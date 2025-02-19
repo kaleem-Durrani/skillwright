@@ -7,13 +7,13 @@ interface DecodedToken extends JwtPayload {
   userId: string;
 }
 
-declare global {
-  namespace Express {
-    interface Request {
-      student?: any;
-    }
-  }
-}
+// declare global {
+//   namespace Express {
+//     interface Request {
+//       student?: any;
+//     }
+//   }
+// }
 
 const protectStudentRoute = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   const token = req.cookies.token;
