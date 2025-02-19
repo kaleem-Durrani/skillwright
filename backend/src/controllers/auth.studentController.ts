@@ -1,0 +1,369 @@
+import { Request, Response } from "express";
+import bcrypt from "bcryptjs";
+import { validationResult } from "express-validator";
+import asyncHandler from "../middleware/asyncHandler.js";
+import prisma from "../db/prisma.js";
+import { generateToken } from "../utils/generateToken.js";
+import { sendEmail } from "../utils/sendEmail.js";
+import { generateOTP } from "../utils/generateOTP.js";
+import { ValidationError, NotFoundError, ForbiddenError, AuthenticationError } from "../utils/customErrors.js";
+import { parseValidationErrors } from "../utils/validationErrorParser.js";
+
+// @desc    Register a new student
+// @route   POST /api/auth/student/signup
+// @access  Public
+const signupStudent = asyncHandler(async (req: Request, res: Response) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    throw parseValidationErrors(errors);
+  }
+
+  const { email, password, name, enrollmentNo, departmentId, phoneNumber } = req.body;
+
+  // Check if student already exists
+  const studentExists = await prisma.student.findFirst({
+    where: {
+      OR: [{ email }, { enrollmentNo }],
+    },
+  });
+
+  if (studentExists) {
+    throw new ValidationError({
+      email: ["Student already exists with this email or enrollment number"],
+    });
+  }
+
+  // Check if department exists
+  const departmentExists = await prisma.department.findUnique({
+    where: { id: departmentId },
+  });
+
+  if (!departmentExists) {
+    throw new ValidationError({
+      departmentId: ["Department not found"],
+    });
+  }
+
+  // Hash password
+  const salt = await bcrypt.genSalt(10);
+  const hashedPassword = await bcrypt.hash(password, salt);
+
+  // Generate OTP
+  const otp = generateOTP();
+  const otpExpiry = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+
+  // Create student
+  const student = await prisma.student.create({
+    data: {
+      email,
+      password: hashedPassword,
+      name,
+      enrollmentNo,
+      departmentId,
+      phoneNumber,
+      otp,
+      otpExpiry,
+    },
+  });
+
+  // Send OTP email
+  await sendEmail(
+    email,
+    "Verify Your Email - Millat Vocational Training",
+    `Your verification code is: ${otp}\nThis code will expire in 15 minutes.`
+  );
+
+  // Generate token
+  generateToken(res, student.id);
+
+  res.status(201).json({
+    success: true,
+    data: {
+      id: student.id,
+      name: student.name,
+      email: student.email,
+      isVerified: student.isVerified,
+    },
+  });
+});
+
+// @desc    Login student
+// @route   POST /api/auth/student/login
+// @access  Public
+const loginStudent = asyncHandler(async (req: Request, res: Response) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    throw parseValidationErrors(errors);
+  }
+
+  const { email, password } = req.body;
+
+  const student = await prisma.student.findUnique({
+    where: { email },
+  });
+
+  if (!student) {
+    throw new AuthenticationError("Invalid email or password");
+  }
+
+  if (student.isBanned) {
+    throw new ForbiddenError("Your account has been banned. Please contact the administrators.");
+  }
+
+  const isPasswordMatch = await bcrypt.compare(password, student.password);
+  if (!isPasswordMatch) {
+    throw new AuthenticationError("Invalid email or password");
+  }
+
+  generateToken(res, student.id);
+
+  res.status(200).json({
+    success: true,
+    data: {
+      id: student.id,
+      name: student.name,
+      email: student.email,
+      isVerified: student.isVerified,
+    },
+  });
+});
+
+// @desc    Logout student
+// @route   POST /api/auth/student/logout
+// @access  Private
+const logoutStudent = asyncHandler(async (req: Request, res: Response) => {
+  res.cookie("token", "", {
+    httpOnly: true,
+    expires: new Date(0),
+  });
+
+  res.status(200).json({
+    success: true,
+    message: "Logged out successfully",
+  });
+});
+
+// @desc    Verify OTP
+// @route   POST /api/auth/student/verify-otp
+// @access  Public
+const verifyOtp = asyncHandler(async (req: Request, res: Response) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    throw parseValidationErrors(errors);
+  }
+
+  const { email, otp } = req.body;
+
+  const student = await prisma.student.findUnique({
+    where: { email },
+  });
+
+  if (!student) {
+    throw new NotFoundError("Student not found");
+  }
+
+  if (student.isVerified) {
+    throw new ValidationError({
+      email: ["Email is already verified"],
+    });
+  }
+
+  if (!student.otp || !student.otpExpiry) {
+    throw new ValidationError({
+      otp: ["No OTP found. Please request a new one"],
+    });
+  }
+
+  if (student.otp !== otp) {
+    throw new ValidationError({
+      otp: ["Invalid OTP"],
+    });
+  }
+
+  if (new Date() > student.otpExpiry) {
+    throw new ValidationError({
+      otp: ["OTP has expired"],
+    });
+  }
+
+  await prisma.student.update({
+    where: { email },
+    data: {
+      isVerified: true,
+      otp: null,
+      otpExpiry: null,
+    },
+  });
+
+  res.status(200).json({
+    success: true,
+    message: "Email verified successfully",
+  });
+});
+
+// @desc    Resend OTP
+// @route   POST /api/auth/student/resend-otp
+// @access  Public
+const resendOtp = asyncHandler(async (req: Request, res: Response) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    throw parseValidationErrors(errors);
+  }
+
+  const { email } = req.body;
+
+  const student = await prisma.student.findUnique({
+    where: { email },
+  });
+
+  if (!student) {
+    throw new NotFoundError("Student not found");
+  }
+
+  if (student.isVerified) {
+    throw new ValidationError({
+      email: ["Email is already verified"],
+    });
+  }
+
+  if (student.otpExpiry && new Date() < student.otpExpiry) {
+    throw new ValidationError({
+      email: ["Please wait for the previous OTP to expire"],
+    });
+  }
+
+  const otp = generateOTP();
+  const otpExpiry = new Date(Date.now() + 15 * 60 * 1000);
+
+  await prisma.student.update({
+    where: { email },
+    data: {
+      otp,
+      otpExpiry,
+    },
+  });
+
+  await sendEmail(
+    email,
+    "Verify Your Email - Millat Vocational Training",
+    `Your verification code is: ${otp}\nThis code will expire in 15 minutes.`
+  );
+
+  res.status(200).json({
+    success: true,
+    message: "OTP sent successfully",
+  });
+});
+
+// @desc    Forgot password
+// @route   POST /api/auth/student/forgot-password
+// @access  Public
+const forgotPassword = asyncHandler(async (req: Request, res: Response) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    throw parseValidationErrors(errors);
+  }
+
+  const { email } = req.body;
+
+  const student = await prisma.student.findUnique({
+    where: { email },
+  });
+
+  if (!student) {
+    throw new NotFoundError("Student not found");
+  }
+
+  if (student.otpExpiry && new Date() < student.otpExpiry) {
+    throw new ValidationError({
+      email: ["Please wait for the previous OTP to expire"],
+    });
+  }
+
+  const otp = generateOTP();
+  const otpExpiry = new Date(Date.now() + 15 * 60 * 1000);
+
+  await prisma.student.update({
+    where: { email },
+    data: {
+      otp,
+      otpExpiry,
+    },
+  });
+
+  await sendEmail(
+    email,
+    "Reset Password - Millat Vocational Training",
+    `Your password reset code is: ${otp}\nThis code will expire in 15 minutes.`
+  );
+
+  res.status(200).json({
+    success: true,
+    message: "Password reset OTP sent successfully",
+  });
+});
+
+// @desc    Reset password
+// @route   POST /api/auth/student/reset-password
+// @access  Public
+const resetPassword = asyncHandler(async (req: Request, res: Response) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    throw parseValidationErrors(errors);
+  }
+
+  const { email, otp, newPassword } = req.body;
+
+  const student = await prisma.student.findUnique({
+    where: { email },
+  });
+
+  if (!student) {
+    throw new NotFoundError("Student not found");
+  }
+
+  if (!student.otp || !student.otpExpiry) {
+    throw new ValidationError({
+      otp: ["No OTP found. Please request a password reset"],
+    });
+  }
+
+  if (student.otp !== otp) {
+    throw new ValidationError({
+      otp: ["Invalid OTP"],
+    });
+  }
+
+  if (new Date() > student.otpExpiry) {
+    throw new ValidationError({
+      otp: ["OTP has expired"],
+    });
+  }
+
+  const salt = await bcrypt.genSalt(10);
+  const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+  await prisma.student.update({
+    where: { email },
+    data: {
+      password: hashedPassword,
+      otp: null,
+      otpExpiry: null,
+    },
+  });
+
+  res.status(200).json({
+    success: true,
+    message: "Password reset successfully",
+  });
+});
+
+export {
+  signupStudent,
+  loginStudent,
+  logoutStudent,
+  verifyOtp,
+  resendOtp,
+  forgotPassword,
+  resetPassword,
+};

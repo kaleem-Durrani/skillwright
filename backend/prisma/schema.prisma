@@ -1,0 +1,264 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+// Previous generator and datasource blocks remain the same
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Admin {
+  id          String   @id @default(cuid())
+  email       String   @unique
+  password    String
+  name        String
+  phoneNumber String?
+  designation String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  isVerified Boolean   @default(false)
+  otp        String?
+  otpExpiry  DateTime?
+  isActive   Boolean   @default(true)
+
+  // Communication
+  adminConversations ConversationParticipant[] @relation("AdminConversations")
+  sentMessages       Message[]                 @relation("AdminSentMessages")
+}
+
+model Teacher {
+  id             String     @id @default(cuid())
+  email          String     @unique
+  password       String
+  name           String
+  phoneNumber    String?
+  qualification  String
+  specialization String?
+  department     Department @relation(fields: [departmentId], references: [id])
+  departmentId   String
+  courses        Course[]
+  resources      Resource[]
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  isVerified Boolean   @default(false)
+  otp        String?
+  otpExpiry  DateTime?
+  isBanned   Boolean   @default(false)
+
+  // Communication
+  teacherConversations ConversationParticipant[] @relation("TeacherConversations")
+  sentMessages         Message[]                 @relation("TeacherSentMessages")
+  resourceComments     ResourceComment[]
+  newsEventComments    NewsEventComment[]
+}
+
+model Student {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  password     String
+  name         String
+  phoneNumber  String?
+  enrollmentNo String       @unique
+  department   Department   @relation(fields: [departmentId], references: [id])
+  departmentId String
+  enrollments  Enrollment[]
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  isVerified Boolean   @default(false)
+  otp        String?
+  otpExpiry  DateTime?
+  isBanned   Boolean   @default(false)
+
+  // Communication
+  studentConversations ConversationParticipant[] @relation("StudentConversations")
+  sentMessages         Message[]                 @relation("StudentSentMessages")
+  resourceComments     ResourceComment[]
+  newsEventComments    NewsEventComment[]
+}
+
+model Department {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  description String?
+  courses     Course[]
+  teachers    Teacher[]
+  students    Student[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Course {
+  id           String       @id @default(cuid())
+  name         String
+  code         String       @unique
+  description  String?
+  duration     String
+  capacity     Int          @default(30)
+  department   Department   @relation(fields: [departmentId], references: [id])
+  departmentId String
+  teacher      Teacher      @relation(fields: [teacherId], references: [id])
+  teacherId    String
+  enrollments  Enrollment[]
+  resources    Resource[]
+  syllabus     String? // URL or file path
+  startDate    DateTime?
+  endDate      DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+}
+
+model Enrollment {
+  id         String           @id @default(cuid())
+  student    Student          @relation(fields: [studentId], references: [id])
+  studentId  String
+  course     Course           @relation(fields: [courseId], references: [id])
+  courseId   String
+  status     EnrollmentStatus @default(PENDING)
+  enrolledAt DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  @@unique([studentId, courseId])
+}
+
+enum EnrollmentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  WITHDRAWN
+}
+
+model Resource {
+  id          String            @id @default(cuid())
+  title       String
+  description String?
+  type        ResourceType
+  url         String
+  course      Course            @relation(fields: [courseId], references: [id])
+  courseId    String
+  teacher     Teacher           @relation(fields: [teacherId], references: [id])
+  teacherId   String
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  comments    ResourceComment[]
+  isPublic    Boolean           @default(false)
+}
+
+enum ResourceType {
+  DOCUMENT
+  VIDEO
+  LINK
+  ASSIGNMENT
+  QUIZ
+}
+
+model NewsEvent {
+  id          String             @id @default(cuid())
+  title       String
+  content     String
+  type        NewsEventType
+  date        DateTime
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  comments    NewsEventComment[]
+  isPublished Boolean            @default(false)
+}
+
+enum NewsEventType {
+  NEWS
+  EVENT
+  ANNOUNCEMENT
+}
+
+// Communication Models
+model Conversation {
+  id           String                    @id @default(cuid())
+  title        String?
+  createdAt    DateTime                  @default(now())
+  updatedAt    DateTime                  @updatedAt
+  participants ConversationParticipant[]
+  messages     Message[]
+}
+
+model ConversationParticipant {
+  id             String       @id @default(cuid())
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  conversationId String
+
+  // Polymorphic relationship with participants
+  admin     Admin?   @relation("AdminConversations", fields: [adminId], references: [id])
+  adminId   String?
+  teacher   Teacher? @relation("TeacherConversations", fields: [teacherId], references: [id])
+  teacherId String?
+  student   Student? @relation("StudentConversations", fields: [studentId], references: [id])
+  studentId String?
+
+  joinedAt DateTime  @default(now())
+  leftAt   DateTime?
+
+  @@unique([conversationId, adminId, teacherId, studentId])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  conversationId String
+  content        String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  // Sender (one of these will be populated)
+  adminSender     Admin?   @relation("AdminSentMessages", fields: [adminSenderId], references: [id])
+  adminSenderId   String?
+  teacherSender   Teacher? @relation("TeacherSentMessages", fields: [teacherSenderId], references: [id])
+  teacherSenderId String?
+  studentSender   Student? @relation("StudentSentMessages", fields: [studentSenderId], references: [id])
+  studentSenderId String?
+}
+
+model ResourceComment {
+  id         String   @id @default(cuid())
+  content    String
+  resource   Resource @relation(fields: [resourceId], references: [id])
+  resourceId String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Comment can be made by either student or teacher
+  teacher   Teacher? @relation(fields: [teacherId], references: [id])
+  teacherId String?
+  student   Student? @relation(fields: [studentId], references: [id])
+  studentId String?
+
+  parentComment ResourceComment?  @relation("CommentReplies", fields: [parentId], references: [id])
+  parentId      String?
+  replies       ResourceComment[] @relation("CommentReplies")
+}
+
+model NewsEventComment {
+  id          String    @id @default(cuid())
+  content     String
+  newsEvent   NewsEvent @relation(fields: [newsEventId], references: [id])
+  newsEventId String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Comment can be made by either student or teacher
+  teacher   Teacher? @relation(fields: [teacherId], references: [id])
+  teacherId String?
+  student   Student? @relation(fields: [studentId], references: [id])
+  studentId String?
+
+  parentComment NewsEventComment?  @relation("CommentReplies", fields: [parentId], references: [id])
+  parentId      String?
+  replies       NewsEventComment[] @relation("CommentReplies")
+}
