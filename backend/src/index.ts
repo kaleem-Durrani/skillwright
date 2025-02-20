@@ -20,6 +20,7 @@ dotenv.config();
 const app = express();
 
 app.use(express.json());
+// app.use(express.urlencoded({extended:true}));
 
 // app.use(cors());
 
@@ -27,21 +28,13 @@ app.use("/api/auth/admin", authAdminRouter);
 app.use("/api/auth/student", authStudentRouter);
 app.use("/api/auth/teacher", authTeacherRouter);
 
-app.use("/api/admin",  adminRouter);
-app.use("/api/student",  studentRouter);
+app.use("/api/admin", adminRouter);
+app.use("/api/student", studentRouter);
 app.use("/api/teacher", teacherRouter);
 
 app.use("/api/department", departmentRouter);
-
 app.use("/api/course", courseRouter);
-
 app.use("/api/resource", resourceRouter);
-
-
-
-
-
-
 
 app.get("/", (req, res) => {
 	res.send("Hello World");

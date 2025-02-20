@@ -1,4 +1,4 @@
-import express from "express";
+import { Router } from "express";
 import {
   createResource,
   updateResource,
@@ -6,22 +6,59 @@ import {
   getResource,
   getResourceComments,
 } from "../controllers/resource.controller.js";
-import {
-  createResourceValidation,
-  updateResourceValidation,
-} from "../routesValidation/resource.validation.js";
 import { protectTeacherRoute } from "../middleware/protectTeacherRoute.js";
-import { checkCourseAccess } from "../middleware/checkCourseAccess.js";
+import { protectCourseAccess } from "../middleware/protectCourseAccess.js";
+import {
+  uploadDocument,
+  uploadVideo,
+  handleUploadError,
+} from "../middleware/uploadMiddleware.js";
+import { validateResource } from "../middleware/validateResource.js";
 
-const router = express.Router();
+const router = Router();
 
-// Protected routes (Teacher only)
-router.post("/", protectTeacherRoute, createResourceValidation, createResource);
-router.put("/:id", protectTeacherRoute, updateResourceValidation, updateResource);
-router.delete("/:id", protectTeacherRoute, deleteResource);
+// Resource routes
+router.post(
+  "/",
+  protectTeacherRoute,
+  uploadDocument.single("document"),
+  handleUploadError,
+  validateResource,
+  createResource
+);
 
-// Protected routes (Course access required)
-router.get("/:id", checkCourseAccess, getResource);
-router.get("/:id/comments", checkCourseAccess, getResourceComments);
+router.post(
+  "/video",
+  protectTeacherRoute,
+  uploadVideo.single("video"),
+  handleUploadError,
+  validateResource,
+  createResource
+);
+
+router.put(
+  "/:id",
+  protectTeacherRoute,
+  validateResource,
+  updateResource
+);
+
+router.delete(
+  "/:id",
+  protectTeacherRoute,
+  deleteResource
+);
+
+router.get(
+  "/:id",
+  protectCourseAccess,
+  getResource
+);
+
+router.get(
+  "/:id/comments",
+  protectCourseAccess,
+  getResourceComments
+);
 
 export default router; 

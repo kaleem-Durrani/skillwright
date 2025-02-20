@@ -2,18 +2,17 @@ import jwt, { JwtPayload } from "jsonwebtoken";
 import asyncHandler from "./asyncHandler.js";
 import prisma from "../db/prisma.js";
 import { Request, Response, NextFunction } from "express";
+import { Student } from "@prisma/client";
 
 interface DecodedToken extends JwtPayload {
   userId: string;
 }
 
-// declare global {
-//   namespace Express {
-//     interface Request {
-//       student?: any;
-//     }
-//   }
-// }
+declare module "express-serve-static-core" {
+  interface Request {
+    student?: Student;
+  }
+}
 
 const protectStudentRoute = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   const token = req.cookies.token;

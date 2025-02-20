@@ -174,35 +174,69 @@ export const requestEnrollment = async (
     }
 
     const studentId = req.student?.id;
+    if (!studentId) {
+      throw new AuthenticationError("Not authenticated");
+    }
+    
     const courseId = req.params.courseId;
 
-    const existingEnrollment = await prisma.enrollment.findFirst({
-      where: {
-        studentId,
-        courseId,
-      },
-    });
-
-    if (existingEnrollment) {
-      throw new ForbiddenError("You are already enrolled in this course");
-    }
-
-    const enrollment = await prisma.enrollment.create({
-      data: {
-        studentId: studentId!,
-        courseId,
-        status: "PENDING",
-      },
-      select: {
-        id: true,
-        status: true,
-        course: {
-          select: {
-            id: true,
-            name: true,
+    // Start transaction
+    const enrollment = await prisma.$transaction(async (tx) => {
+      // Check if course exists and has capacity
+      const course = await tx.course.findUnique({
+        where: { id: courseId },
+        select: {
+          capacity: true,
+          _count: {
+            select: {
+              enrollments: {
+                where: {
+                  status: "APPROVED",
+                },
+              },
+            },
           },
         },
-      },
+      });
+
+      if (!course) {
+        throw new NotFoundError("Course not found");
+      }
+
+      if (course._count.enrollments >= course.capacity) {
+        throw new ForbiddenError("Course has reached its capacity");
+      }
+
+      // Check for existing enrollment
+      const existingEnrollment = await tx.enrollment.findFirst({
+        where: {
+          studentId,
+          courseId,
+        },
+      });
+
+      if (existingEnrollment) {
+        throw new ForbiddenError("You are already enrolled in this course");
+      }
+
+      // Create enrollment
+      return await tx.enrollment.create({
+        data: {
+          studentId,
+          courseId,
+          status: "PENDING",
+        },
+        select: {
+          id: true,
+          status: true,
+          course: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+      });
     });
 
     res.status(201).json(enrollment);
@@ -220,21 +254,24 @@ export const withdrawFromCourse = async (
     const studentId = req.student?.id;
     const courseId = req.params.courseId;
 
-    const enrollment = await prisma.enrollment.findFirst({
-      where: {
-        studentId,
-        courseId,
-      },
-    });
+    // Start transaction
+    await prisma.$transaction(async (tx) => {
+      const enrollment = await tx.enrollment.findFirst({
+        where: {
+          studentId,
+          courseId,
+        },
+      });
 
-    if (!enrollment) {
-      throw new NotFoundError("Enrollment not found");
-    }
+      if (!enrollment) {
+        throw new NotFoundError("Enrollment not found");
+      }
 
-    await prisma.enrollment.delete({
-      where: {
-        id: enrollment.id,
-      },
+      await tx.enrollment.delete({
+        where: {
+          id: enrollment.id,
+        },
+      });
     });
 
     res.status(204).send();
@@ -299,23 +336,36 @@ export const createResourceComment = async (
     const resourceId = req.params.resourceId;
     const { content } = req.body;
 
-    const comment = await prisma.resourceComment.create({
-      data: {
-        content,
-        studentId,
-        resourceId,
-      },
-      select: {
-        id: true,
-        content: true,
-        createdAt: true,
-        student: {
-          select: {
-            id: true,
-            name: true,
+    // Start transaction
+    const comment = await prisma.$transaction(async (tx) => {
+      // Check if resource exists
+      const resource = await tx.resource.findUnique({
+        where: { id: resourceId },
+      });
+
+      if (!resource) {
+        throw new NotFoundError("Resource not found");
+      }
+
+      // Create comment
+      return await tx.resourceComment.create({
+        data: {
+          content,
+          studentId,
+          resourceId,
+        },
+        select: {
+          id: true,
+          content: true,
+          createdAt: true,
+          student: {
+            select: {
+              id: true,
+              name: true,
+            },
           },
         },
-      },
+      });
     });
 
     res.status(201).json(comment);
@@ -339,32 +389,35 @@ export const updateResourceComment = async (
     const commentId = req.params.commentId;
     const { content } = req.body;
 
-    const comment = await prisma.resourceComment.findUnique({
-      where: { id: commentId },
-    });
+    // Start transaction
+    const updatedComment = await prisma.$transaction(async (tx) => {
+      const comment = await tx.resourceComment.findUnique({
+        where: { id: commentId },
+      });
 
-    if (!comment) {
-      throw new NotFoundError("Comment not found");
-    }
+      if (!comment) {
+        throw new NotFoundError("Comment not found");
+      }
 
-    if (comment.studentId !== studentId) {
-      throw new ForbiddenError("You can only edit your own comments");
-    }
+      if (comment.studentId !== studentId) {
+        throw new ForbiddenError("You can only edit your own comments");
+      }
 
-    const updatedComment = await prisma.resourceComment.update({
-      where: { id: commentId },
-      data: { content },
-      select: {
-        id: true,
-        content: true,
-        updatedAt: true,
-        student: {
-          select: {
-            id: true,
-            name: true,
+      return await tx.resourceComment.update({
+        where: { id: commentId },
+        data: { content },
+        select: {
+          id: true,
+          content: true,
+          updatedAt: true,
+          student: {
+            select: {
+              id: true,
+              name: true,
+            },
           },
         },
-      },
+      });
     });
 
     res.json(updatedComment);
@@ -382,20 +435,23 @@ export const deleteResourceComment = async (
     const studentId = req.student?.id;
     const commentId = req.params.commentId;
 
-    const comment = await prisma.resourceComment.findUnique({
-      where: { id: commentId },
-    });
+    // Start transaction
+    await prisma.$transaction(async (tx) => {
+      const comment = await tx.resourceComment.findUnique({
+        where: { id: commentId },
+      });
 
-    if (!comment) {
-      throw new NotFoundError("Comment not found");
-    }
+      if (!comment) {
+        throw new NotFoundError("Comment not found");
+      }
 
-    if (comment.studentId !== studentId) {
-      throw new ForbiddenError("You can only delete your own comments");
-    }
+      if (comment.studentId !== studentId) {
+        throw new ForbiddenError("You can only delete your own comments");
+      }
 
-    await prisma.resourceComment.delete({
-      where: { id: commentId },
+      await tx.resourceComment.delete({
+        where: { id: commentId },
+      });
     });
 
     res.status(204).send();
@@ -487,25 +543,29 @@ export const toggleStudentBan = async (
 ) => {
   try {
     const studentId = req.params.id;
-    const student = await prisma.student.findUnique({
-      where: { id: studentId },
-    });
 
-    if (!student) {
-      throw new NotFoundError("Student not found");
-    }
+    // Start transaction
+    const updatedStudent = await prisma.$transaction(async (tx) => {
+      const student = await tx.student.findUnique({
+        where: { id: studentId },
+      });
 
-    const updatedStudent = await prisma.student.update({
-      where: { id: studentId },
-      data: {
-        isBanned: !student.isBanned,
-      },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        isBanned: true,
-      },
+      if (!student) {
+        throw new NotFoundError("Student not found");
+      }
+
+      return await tx.student.update({
+        where: { id: studentId },
+        data: {
+          isBanned: !student.isBanned,
+        },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          isBanned: true,
+        },
+      });
     });
 
     res.json(updatedStudent);
@@ -521,16 +581,42 @@ export const deleteStudent = async (
 ) => {
   try {
     const studentId = req.params.id;
-    const student = await prisma.student.findUnique({
-      where: { id: studentId },
-    });
 
-    if (!student) {
-      throw new NotFoundError("Student not found");
-    }
+    // Start transaction
+    await prisma.$transaction(async (tx) => {
+      const student = await tx.student.findUnique({
+        where: { id: studentId },
+      });
 
-    await prisma.student.delete({
-      where: { id: studentId },
+      if (!student) {
+        throw new NotFoundError("Student not found");
+      }
+
+      // Delete all related records first
+      await tx.resourceComment.deleteMany({
+        where: { studentId },
+      });
+
+      await tx.newsEventComment.deleteMany({
+        where: { studentId },
+      });
+
+      await tx.enrollment.deleteMany({
+        where: { studentId },
+      });
+
+      await tx.conversationParticipant.deleteMany({
+        where: { studentId },
+      });
+
+      await tx.message.deleteMany({
+        where: { studentSenderId: studentId },
+      });
+
+      // Finally, delete the student
+      await tx.student.delete({
+        where: { id: studentId },
+      });
     });
 
     res.status(204).send();

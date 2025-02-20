@@ -22,22 +22,27 @@ const loginAdmin = asyncHandler(async (req: Request, res: Response) => {
 
   const { email, password } = req.body;
 
-  const admin = await prisma.admin.findUnique({
-    where: { email },
+  // Start transaction
+  const admin = await prisma.$transaction(async (tx) => {
+    const admin = await tx.admin.findUnique({
+      where: { email },
+    });
+
+    if (!admin) {
+      throw new AuthenticationError("Invalid email or password");
+    }
+
+    if (!admin.isActive) {
+      throw new ForbiddenError("Your account has been deactivated");
+    }
+
+    const isPasswordMatch = await bcrypt.compare(password, admin.password);
+    if (!isPasswordMatch) {
+      throw new AuthenticationError("Invalid email or password");
+    }
+
+    return admin;
   });
-
-  if (!admin) {
-    throw new AuthenticationError("Invalid email or password");
-  }
-
-  if (!admin.isActive) {
-    throw new ForbiddenError("Your account has been deactivated");
-  }
-
-  const isPasswordMatch = await bcrypt.compare(password, admin.password);
-  if (!isPasswordMatch) {
-    throw new AuthenticationError("Invalid email or password");
-  }
 
   generateToken(res, admin.id);
 

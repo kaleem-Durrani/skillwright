@@ -13,7 +13,6 @@ import { parseValidationErrors } from "../utils/validationErrorParser.js";
 // @route   POST /api/auth/teacher/signup
 // @access  Public
 const signupTeacher = asyncHandler(async (req: Request, res: Response) => {
-    
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
     throw parseValidationErrors(errors);
@@ -21,49 +20,52 @@ const signupTeacher = asyncHandler(async (req: Request, res: Response) => {
 
   const { email, password, name, qualification, departmentId, specialization, phoneNumber } = req.body;
 
-  // Check if teacher already exists
-  const teacherExists = await prisma.teacher.findUnique({
-    where: { email },
-  });
-
-  if (teacherExists) {
-    throw new ValidationError({
-      email: ["Teacher already exists with this email"],
-    });
-  }
-
-  // Check if department exists
-  const departmentExists = await prisma.department.findUnique({
-    where: { id: departmentId },
-  });
-
-  if (!departmentExists) {
-    throw new ValidationError({
-      departmentId: ["Department not found"],
-    });
-  }
-
-  // Hash password
-  const salt = await bcrypt.genSalt(10);
-  const hashedPassword = await bcrypt.hash(password, salt);
-
   // Generate OTP
   const otp = generateOTP();
   const otpExpiry = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
 
-  // Create teacher
-  const teacher = await prisma.teacher.create({
-    data: {
-      email,
-      password: hashedPassword,
-      name,
-      qualification,
-      departmentId,
-      specialization,
-      phoneNumber,
-      otp,
-      otpExpiry,
-    },
+  // Start transaction
+  const teacher = await prisma.$transaction(async (tx) => {
+    // Check if teacher already exists
+    const teacherExists = await tx.teacher.findUnique({
+      where: { email },
+    });
+
+    if (teacherExists) {
+      throw new ValidationError({
+        email: ["Teacher already exists with this email"],
+      });
+    }
+
+    // Check if department exists
+    const departmentExists = await tx.department.findUnique({
+      where: { id: departmentId },
+    });
+
+    if (!departmentExists) {
+      throw new ValidationError({
+        departmentId: ["Department not found"],
+      });
+    }
+
+    // Hash password
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    // Create teacher
+    return await tx.teacher.create({
+      data: {
+        email,
+        password: hashedPassword,
+        name,
+        qualification,
+        departmentId,
+        specialization,
+        phoneNumber,
+        otp,
+        otpExpiry,
+      },
+    });
   });
 
   // Send OTP email
@@ -154,45 +156,48 @@ const verifyOtp = asyncHandler(async (req: Request, res: Response) => {
 
   const { email, otp } = req.body;
 
-  const teacher = await prisma.teacher.findUnique({
-    where: { email },
-  });
-
-  if (!teacher) {
-    throw new NotFoundError("Teacher not found");
-  }
-
-  if (teacher.isVerified) {
-    throw new ValidationError({
-      email: ["Email is already verified"],
+  // Start transaction
+  await prisma.$transaction(async (tx) => {
+    const teacher = await tx.teacher.findUnique({
+      where: { email },
     });
-  }
 
-  if (!teacher.otp || !teacher.otpExpiry) {
-    throw new ValidationError({
-      otp: ["No OTP found. Please request a new one"],
+    if (!teacher) {
+      throw new NotFoundError("Teacher not found");
+    }
+
+    if (teacher.isVerified) {
+      throw new ValidationError({
+        email: ["Email is already verified"],
+      });
+    }
+
+    if (!teacher.otp || !teacher.otpExpiry) {
+      throw new ValidationError({
+        otp: ["No OTP found. Please request a new one"],
+      });
+    }
+
+    if (teacher.otp !== otp) {
+      throw new ValidationError({
+        otp: ["Invalid OTP"],
+      });
+    }
+
+    if (new Date() > teacher.otpExpiry) {
+      throw new ValidationError({
+        otp: ["OTP has expired"],
+      });
+    }
+
+    await tx.teacher.update({
+      where: { email },
+      data: {
+        isVerified: true,
+        otp: null,
+        otpExpiry: null,
+      },
     });
-  }
-
-  if (teacher.otp !== otp) {
-    throw new ValidationError({
-      otp: ["Invalid OTP"],
-    });
-  }
-
-  if (new Date() > teacher.otpExpiry) {
-    throw new ValidationError({
-      otp: ["OTP has expired"],
-    });
-  }
-
-  await prisma.teacher.update({
-    where: { email },
-    data: {
-      isVerified: true,
-      otp: null,
-      otpExpiry: null,
-    },
   });
 
   res.status(200).json({
@@ -211,36 +216,38 @@ const resendOtp = asyncHandler(async (req: Request, res: Response) => {
   }
 
   const { email } = req.body;
-
-  const teacher = await prisma.teacher.findUnique({
-    where: { email },
-  });
-
-  if (!teacher) {
-    throw new NotFoundError("Teacher not found");
-  }
-
-  if (teacher.isVerified) {
-    throw new ValidationError({
-      email: ["Email is already verified"],
-    });
-  }
-
-  if (teacher.otpExpiry && new Date() < teacher.otpExpiry) {
-    throw new ValidationError({
-      email: ["Please wait for the previous OTP to expire"],
-    });
-  }
-
   const otp = generateOTP();
   const otpExpiry = new Date(Date.now() + 15 * 60 * 1000);
 
-  await prisma.teacher.update({
-    where: { email },
-    data: {
-      otp,
-      otpExpiry,
-    },
+  // Start transaction
+  const teacher = await prisma.$transaction(async (tx) => {
+    const teacher = await tx.teacher.findUnique({
+      where: { email },
+    });
+
+    if (!teacher) {
+      throw new NotFoundError("Teacher not found");
+    }
+
+    if (teacher.isVerified) {
+      throw new ValidationError({
+        email: ["Email is already verified"],
+      });
+    }
+
+    if (teacher.otpExpiry && new Date() < teacher.otpExpiry) {
+      throw new ValidationError({
+        email: ["Please wait for the previous OTP to expire"],
+      });
+    }
+
+    return await tx.teacher.update({
+      where: { email },
+      data: {
+        otp,
+        otpExpiry,
+      },
+    });
   });
 
   await sendEmail(
@@ -265,30 +272,32 @@ const forgotPassword = asyncHandler(async (req: Request, res: Response) => {
   }
 
   const { email } = req.body;
-
-  const teacher = await prisma.teacher.findUnique({
-    where: { email },
-  });
-
-  if (!teacher) {
-    throw new NotFoundError("Teacher not found");
-  }
-
-  if (teacher.otpExpiry && new Date() < teacher.otpExpiry) {
-    throw new ValidationError({
-      email: ["Please wait for the previous OTP to expire"],
-    });
-  }
-
   const otp = generateOTP();
   const otpExpiry = new Date(Date.now() + 15 * 60 * 1000);
 
-  await prisma.teacher.update({
-    where: { email },
-    data: {
-      otp,
-      otpExpiry,
-    },
+  // Start transaction
+  const teacher = await prisma.$transaction(async (tx) => {
+    const teacher = await tx.teacher.findUnique({
+      where: { email },
+    });
+
+    if (!teacher) {
+      throw new NotFoundError("Teacher not found");
+    }
+
+    if (teacher.otpExpiry && new Date() < teacher.otpExpiry) {
+      throw new ValidationError({
+        email: ["Please wait for the previous OTP to expire"],
+      });
+    }
+
+    return await tx.teacher.update({
+      where: { email },
+      data: {
+        otp,
+        otpExpiry,
+      },
+    });
   });
 
   await sendEmail(
@@ -314,42 +323,45 @@ const resetPassword = asyncHandler(async (req: Request, res: Response) => {
 
   const { email, otp, newPassword } = req.body;
 
-  const teacher = await prisma.teacher.findUnique({
-    where: { email },
-  });
-
-  if (!teacher) {
-    throw new NotFoundError("Teacher not found");
-  }
-
-  if (!teacher.otp || !teacher.otpExpiry) {
-    throw new ValidationError({
-      otp: ["No OTP found. Please request a password reset"],
+  // Start transaction
+  await prisma.$transaction(async (tx) => {
+    const teacher = await tx.teacher.findUnique({
+      where: { email },
     });
-  }
 
-  if (teacher.otp !== otp) {
-    throw new ValidationError({
-      otp: ["Invalid OTP"],
+    if (!teacher) {
+      throw new NotFoundError("Teacher not found");
+    }
+
+    if (!teacher.otp || !teacher.otpExpiry) {
+      throw new ValidationError({
+        otp: ["No OTP found. Please request a password reset"],
+      });
+    }
+
+    if (teacher.otp !== otp) {
+      throw new ValidationError({
+        otp: ["Invalid OTP"],
+      });
+    }
+
+    if (new Date() > teacher.otpExpiry) {
+      throw new ValidationError({
+        otp: ["OTP has expired"],
+      });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+    await tx.teacher.update({
+      where: { email },
+      data: {
+        password: hashedPassword,
+        otp: null,
+        otpExpiry: null,
+      },
     });
-  }
-
-  if (new Date() > teacher.otpExpiry) {
-    throw new ValidationError({
-      otp: ["OTP has expired"],
-    });
-  }
-
-  const salt = await bcrypt.genSalt(10);
-  const hashedPassword = await bcrypt.hash(newPassword, salt);
-
-  await prisma.teacher.update({
-    where: { email },
-    data: {
-      password: hashedPassword,
-      otp: null,
-      otpExpiry: null,
-    },
   });
 
   res.status(200).json({

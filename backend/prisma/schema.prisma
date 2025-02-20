@@ -143,6 +143,7 @@ model Resource {
   description String?
   type        ResourceType
   url         String
+  mimeType    String?
   course      Course            @relation(fields: [courseId], references: [id])
   courseId    String
   teacher     Teacher           @relation(fields: [teacherId], references: [id])

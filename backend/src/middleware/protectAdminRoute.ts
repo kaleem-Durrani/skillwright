@@ -2,18 +2,18 @@ import { Request, Response, NextFunction } from "express";
 import jwt, { JwtPayload } from "jsonwebtoken";
 import asyncHandler from "./asyncHandler.js";
 import prisma from "../db/prisma.js";
+import { Admin } from "@prisma/client";
 
 interface DecodedToken extends JwtPayload {
   userId: string;
 }
 
-// declare global {
-//   namespace Express {
-//     interface Request {
-//       admin?: any;
-//     }
-//   }
-// }
+// Augment the Request type
+declare module "express-serve-static-core" {
+  interface Request {
+    admin?: Admin;
+  }
+}
 
 const protectAdminRoute = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   const token = req.cookies.token;
