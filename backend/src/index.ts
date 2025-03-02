@@ -14,6 +14,8 @@ import teacherRouter from "./routes/teacher.routes.js";
 import departmentRouter from "./routes/department.routes.js";
 import courseRouter from "./routes/course.routes.js";
 import resourceRouter from "./routes/resource.routes.js";
+import newsRouter from "./routes/news.routes.js";
+import conversationRouter from "./routes/conversation.routes.js";
 
 dotenv.config();
 
@@ -35,6 +37,8 @@ app.use("/api/teacher", teacherRouter);
 app.use("/api/department", departmentRouter);
 app.use("/api/course", courseRouter);
 app.use("/api/resource", resourceRouter);
+app.use("/api/news", newsRouter);
+app.use("/api/conversations", conversationRouter);
 
 app.get("/", (req, res) => {
 	res.send("Hello World");

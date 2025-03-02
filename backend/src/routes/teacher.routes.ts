@@ -25,6 +25,18 @@ import {
 } from "../routesValidation/resource.validation.js";
 import { protectTeacherRoute } from "../middleware/protectTeacherRoute.js";
 
+/**
+ * Teacher Routes
+ * 
+ * This file contains all routes related to teacher functionality:
+ * - Teacher profile management
+ * - Course management (view courses, students, manage enrollments)
+ * - Resource management (CRUD operations)
+ * - Resource comments
+ * 
+ * All routes are protected with the teacher authentication middleware
+ */
+
 const router = express.Router();
 
 // Profile Management
@@ -51,5 +63,8 @@ router.get("/resources/:id/comments", protectTeacherRoute, getResourceComments);
 router.post("/resources/:id/comments", protectTeacherRoute, createResourceComment);
 router.put("/resources/comments/:commentId", protectTeacherRoute, updateResourceComment);
 router.delete("/resources/comments/:commentId", protectTeacherRoute, deleteResourceComment);
+
+// Note: Nested comment functionality is currently disabled
+// Future implementation will support replies to comments
 
 export default router;

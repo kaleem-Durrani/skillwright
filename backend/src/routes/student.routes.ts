@@ -10,10 +10,6 @@ import {
   createResourceComment,
   updateResourceComment,
   deleteResourceComment,
-  getAllStudents,
-  getStudentById,
-  toggleStudentBan,
-  deleteStudent,
 } from "../controllers/student.controller.js";
 import {
   updateProfileValidation,
@@ -22,8 +18,16 @@ import {
   updateCommentValidation,
 } from "../routesValidation/student.validation.js";
 import { protectStudentRoute } from "../middleware/protectStudentRoute.js";
-import { protectAdminRoute } from "../middleware/protectAdminRoute.js";
 import { checkCourseAccess } from "../middleware/checkCourseAccess.js";
+
+/**
+ * Student Routes
+ * 
+ * This file contains all routes related to student functionality:
+ * - Profile management
+ * - Course enrollment and access
+ * - Resource access and comments
+ */
 
 const router = express.Router();
 
@@ -58,10 +62,7 @@ router.delete(
   deleteResourceComment
 );
 
-// Protected Routes (Admin Only)
-router.get("/", protectAdminRoute, getAllStudents);
-router.get("/:id", protectAdminRoute, getStudentById);
-router.put("/:id/ban", protectAdminRoute, toggleStudentBan);
-router.delete("/:id", protectAdminRoute, deleteStudent);
+// Note: Admin-only routes for student management (getAllStudents, getStudentById, toggleStudentBan, deleteStudent)
+// are defined in the admin.routes.ts file to maintain logical organization
 
 export default router;

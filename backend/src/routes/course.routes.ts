@@ -16,6 +16,18 @@ import {
 import { protectTeacherRoute } from "../middleware/protectTeacherRoute.js";
 import { protectAdminRoute } from "../middleware/protectAdminRoute.js";
 
+/**
+ * Course Routes
+ * 
+ * This file contains all routes related to course functionality:
+ * - Public course access (view all courses, view specific course)
+ * - Teacher course management (CRUD operations)
+ * - Enrollment management
+ * - Course resources
+ * 
+ * Public routes are unprotected, while management routes require teacher authentication
+ */
+
 const router = express.Router();
 
 // Public routes

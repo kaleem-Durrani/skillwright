@@ -17,6 +17,18 @@ import {
 } from "../routesValidation/auth.teacherRoutes.validation.js";
 import { protectTeacherRoute } from "../middleware/protectTeacherRoute.js";
 
+/**
+ * Teacher Authentication Routes
+ * 
+ * This file contains all routes related to teacher authentication:
+ * - Teacher signup
+ * - Teacher login/logout
+ * - OTP verification
+ * - Password management (forgot/reset)
+ * 
+ * Logout route is protected with teacher authentication middleware
+ */
+
 const router = express.Router();
 
 // Public routes

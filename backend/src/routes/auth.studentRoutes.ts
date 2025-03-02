@@ -17,6 +17,18 @@ import {
 } from "../routesValidation/auth.studentRoutes.validation.js";
 import { protectStudentRoute } from "../middleware/protectStudentRoute.js";
 
+/**
+ * Student Authentication Routes
+ * 
+ * This file contains all routes related to student authentication:
+ * - Student signup
+ * - Student login/logout
+ * - OTP verification
+ * - Password management (forgot/reset)
+ * 
+ * Logout route is protected with student authentication middleware
+ */
+
 const router = express.Router();
 
 // Public routes

@@ -24,6 +24,18 @@ import {
 } from "../routesValidation/admin.validation.js";
 import { protectAdminRoute } from "../middleware/protectAdminRoute.js";
 
+/**
+ * Admin Routes
+ * 
+ * This file contains all routes related to admin functionality:
+ * - Admin profile management
+ * - Teacher management (view, ban, delete)
+ * - Student management (view, ban, delete)
+ * - News & Events management (CRUD operations)
+ * 
+ * All routes are protected with the admin authentication middleware
+ */
+
 const router = express.Router();
 
 // Profile Management
