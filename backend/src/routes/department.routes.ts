@@ -10,7 +10,7 @@ import {
   createDepartmentValidation,
   updateDepartmentValidation,
 } from "../routesValidation/department.validation.js";
-import { protectAdminRoute } from "../middleware/protectAdminRoute.js";
+import { adminProtect } from "../middleware/authMiddleware.js";
 
 /**
  * Department Routes
@@ -29,8 +29,8 @@ router.get("/", getAllDepartments);
 router.get("/:id", getDepartment);
 
 // Protected routes (Admin only)
-router.post("/", protectAdminRoute, createDepartmentValidation, createDepartment);
-router.put("/:id", protectAdminRoute, updateDepartmentValidation, updateDepartment);
-router.delete("/:id", protectAdminRoute, deleteDepartment);
+router.post("/", adminProtect, createDepartmentValidation, createDepartment);
+router.put("/:id", adminProtect, updateDepartmentValidation, updateDepartment);
+router.delete("/:id", adminProtect, deleteDepartment);
 
 export default router;

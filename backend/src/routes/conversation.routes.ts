@@ -10,9 +10,9 @@ import {
   createConversationValidation,
   sendMessageValidation,
 } from "../routesValidation/conversation.validation.js";
-import { protectAdminRoute } from "../middleware/protectAdminRoute.js";
-import { protectTeacherRoute } from "../middleware/protectTeacherRoute.js";
-import { protectStudentRoute } from "../middleware/protectStudentRoute.js";
+import { adminProtect } from "../middleware/authMiddleware.js";
+import { teacherProtect } from "../middleware/authMiddleware.js";
+import { studentProtect } from "../middleware/authMiddleware.js";
 
 /**
  * Conversation Routes
@@ -40,24 +40,24 @@ const protectAnyUserRoute = (req: express.Request, res: express.Response, next: 
 };
 
 // Admin routes
-router.get("/admin", protectAdminRoute, getMyConversations);
-router.get("/admin/:id", protectAdminRoute, getConversation);
-router.post("/admin", protectAdminRoute, createConversationValidation, createConversation);
-router.post("/admin/:id/messages", protectAdminRoute, sendMessageValidation, sendMessage);
-router.put("/admin/:id/leave", protectAdminRoute, leaveConversation);
+router.get("/admin", adminProtect, getMyConversations);
+router.get("/admin/:id", adminProtect, getConversation);
+router.post("/admin", adminProtect, createConversationValidation, createConversation);
+router.post("/admin/:id/messages", adminProtect, sendMessageValidation, sendMessage);
+router.put("/admin/:id/leave", adminProtect, leaveConversation);
 
 // Teacher routes
-router.get("/teacher", protectTeacherRoute, getMyConversations);
-router.get("/teacher/:id", protectTeacherRoute, getConversation);
-router.post("/teacher", protectTeacherRoute, createConversationValidation, createConversation);
-router.post("/teacher/:id/messages", protectTeacherRoute, sendMessageValidation, sendMessage);
-router.put("/teacher/:id/leave", protectTeacherRoute, leaveConversation);
+router.get("/teacher", teacherProtect, getMyConversations);
+router.get("/teacher/:id", teacherProtect, getConversation);
+router.post("/teacher", teacherProtect, createConversationValidation, createConversation);
+router.post("/teacher/:id/messages", teacherProtect, sendMessageValidation, sendMessage);
+router.put("/teacher/:id/leave", teacherProtect, leaveConversation);
 
 // Student routes
-router.get("/student", protectStudentRoute, getMyConversations);
-router.get("/student/:id", protectStudentRoute, getConversation);
-router.post("/student", protectStudentRoute, createConversationValidation, createConversation);
-router.post("/student/:id/messages", protectStudentRoute, sendMessageValidation, sendMessage);
-router.put("/student/:id/leave", protectStudentRoute, leaveConversation);
+router.get("/student", studentProtect, getMyConversations);
+router.get("/student/:id", studentProtect, getConversation);
+router.post("/student", studentProtect, createConversationValidation, createConversation);
+router.post("/student/:id/messages", studentProtect, sendMessageValidation, sendMessage);
+router.put("/student/:id/leave", studentProtect, leaveConversation);
 
 export default router; 

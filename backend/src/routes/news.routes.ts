@@ -7,8 +7,8 @@ import {
   updateNewsEventComment,
   deleteNewsEventComment,
 } from "../controllers/news.controller.js";
-import { protectStudentRoute } from "../middleware/protectStudentRoute.js";
-import { protectTeacherRoute } from "../middleware/protectTeacherRoute.js";
+import { studentProtect } from "../middleware/authMiddleware.js";
+import { teacherProtect } from "../middleware/authMiddleware.js";
 
 /**
  * News & Events Routes (Public)
@@ -28,13 +28,13 @@ router.get("/:id", getPublishedNewsEvent);
 router.get("/:id/comments", getNewsEventComments);
 
 // Student comment routes
-router.post("/:id/comments", protectStudentRoute, createNewsEventComment);
-router.put("/comments/:commentId", protectStudentRoute, updateNewsEventComment);
-router.delete("/comments/:commentId", protectStudentRoute, deleteNewsEventComment);
+router.post("/:id/comments", studentProtect, createNewsEventComment);
+router.put("/comments/:commentId", studentProtect, updateNewsEventComment);
+router.delete("/comments/:commentId", studentProtect, deleteNewsEventComment);
 
 // Teacher comment routes (using the same controller functions)
-router.post("/:id/comments/teacher", protectTeacherRoute, createNewsEventComment);
-router.put("/comments/:commentId/teacher", protectTeacherRoute, updateNewsEventComment);
-router.delete("/comments/:commentId/teacher", protectTeacherRoute, deleteNewsEventComment);
+router.post("/:id/comments/teacher", teacherProtect, createNewsEventComment);
+router.put("/comments/:commentId/teacher", teacherProtect, updateNewsEventComment);
+router.delete("/comments/:commentId/teacher", teacherProtect, deleteNewsEventComment);
 
 export default router; 

@@ -17,7 +17,7 @@ import {
   resourceCommentValidation,
   updateCommentValidation,
 } from "../routesValidation/student.validation.js";
-import { protectStudentRoute } from "../middleware/protectStudentRoute.js";
+import { studentProtect } from "../middleware/authMiddleware.js";
 import { checkCourseAccess } from "../middleware/checkCourseAccess.js";
 
 /**
@@ -32,32 +32,32 @@ import { checkCourseAccess } from "../middleware/checkCourseAccess.js";
 const router = express.Router();
 
 // Protected Routes (Student Only)
-router.get("/profile", protectStudentRoute, getProfile);
-router.put("/profile", protectStudentRoute, updateProfileValidation, updateProfile);
-router.get("/courses", protectStudentRoute, getEnrolledCourses);
-router.get("/courses/:courseId", protectStudentRoute, checkCourseAccess, getCourseDetails);
-router.post("/courses/:courseId/enroll", protectStudentRoute, enrollmentRequestValidation, requestEnrollment);
-router.put("/courses/:courseId/withdraw", protectStudentRoute, checkCourseAccess, withdrawFromCourse);
+router.get("/profile", studentProtect, getProfile);
+router.put("/profile", studentProtect, updateProfileValidation, updateProfile);
+router.get("/courses", studentProtect, getEnrolledCourses);
+router.get("/courses/:courseId", studentProtect, checkCourseAccess, getCourseDetails);
+router.post("/courses/:courseId/enroll", studentProtect, enrollmentRequestValidation, requestEnrollment);
+router.put("/courses/:courseId/withdraw", studentProtect, checkCourseAccess, withdrawFromCourse);
 
 // Protected Routes (Student + Course Access)
-router.get("/courses/:courseId/resources", protectStudentRoute, checkCourseAccess, getCourseResources);
+router.get("/courses/:courseId/resources", studentProtect, checkCourseAccess, getCourseResources);
 router.post(
   "/resources/:resourceId/comments",
-  protectStudentRoute,
+  studentProtect,
   checkCourseAccess,
   resourceCommentValidation,
   createResourceComment
 );
 router.put(
   "/resources/comments/:commentId",
-  protectStudentRoute,
+  studentProtect,
   checkCourseAccess,
   updateCommentValidation,
   updateResourceComment
 );
 router.delete(
   "/resources/comments/:commentId",
-  protectStudentRoute,
+  studentProtect,
   checkCourseAccess,
   deleteResourceComment
 );

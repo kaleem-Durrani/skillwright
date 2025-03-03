@@ -1,11 +1,13 @@
 import express from "express";
 import dotenv from "dotenv";
+import cookieParser from "cookie-parser";
 
 import { notFound, errorHandler } from "./middleware/errorMiddleware.js";
 
 import authAdminRouter from "./routes/auth.adminRoutes.js";
 import authStudentRouter from "./routes/auth.studentRoutes.js";
 import authTeacherRouter from "./routes/auth.teacherRoutes.js";
+import authRefreshRouter from "./routes/auth.refreshRoutes.js";
 
 import adminRouter from "./routes/admin.routes.js";
 import studentRouter from "./routes/student.routes.js";
@@ -23,12 +25,14 @@ const app = express();
 
 app.use(express.json());
 // app.use(express.urlencoded({extended:true}));
+app.use(cookieParser());
 
 // app.use(cors());
 
 app.use("/api/auth/admin", authAdminRouter);
 app.use("/api/auth/student", authStudentRouter);
 app.use("/api/auth/teacher", authTeacherRouter);
+app.use("/api/auth/refresh", authRefreshRouter);
 
 app.use("/api/admin", adminRouter);
 app.use("/api/student", studentRouter);

@@ -22,7 +22,8 @@ import {
   createNewsEventValidation,
   updateNewsEventValidation,
 } from "../routesValidation/admin.validation.js";
-import { protectAdminRoute } from "../middleware/protectAdminRoute.js";
+import { adminProtect } from "../middleware/authMiddleware.js";
+
 
 /**
  * Admin Routes
@@ -39,27 +40,27 @@ import { protectAdminRoute } from "../middleware/protectAdminRoute.js";
 const router = express.Router();
 
 // Profile Management
-router.get("/profile", protectAdminRoute, getProfile);
-router.put("/profile", protectAdminRoute, updateProfileValidation, updateProfile);
+router.get("/profile", adminProtect, getProfile);
+router.put("/profile", adminProtect, updateProfileValidation, updateProfile);
 
 // Teacher Management
-router.get("/teachers", protectAdminRoute, getAllTeachers);
-router.get("/teachers/:id", protectAdminRoute, getTeacherById);
-router.put("/teachers/:id/ban", protectAdminRoute, toggleTeacherBan);
-router.delete("/teachers/:id", protectAdminRoute, deleteTeacher);
+router.get("/teachers", adminProtect, getAllTeachers);
+router.get("/teachers/:id", adminProtect, getTeacherById);
+router.put("/teachers/:id/ban", adminProtect, toggleTeacherBan);
+router.delete("/teachers/:id", adminProtect, deleteTeacher);
 
 // Student Management
-router.get("/students", protectAdminRoute, getAllStudents);
-router.get("/students/:id", protectAdminRoute, getStudentById);
-router.put("/students/:id/ban", protectAdminRoute, toggleStudentBan);
-router.delete("/students/:id", protectAdminRoute, deleteStudent);
+router.get("/students", adminProtect, getAllStudents);
+router.get("/students/:id", adminProtect, getStudentById);
+router.put("/students/:id/ban", adminProtect, toggleStudentBan);
+router.delete("/students/:id", adminProtect, deleteStudent);
 
 // News & Events Management
-router.get("/news-events", protectAdminRoute, getAllNewsEvents);
-router.get("/news-events/:id", protectAdminRoute, getNewsEvent);
-router.post("/news-events", protectAdminRoute, createNewsEventValidation, createNewsEvent);
-router.put("/news-events/:id", protectAdminRoute, updateNewsEventValidation, updateNewsEvent);
-router.delete("/news-events/:id", protectAdminRoute, deleteNewsEvent);
-router.put("/news-events/:id/publish", protectAdminRoute, toggleNewsEventPublish);
+router.get("/news-events", adminProtect, getAllNewsEvents);
+router.get("/news-events/:id", adminProtect, getNewsEvent);
+router.post("/news-events", adminProtect, createNewsEventValidation, createNewsEvent);
+router.put("/news-events/:id", adminProtect, updateNewsEventValidation, updateNewsEvent);
+router.delete("/news-events/:id", adminProtect, deleteNewsEvent);
+router.put("/news-events/:id/publish", adminProtect, toggleNewsEventPublish);
 
 export default router;

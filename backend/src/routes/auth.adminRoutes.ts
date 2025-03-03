@@ -5,7 +5,7 @@ import {
   signupAdmin,
 } from "../controllers/auth.adminController.js";
 import { loginValidation } from "../routesValidation/auth.adminRoutes.validation.js";
-import { protectAdminRoute } from "../middleware/protectAdminRoute.js";
+import { adminProtect } from "../middleware/authMiddleware.js";
 
 /**
  * Admin Authentication Routes
@@ -25,6 +25,6 @@ router.post("/signup", signupAdmin);
 router.post("/login", loginValidation, loginAdmin);
 
 // Protected routes
-router.post("/logout", protectAdminRoute, logoutAdmin);
+router.post("/logout", adminProtect, logoutAdmin);
 
 export default router;

@@ -8,11 +8,12 @@ import { sendEmail } from "../utils/sendEmail.js";
 import { generateOTP } from "../utils/generateOTP.js";
 import { ValidationError, NotFoundError, ForbiddenError, AuthenticationError } from "../utils/customErrors.js";
 import { parseValidationErrors } from "../utils/validationErrorParser.js";
+import { generateAccessToken, generateRefreshToken, storeRefreshToken, deleteAllRefreshTokens, clearTokens, setTokens } from "../utils/tokenUtils.js";
 
 // @desc    Register a new student
 // @route   POST /api/auth/student/signup
 // @access  Public
-const signupStudent = asyncHandler(async (req: Request, res: Response) => {
+export const signupStudent = asyncHandler(async (req: Request, res: Response) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
     throw parseValidationErrors(errors);
@@ -76,16 +77,25 @@ const signupStudent = asyncHandler(async (req: Request, res: Response) => {
     `Your verification code is: ${otp}\nThis code will expire in 15 minutes.`
   );
 
-  // Generate token
-  generateToken(res, student.id);
+  // Generate tokens
+  const accessToken = generateAccessToken(student.id, 'student');
+  const refreshToken = generateRefreshToken();
+
+  // Store refresh token in database
+  await storeRefreshToken(refreshToken, student.id, 'student');
+
+  // Set tokens in cookies
+  setTokens(res, accessToken, refreshToken);
 
   res.status(201).json({
     success: true,
+    message: "Registration successful. Please verify your email.",
     data: {
       id: student.id,
       name: student.name,
       email: student.email,
       isVerified: student.isVerified,
+      userType: 'student'
     },
   });
 });
@@ -93,7 +103,7 @@ const signupStudent = asyncHandler(async (req: Request, res: Response) => {
 // @desc    Login student
 // @route   POST /api/auth/student/login
 // @access  Public
-const loginStudent = asyncHandler(async (req: Request, res: Response) => {
+export const loginStudent = asyncHandler(async (req: Request, res: Response) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
     throw parseValidationErrors(errors);
@@ -101,32 +111,45 @@ const loginStudent = asyncHandler(async (req: Request, res: Response) => {
 
   const { email, password } = req.body;
 
+  // Find student by email
   const student = await prisma.student.findUnique({
     where: { email },
   });
 
   if (!student) {
-    throw new AuthenticationError("Invalid email or password");
+    throw new AuthenticationError("Invalid credentials");
   }
 
+  // Check if student is banned
   if (student.isBanned) {
-    throw new ForbiddenError("Your account has been banned. Please contact the administrators.");
+    throw new AuthenticationError("Your account has been banned");
   }
 
-  const isPasswordMatch = await bcrypt.compare(password, student.password);
-  if (!isPasswordMatch) {
-    throw new AuthenticationError("Invalid email or password");
+  // Check password
+  const isMatch = await bcrypt.compare(password, student.password);
+  if (!isMatch) {
+    throw new AuthenticationError("Invalid credentials");
   }
 
-  generateToken(res, student.id);
+  // Generate tokens
+  const accessToken = generateAccessToken(student.id, 'student');
+  const refreshToken = generateRefreshToken();
+
+  // Store refresh token in database
+  await storeRefreshToken(refreshToken, student.id, 'student');
+
+  // Set tokens in cookies
+  setTokens(res, accessToken, refreshToken);
 
   res.status(200).json({
     success: true,
+    message: "Login successful",
     data: {
       id: student.id,
       name: student.name,
       email: student.email,
       isVerified: student.isVerified,
+      userType: 'student'
     },
   });
 });
@@ -134,22 +157,33 @@ const loginStudent = asyncHandler(async (req: Request, res: Response) => {
 // @desc    Logout student
 // @route   POST /api/auth/student/logout
 // @access  Private
-const logoutStudent = asyncHandler(async (req: Request, res: Response) => {
-  res.cookie("token", "", {
-    httpOnly: true,
-    expires: new Date(0),
-  });
+export const logoutStudent = asyncHandler(async (req: Request, res: Response) => {
+  const refreshToken = req.cookies.refreshToken;
+  
+  // Delete refresh token from database if it exists
+  if (refreshToken && req.student?.id) {
+    try {
+      await deleteAllRefreshTokens(req.student.id, 'student');
+    } catch (error) {
+      // Continue even if token deletion fails
+      console.error("Error deleting refresh token:", error);
+    }
+  }
+  
+  // Clear cookies
+  clearTokens(res);
 
   res.status(200).json({
     success: true,
-    message: "Logged out successfully",
+    message: "Logout successful",
+    data: null,
   });
 });
 
 // @desc    Verify OTP
 // @route   POST /api/auth/student/verify-otp
 // @access  Public
-const verifyOtp = asyncHandler(async (req: Request, res: Response) => {
+export const verifyOtp = asyncHandler(async (req: Request, res: Response) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
     throw parseValidationErrors(errors);
@@ -204,13 +238,14 @@ const verifyOtp = asyncHandler(async (req: Request, res: Response) => {
   res.status(200).json({
     success: true,
     message: "Email verified successfully",
+    data: null
   });
 });
 
 // @desc    Resend OTP
 // @route   POST /api/auth/student/resend-otp
 // @access  Public
-const resendOtp = asyncHandler(async (req: Request, res: Response) => {
+export const resendOtp = asyncHandler(async (req: Request, res: Response) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
     throw parseValidationErrors(errors);
@@ -260,13 +295,14 @@ const resendOtp = asyncHandler(async (req: Request, res: Response) => {
   res.status(200).json({
     success: true,
     message: "OTP sent successfully",
+    data: null
   });
 });
 
 // @desc    Forgot password
 // @route   POST /api/auth/student/forgot-password
 // @access  Public
-const forgotPassword = asyncHandler(async (req: Request, res: Response) => {
+export const forgotPassword = asyncHandler(async (req: Request, res: Response) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
     throw parseValidationErrors(errors);
@@ -310,13 +346,14 @@ const forgotPassword = asyncHandler(async (req: Request, res: Response) => {
   res.status(200).json({
     success: true,
     message: "Password reset OTP sent successfully",
+    data: null
   });
 });
 
 // @desc    Reset password
 // @route   POST /api/auth/student/reset-password
 // @access  Public
-const resetPassword = asyncHandler(async (req: Request, res: Response) => {
+export const resetPassword = asyncHandler(async (req: Request, res: Response) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
     throw parseValidationErrors(errors);
@@ -368,15 +405,6 @@ const resetPassword = asyncHandler(async (req: Request, res: Response) => {
   res.status(200).json({
     success: true,
     message: "Password reset successfully",
+    data: null
   });
 });
-
-export {
-  signupStudent,
-  loginStudent,
-  logoutStudent,
-  verifyOtp,
-  resendOtp,
-  forgotPassword,
-  resetPassword,
-};

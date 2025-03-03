@@ -8,7 +8,7 @@ import {
   getAllPublicResources,
   getResourceById,
 } from "../controllers/resource.controller.js";
-import { protectTeacherRoute } from "../middleware/protectTeacherRoute.js";
+import { teacherProtect } from "../middleware/authMiddleware.js";
 import { protectCourseAccess } from "../middleware/protectCourseAccess.js";
 import {
   uploadDocument,
@@ -37,7 +37,7 @@ router.get("/public/:id", getResourceById);
 // Teacher-only resource management routes
 router.post(
   "/",
-  protectTeacherRoute,
+  teacherProtect,
   uploadDocument.single("document"),
   handleUploadError,
   validateResource,
@@ -46,7 +46,7 @@ router.post(
 
 router.post(
   "/video",
-  protectTeacherRoute,
+  teacherProtect,
   uploadVideo.single("video"),
   handleUploadError,
   validateResource,
@@ -55,14 +55,14 @@ router.post(
 
 router.put(
   "/:id",
-  protectTeacherRoute,
+  teacherProtect,
   validateResource,
   updateResource
 );
 
 router.delete(
   "/:id",
-  protectTeacherRoute,
+  teacherProtect,
   deleteResource
 );
 

@@ -15,7 +15,8 @@ import {
   forgotPasswordValidation,
   resetPasswordValidation,
 } from "../routesValidation/auth.studentRoutes.validation.js";
-import { protectStudentRoute } from "../middleware/protectStudentRoute.js";
+import { studentProtect } from "../middleware/authMiddleware.js";
+
 
 /**
  * Student Authentication Routes
@@ -40,6 +41,6 @@ router.post("/forgot-password", forgotPasswordValidation, forgotPassword);
 router.post("/reset-password", resetPasswordValidation, resetPassword);
 
 // Protected routes
-router.post("/logout", protectStudentRoute, logoutStudent);
+router.post("/logout", studentProtect, logoutStudent);
 
 export default router;

@@ -32,6 +32,7 @@ model Admin {
   // Communication
   adminConversations ConversationParticipant[] @relation("AdminConversations")
   sentMessages       Message[]                 @relation("AdminSentMessages")
+  refreshTokens      RefreshToken[]
 }
 
 model Teacher {
@@ -59,6 +60,7 @@ model Teacher {
   sentMessages         Message[]                 @relation("TeacherSentMessages")
   resourceComments     ResourceComment[]
   newsEventComments    NewsEventComment[]
+  refreshTokens        RefreshToken[]
 }
 
 model Student {
@@ -84,6 +86,7 @@ model Student {
   sentMessages         Message[]                 @relation("StudentSentMessages")
   resourceComments     ResourceComment[]
   newsEventComments    NewsEventComment[]
+  refreshTokens        RefreshToken[]
 }
 
 model Department {
@@ -262,4 +265,27 @@ model NewsEventComment {
   parentComment NewsEventComment?  @relation("CommentReplies", fields: [parentId], references: [id])
   parentId      String?
   replies       NewsEventComment[] @relation("CommentReplies")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations - one of these will be set
+  adminId   String?
+  teacherId String?
+  studentId String?
+
+  // Foreign keys
+  admin   Admin?   @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  teacher Teacher? @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  student Student? @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([adminId])
+  @@index([teacherId])
+  @@index([studentId])
+  @@index([token])
 }

@@ -13,8 +13,7 @@ import {
   createCourseValidation,
   updateCourseValidation,
 } from "../routesValidation/course.validation.js";
-import { protectTeacherRoute } from "../middleware/protectTeacherRoute.js";
-import { protectAdminRoute } from "../middleware/protectAdminRoute.js";
+import { teacherProtect } from "../middleware/authMiddleware.js";
 
 /**
  * Course Routes
@@ -35,11 +34,11 @@ router.get("/", getAllCourses);
 router.get("/:id", getCourse);
 
 // Protected routes (Teacher only)
-router.post("/", protectTeacherRoute, createCourseValidation, createCourse);
-router.put("/:id", protectTeacherRoute, updateCourseValidation, updateCourse);
-router.delete("/:id", protectTeacherRoute, deleteCourse);
-router.get("/:id/resources", protectTeacherRoute, getCourseResources);
-router.get("/:id/students", protectTeacherRoute, getEnrolledStudents);
-router.put("/:id/enrollments/:enrollmentId", protectTeacherRoute, updateEnrollmentStatus);
+router.post("/", teacherProtect, createCourseValidation, createCourse);
+router.put("/:id", teacherProtect, updateCourseValidation, updateCourse);
+router.delete("/:id", teacherProtect, deleteCourse);
+router.get("/:id/resources", teacherProtect, getCourseResources);
+router.get("/:id/students", teacherProtect, getEnrolledStudents);
+router.put("/:id/enrollments/:enrollmentId", teacherProtect, updateEnrollmentStatus);
 
 export default router; 

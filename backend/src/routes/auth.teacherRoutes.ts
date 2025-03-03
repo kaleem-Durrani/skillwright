@@ -15,7 +15,8 @@ import {
   forgotPasswordValidation,
   resetPasswordValidation,
 } from "../routesValidation/auth.teacherRoutes.validation.js";
-import { protectTeacherRoute } from "../middleware/protectTeacherRoute.js";
+import { teacherProtect } from "../middleware/authMiddleware.js";
+
 
 /**
  * Teacher Authentication Routes
@@ -40,6 +41,6 @@ router.post("/forgot-password", forgotPasswordValidation, forgotPassword);
 router.post("/reset-password", resetPasswordValidation, resetPassword);
 
 // Protected routes
-router.post("/logout", protectTeacherRoute, logoutTeacher);
+router.post("/logout", teacherProtect, logoutTeacher);
 
 export default router;
