@@ -1,3 +1,4 @@
+// Response types (what we receive from the backend)
 export interface Department {
   id: string;
   name: string;
@@ -129,4 +130,85 @@ export interface Message {
   senderType: 'admin' | 'teacher' | 'student';
   createdAt: string;
   updatedAt: string;
+}
+
+// Request types (what we send to the backend)
+export interface DepartmentCreateData {
+  name: string;
+  description?: string;
+}
+
+export interface DepartmentUpdateData {
+  name?: string;
+  description?: string;
+}
+
+export interface CourseCreateData {
+  name: string;
+  code: string;
+  description?: string;
+  duration: string;
+  capacity?: number;
+  departmentId: string;
+  syllabus?: string;
+  startDate?: string;
+  endDate?: string;
+}
+
+export interface CourseUpdateData {
+  name?: string;
+  code?: string;
+  description?: string;
+  duration?: string;
+  capacity?: number;
+  departmentId?: string;
+  syllabus?: string;
+  startDate?: string;
+  endDate?: string;
+}
+
+export interface ResourceCreateData {
+  title: string;
+  description?: string;
+  type: ResourceType;
+  url: string;
+  courseId: string;
+  isPublic: boolean;
+}
+
+export interface ResourceUpdateData {
+  title?: string;
+  description?: string;
+  type?: ResourceType;
+  url?: string;
+  courseId?: string;
+  isPublic?: boolean;
+}
+
+export interface NewsEventCreateData {
+  title: string;
+  content: string;
+  type: NewsEventType;
+  date: string;
+  isPublished?: boolean;
+}
+
+export interface NewsEventUpdateData {
+  title?: string;
+  content?: string;
+  type?: NewsEventType;
+  date?: string;
+  isPublished?: boolean;
+}
+
+export interface ConversationCreateData {
+  title?: string;
+  participants: {
+    userId: string;
+    userType: 'admin' | 'teacher' | 'student';
+  }[];
+}
+
+export interface MessageCreateData {
+  content: string;
 } 

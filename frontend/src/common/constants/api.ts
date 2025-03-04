@@ -112,4 +112,16 @@ export const API_ENDPOINTS = {
       LEAVE: (id: string) => `/conversations/student/${id}/leave`,
     },
   },
+
+  NEWS: {
+    LIST: '/news',
+    BY_ID: (id: string) => `/news/${id}`,
+    COMMENTS: (id: string) => `/news/${id}/comments`,
+    STUDENT_COMMENT: (id: string) => `/news/${id}/comments`,
+    TEACHER_COMMENT: (id: string) => `/news/${id}/comments/teacher`,
+    UPDATE_STUDENT_COMMENT: (commentId: string) => `/news/comments/${commentId}`,
+    DELETE_STUDENT_COMMENT: (commentId: string) => `/news/comments/${commentId}`,
+    UPDATE_TEACHER_COMMENT: (commentId: string) => `/news/comments/${commentId}/teacher`,
+    DELETE_TEACHER_COMMENT: (commentId: string) => `/news/comments/${commentId}/teacher`,
+  },
 }; 

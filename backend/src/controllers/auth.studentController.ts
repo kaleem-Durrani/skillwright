@@ -3,7 +3,6 @@ import bcrypt from "bcryptjs";
 import { validationResult } from "express-validator";
 import asyncHandler from "../middleware/asyncHandler.js";
 import prisma from "../db/prisma.js";
-import { generateToken } from "../utils/generateToken.js";
 import { sendEmail } from "../utils/sendEmail.js";
 import { generateOTP } from "../utils/generateOTP.js";
 import { ValidationError, NotFoundError, ForbiddenError, AuthenticationError } from "../utils/customErrors.js";
