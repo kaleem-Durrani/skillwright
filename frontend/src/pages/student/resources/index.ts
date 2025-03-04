@@ -1,0 +1,1 @@
+export { default as StudentResources } from './StudentResources';
