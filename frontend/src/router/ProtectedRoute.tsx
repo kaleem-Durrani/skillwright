@@ -6,6 +6,7 @@ import { UserType } from "../common/types/auth.types";
 interface ProtectedRouteProps {
   children: ReactNode;
   userType?: UserType;
+  requiresVerification?: boolean;
 }
 
 // Mock authentication - replace with actual auth logic later
@@ -18,11 +19,16 @@ const useAuth = () => {
     user,
     isAuthenticated: !!user,
     userType: user?.userType as UserType | undefined,
+    isVerified: user?.isVerified as boolean | undefined,
   };
 };
 
-const ProtectedRoute = ({ children, userType }: ProtectedRouteProps) => {
-  const { isAuthenticated, user } = useAuth();
+const ProtectedRoute = ({
+  children,
+  userType,
+  requiresVerification = false,
+}: ProtectedRouteProps) => {
+  const { isAuthenticated, user, isVerified } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -33,18 +39,53 @@ const ProtectedRoute = ({ children, userType }: ProtectedRouteProps) => {
       return;
     }
 
-    // If userType is specified and doesn't match the user's type, redirect to unauthorized
-    if (userType && user?.userType !== userType) {
-      navigate(ROUTES.ERROR.UNAUTHORIZED, { replace: true });
-    }
-  }, [isAuthenticated, user, userType, location, navigate]);
+    // Handle verification routes
+    if (requiresVerification) {
+      // If user is already verified, redirect to dashboard
+      if (isVerified) {
+        const dashboardRoute =
+          user?.userType === "admin"
+            ? ROUTES.ADMIN.DASHBOARD
+            : user?.userType === "teacher"
+            ? ROUTES.TEACHER.DASHBOARD
+            : ROUTES.STUDENT.DASHBOARD;
+        navigate(dashboardRoute, { replace: true });
+        return;
+      }
+    } else {
+      // For non-verification routes, if user is not verified, redirect to verify email
+      if (!isVerified) {
+        navigate(ROUTES.VERIFY_EMAIL, { replace: true });
+        return;
+      }
 
-  // If not authenticated or not authorized, render nothing while the redirect happens
-  if (!isAuthenticated || (userType && user?.userType !== userType)) {
+      // If userType is specified and doesn't match the user's type, redirect to unauthorized
+      if (userType && user?.userType !== userType) {
+        navigate(ROUTES.ERROR.UNAUTHORIZED, { replace: true });
+        return;
+      }
+    }
+  }, [
+    isAuthenticated,
+    isVerified,
+    user,
+    userType,
+    requiresVerification,
+    location,
+    navigate,
+  ]);
+
+  // If not authenticated or not meeting verification requirements, render nothing while redirect happens
+  if (
+    !isAuthenticated ||
+    (requiresVerification && isVerified) ||
+    (!requiresVerification && !isVerified) ||
+    (userType && user?.userType !== userType)
+  ) {
     return null;
   }
 
-  // If authenticated and authorized, render the children
+  // If all checks pass, render the children
   return <>{children}</>;
 };
 

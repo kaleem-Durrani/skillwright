@@ -20,7 +20,10 @@ const Router = () => {
             path={route.path}
             element={
               route.protected ? (
-                <ProtectedRoute userType={route.userType}>
+                <ProtectedRoute
+                  userType={route.userType}
+                  requiresVerification={route.requiresVerification}
+                >
                   <route.component />
                 </ProtectedRoute>
               ) : (
