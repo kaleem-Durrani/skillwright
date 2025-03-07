@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { Routes, Route } from "react-router-dom";
 import { routes } from "./routes";
 import ProtectedRoute from "./ProtectedRoute";
+import { AuthLayout, AppLayout } from "@/layouts";
 
 // Loading component for Suspense
 const Loading = () => (
@@ -14,24 +15,38 @@ const Router = () => {
   return (
     <Suspense fallback={<Loading />}>
       <Routes>
-        {routes.map((route) => (
-          <Route
-            key={route.path}
-            path={route.path}
-            element={
-              route.protected ? (
-                <ProtectedRoute
-                  userType={route.userType}
-                  requiresVerification={route.requiresVerification}
-                >
-                  <route.component />
-                </ProtectedRoute>
-              ) : (
-                <route.component />
-              )
-            }
-          />
-        ))}
+        {/* Public routes with AuthLayout */}
+        <Route element={<AuthLayout />}>
+          {routes
+            .filter((route) => !route.protected)
+            .map((route) => (
+              <Route
+                key={route.path}
+                path={route.path}
+                element={<route.component />}
+              />
+            ))}
+        </Route>
+
+        {/* Protected routes with AppLayout */}
+        <Route element={<AppLayout />}>
+          {routes
+            .filter((route) => route.protected)
+            .map((route) => (
+              <Route
+                key={route.path}
+                path={route.path}
+                element={
+                  <ProtectedRoute
+                    userType={route.userType}
+                    requiresVerification={route.requiresVerification}
+                  >
+                    <route.component />
+                  </ProtectedRoute>
+                }
+              />
+            ))}
+        </Route>
       </Routes>
     </Suspense>
   );
