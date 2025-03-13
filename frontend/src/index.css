@@ -1,5 +1,141 @@
+@import 'antd/dist/reset.css';
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Custom styles that combine Ant Design and Tailwind */
+.ant-layout {
+  @apply min-h-screen;
+}
+
+.ant-layout-header.site-header {
+  @apply bg-white/30 backdrop-blur-md shadow-md fixed w-full z-50;
+}
+
+.ant-layout-content.site-content {
+  @apply mt-16 px-4 sm:px-6 lg:px-8;
+}
+
+.ant-layout-footer.site-footer {
+  @apply text-center text-gray-500;
+}
+
+/* Glassmorphism effects */
+.glass {
+  @apply bg-white/20 backdrop-blur-md border border-white/20 shadow-lg;
+}
+
+.glass-dark {
+  @apply bg-black/20 backdrop-blur-md border border-white/10 shadow-lg;
+}
+
+/* Landing page animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeOut {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(20px); }
+}
+
+.fade-in {
+  animation: fadeIn 0.8s ease-out forwards;
+}
+
+.fade-in-delay-1 {
+  opacity: 0;
+  animation: fadeIn 0.8s ease-out forwards;
+  animation-delay: 0.2s;
+}
+
+.fade-in-delay-2 {
+  opacity: 0;
+  animation: fadeIn 0.8s ease-out forwards;
+  animation-delay: 0.4s;
+}
+
+.fade-in-delay-3 {
+  opacity: 0;
+  animation: fadeIn 0.8s ease-out forwards;
+  animation-delay: 0.6s;
+}
+
+/* Transition for elements that fade in and out */
+.opacity-0 {
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.5s ease, transform 0.5s ease;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-gray-100;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-blue-400 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-blue-500;
+}
+
+/* Smooth scrolling for the entire page */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Override Ant Design styles for dark theme menus */
+.ant-menu.ant-menu-dark {
+  background: transparent;
+}
+
+.ant-menu.ant-menu-dark .ant-menu-item-selected {
+  @apply bg-white/20;
+}
+
+/* Ensure menu items are always visible */
+.ant-menu.ant-menu-dark .ant-menu-item {
+  text-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
+}
+
+/* Force menu text to be white */
+.ant-menu-title-content {
+  color: white !important;
+  font-weight: 500;
+  text-shadow: 1px 2px 2px rgba(0, 0, 0, 0.7);
+}
+
+/* Menu background for better visibility */
+.ant-menu.ant-menu-dark .ant-menu-item:hover {
+  background-color: rgba(0, 0, 0, 0.2) !important;
+}
+
+/* Custom button styles */
+.btn-glass {
+  @apply bg-white/20 backdrop-blur-md border border-white/30 text-white hover:bg-white/30 transition-all;
+}
+
+/* Responsive adjustments */
+@media (max-width: 640px) {
+  .ant-layout-content.site-content {
+    @apply mt-14;
+  }
+}
+
+/* Override Ant Design button styles */
+.ant-btn-primary {
+  @apply bg-blue-600 hover:bg-blue-700 border-none shadow-md;
+}
+
+.ant-btn-default.transparent {
+  @apply bg-white/20 backdrop-blur-sm text-white hover:bg-white/30 border-white/30 shadow-md;
+}
 
 
