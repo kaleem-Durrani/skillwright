@@ -3,27 +3,36 @@ import { Form, Input, Button, Typography, Checkbox } from "antd";
 import { UserOutlined, LockOutlined, SafetyOutlined } from "@ant-design/icons";
 import { Link } from "react-router-dom";
 import { ROUTES } from "@/common/constants";
+import LoginTypeSelector, { LoginType } from "./LoginTypeSelector";
 
 const { Title, Text } = Typography;
 
 interface AdminLoginProps {
   className?: string;
+  onTypeChange: (type: LoginType) => void;
 }
 
-const AdminLogin: React.FC<AdminLoginProps> = ({ className = "" }) => {
+const AdminLogin: React.FC<AdminLoginProps> = ({
+  className = "",
+  onTypeChange,
+}) => {
   const onFinish = (values: any) => {
     console.log("Admin login values:", values);
     // Handle admin login logic here
   };
 
   return (
-    <div className={`p-8 ${className}`}>
-      <Title level={2} className="mb-6 text-center">
+    <div className={`p-6 flex flex-col ${className}`}>
+      <div className="mb-6 glass-login-selector mx-auto">
+        <LoginTypeSelector selectedType="admin" onChange={onTypeChange} />
+      </div>
+
+      <Title level={2} className="mb-4 text-center text-indigo-700">
         Administrator Login
       </Title>
 
-      <div className="flex justify-center mb-6">
-        <SafetyOutlined className="text-5xl text-blue-600" />
+      <div className="flex justify-center mb-4">
+        <SafetyOutlined className="text-5xl text-indigo-600" />
       </div>
 
       <Text className="block text-center mb-6 text-gray-600">
@@ -36,7 +45,7 @@ const AdminLogin: React.FC<AdminLoginProps> = ({ className = "" }) => {
         onFinish={onFinish}
         layout="vertical"
         size="large"
-        className="max-w-md mx-auto"
+        className="max-w-md mx-auto w-full"
       >
         <Form.Item
           name="email"
@@ -70,7 +79,7 @@ const AdminLogin: React.FC<AdminLoginProps> = ({ className = "" }) => {
             </Form.Item>
             <Link
               to={ROUTES.FORGOT_PASSWORD}
-              className="text-blue-600 hover:text-blue-800"
+              className="text-indigo-600 hover:text-indigo-800"
             >
               Forgot password?
             </Link>
@@ -81,7 +90,7 @@ const AdminLogin: React.FC<AdminLoginProps> = ({ className = "" }) => {
           <Button
             type="primary"
             htmlType="submit"
-            className="w-full rounded-lg h-12 text-lg"
+            className="w-full rounded-lg h-12 text-lg bg-indigo-600 hover:bg-indigo-700 border-indigo-600"
           >
             Log in
           </Button>

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Layout, Menu, Button, Typography } from "antd";
-import { MenuOutlined, HomeOutlined } from "@ant-design/icons";
+import { MenuOutlined } from "@ant-design/icons";
 import { AUTH_MENU } from "@/common/constants/navigation";
 
 const { Header, Content, Footer } = Layout;
@@ -162,7 +162,7 @@ const AuthLayout = () => {
       )}
 
       {/* Main Content */}
-      <Content className="site-content relative z-10">
+      <Content className="site-content h-full relative z-10">
         <Outlet />
       </Content>
 

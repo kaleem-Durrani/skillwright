@@ -3,22 +3,31 @@ import { Form, Input, Button, Typography, Checkbox, Divider } from "antd";
 import { UserOutlined, LockOutlined } from "@ant-design/icons";
 import { Link } from "react-router-dom";
 import { ROUTES } from "@/common/constants";
+import LoginTypeSelector, { LoginType } from "./LoginTypeSelector";
 
 const { Title, Text } = Typography;
 
 interface TeacherLoginProps {
   className?: string;
+  onTypeChange: (type: LoginType) => void;
 }
 
-const TeacherLogin: React.FC<TeacherLoginProps> = ({ className = "" }) => {
+const TeacherLogin: React.FC<TeacherLoginProps> = ({
+  className = "",
+  onTypeChange,
+}) => {
   const onFinish = (values: any) => {
     console.log("Teacher login values:", values);
     // Handle teacher login logic here
   };
 
   return (
-    <div className={`p-8 ${className}`}>
-      <Title level={2} className="mb-6 text-center">
+    <div className={`p-6 flex flex-col ${className}`}>
+      <div className="mb-6 glass-login-selector mx-auto">
+        <LoginTypeSelector selectedType="teacher" onChange={onTypeChange} />
+      </div>
+
+      <Title level={2} className="mb-6 text-center text-green-700">
         Teacher Login
       </Title>
 
@@ -28,7 +37,7 @@ const TeacherLogin: React.FC<TeacherLoginProps> = ({ className = "" }) => {
         onFinish={onFinish}
         layout="vertical"
         size="large"
-        className="max-w-md mx-auto"
+        className="max-w-md mx-auto w-full"
       >
         <Form.Item
           name="email"
@@ -62,7 +71,7 @@ const TeacherLogin: React.FC<TeacherLoginProps> = ({ className = "" }) => {
             </Form.Item>
             <Link
               to={ROUTES.FORGOT_PASSWORD}
-              className="text-blue-600 hover:text-blue-800"
+              className="text-green-600 hover:text-green-800"
             >
               Forgot password?
             </Link>
@@ -73,7 +82,7 @@ const TeacherLogin: React.FC<TeacherLoginProps> = ({ className = "" }) => {
           <Button
             type="primary"
             htmlType="submit"
-            className="w-full rounded-lg h-12 text-lg"
+            className="w-full rounded-lg h-12 text-lg bg-green-600 hover:bg-green-700 border-green-600"
           >
             Log in
           </Button>
@@ -86,7 +95,7 @@ const TeacherLogin: React.FC<TeacherLoginProps> = ({ className = "" }) => {
         <div className="text-center">
           <Link
             to={ROUTES.REGISTER}
-            className="text-blue-600 hover:text-blue-800"
+            className="text-green-600 hover:text-green-800"
           >
             Register as a teacher
           </Link>

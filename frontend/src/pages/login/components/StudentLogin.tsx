@@ -3,22 +3,31 @@ import { Form, Input, Button, Typography, Checkbox, Divider } from "antd";
 import { UserOutlined, LockOutlined } from "@ant-design/icons";
 import { Link } from "react-router-dom";
 import { ROUTES } from "@/common/constants";
+import LoginTypeSelector, { LoginType } from "./LoginTypeSelector";
 
 const { Title, Text } = Typography;
 
 interface StudentLoginProps {
   className?: string;
+  onTypeChange: (type: LoginType) => void;
 }
 
-const StudentLogin: React.FC<StudentLoginProps> = ({ className = "" }) => {
+const StudentLogin: React.FC<StudentLoginProps> = ({
+  className = "",
+  onTypeChange,
+}) => {
   const onFinish = (values: any) => {
     console.log("Student login values:", values);
     // Handle student login logic here
   };
 
   return (
-    <div className={`p-8 ${className}`}>
-      <Title level={2} className="mb-6 text-center">
+    <div className={`p-6 flex flex-col ${className}`}>
+      <div className="mb-6 glass-login-selector mx-auto">
+        <LoginTypeSelector selectedType="student" onChange={onTypeChange} />
+      </div>
+
+      <Title level={2} className="mb-6 text-center text-blue-700">
         Student Login
       </Title>
 
@@ -28,7 +37,7 @@ const StudentLogin: React.FC<StudentLoginProps> = ({ className = "" }) => {
         onFinish={onFinish}
         layout="vertical"
         size="large"
-        className="max-w-md mx-auto"
+        className="max-w-md mx-auto w-full"
       >
         <Form.Item
           name="email"

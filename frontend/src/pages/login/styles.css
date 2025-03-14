@@ -11,17 +11,30 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
+/* Glassmorphism effects */
+.glass-login-selector {
+  backdrop-filter: blur(8px);
+  background-color: rgba(255, 255, 255, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
 /* Login Panel Animations */
 .login-panel {
   transition: all 0.6s cubic-bezier(0.68, -0.55, 0.27, 1.55);
   position: relative;
   transform-origin: left center;
+  display: flex;
+  flex-direction: column;
 }
 
 .login-form {
   transition: all 0.6s cubic-bezier(0.68, -0.55, 0.27, 1.55);
   position: relative;
   transform-origin: right center;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Student Login Animation */
@@ -103,6 +116,11 @@
     transform: translateX(100%) scale(0.8);
     opacity: 0;
   }
+}
+
+/* Fix for height issues */
+.ant-layout, .ant-layout-content {
+  height: 100%;
 }
 
 /* Responsive Adjustments */

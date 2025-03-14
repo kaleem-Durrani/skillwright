@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import LoginTypeSelector, { LoginType } from "./components/LoginTypeSelector";
+import { LoginType } from "./components/LoginTypeSelector";
 import {
   StudentLogin,
   TeacherLogin,
@@ -32,7 +32,7 @@ const Login: React.FC = () => {
     }
   }, [isAnimating, prevLoginType]);
 
-  // Handle login type change with animation
+  // Handle login type change
   const handleLoginTypeChange = (type: LoginType) => {
     if (type !== loginType && !isAnimating) {
       setIsAnimating(true);
@@ -64,11 +64,29 @@ const Login: React.FC = () => {
   const getLoginComponent = () => {
     switch (loginType) {
       case "student":
-        return <StudentLogin key="student-login" className="h-full" />;
+        return (
+          <StudentLogin
+            key="student-login"
+            className="h-full"
+            onTypeChange={handleLoginTypeChange}
+          />
+        );
       case "teacher":
-        return <TeacherLogin key="teacher-login" className="h-full" />;
+        return (
+          <TeacherLogin
+            key="teacher-login"
+            className="h-full"
+            onTypeChange={handleLoginTypeChange}
+          />
+        );
       case "admin":
-        return <AdminLogin key="admin-login" className="h-full" />;
+        return (
+          <AdminLogin
+            key="admin-login"
+            className="h-full"
+            onTypeChange={handleLoginTypeChange}
+          />
+        );
     }
   };
 
@@ -76,40 +94,33 @@ const Login: React.FC = () => {
   const getGradient = () => {
     switch (loginType) {
       case "student":
-        return "from-blue-600 to-purple-600";
+        return "from-blue-600/80 to-purple-600/20";
       case "teacher":
-        return "from-green-600 to-teal-600";
+        return "from-green-600/80 to-teal-600/20";
       case "admin":
-        return "from-indigo-600 to-blue-800";
+        return "from-indigo-600/80 to-blue-800/20";
     }
   };
 
   return (
-    <div className=" flex flex-col items-center justify-center p-4">
-      <div className="w-full max-w-6xl">
-        <LoginTypeSelector
-          selectedType={loginType}
-          onChange={handleLoginTypeChange}
-        />
+    <div className="flex items-center justify-center w-full h-full py-4">
+      <div className="w-full overflow-clip h-auto  flex flex-col lg:flex-row items-stretch justify-between gap-6 lg:gap-10">
+        <div
+          ref={panelRef}
+          className={`login-panel  login-panel-${loginType} w-full lg:w-5/12 h-auto lg:h-[600px] bg-gradient-to-br ${getGradient()} rounded-2xl lg:rounded-l-none backdrop-blur-md border border-white/20 shadow-xl overflow-hidden`}
+        >
+          <InfoPanel
+            key={`info-panel-${loginType}`}
+            type={loginType}
+            className="h-full"
+          />
+        </div>
 
-        <div className="flex flex-col lg:flex-row w-full rounded-xl overflow-hidden">
-          <div
-            ref={panelRef}
-            className={`login-panel login-panel-${loginType} w-full lg:w-1/2 bg-gradient-to-br ${getGradient()} rounded-t-xl lg:rounded-tr-none lg:rounded-l-xl`}
-          >
-            <InfoPanel
-              key={`info-panel-${loginType}`}
-              type={loginType}
-              className="h-full"
-            />
-          </div>
-
-          <div
-            ref={formRef}
-            className={`login-form login-form-${loginType} w-full lg:w-1/2 bg-white rounded-b-xl lg:rounded-bl-none lg:rounded-r-xl`}
-          >
-            {getLoginComponent()}
-          </div>
+        <div
+          ref={formRef}
+          className={`login-form login-form-${loginType} w-full lg:w-5/12 h-auto lg:h-[600px] bg-white/50 backdrop-blur-md rounded-2xl lg:rounded-r-none border border-white/20 shadow-xl overflow-auto`}
+        >
+          {getLoginComponent()}
         </div>
       </div>
     </div>
