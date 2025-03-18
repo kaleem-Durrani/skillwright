@@ -104,7 +104,7 @@ const Login: React.FC = () => {
 
   return (
     <div className="flex items-center justify-center w-full h-full py-4">
-      <div className="w-full overflow-clip h-auto  flex flex-col lg:flex-row items-stretch justify-between gap-6 lg:gap-10">
+      <div className="w-full h-auto overflow-clip flex flex-col lg:flex-row items-stretch justify-between gap-6 lg:gap-10">
         <div
           ref={panelRef}
           className={`login-panel  login-panel-${loginType} w-full lg:w-5/12 h-auto lg:h-[600px] bg-gradient-to-br ${getGradient()} rounded-2xl lg:rounded-l-none backdrop-blur-md border border-white/20 shadow-xl overflow-hidden`}

@@ -138,13 +138,5 @@ html {
   @apply bg-white/20 backdrop-blur-sm text-white hover:bg-white/30 border-white/30 shadow-md;
 }
 
-/* Fix for height issues */
-html, body, #root {
-  height: 100%;
-}
-
-.ant-layout, .ant-layout-content {
-  min-height: 100%;
-}
 
 

@@ -15,7 +15,7 @@ const LoginTypeSelector: React.FC<LoginTypeSelectorProps> = ({
   onChange,
 }) => {
   return (
-    <div className="flex flex-col items-center py-3 px-4 rounded-xl backdrop-blur-md bg-white/30 border border-white/40 shadow-md">
+    <div className=" flex flex-col items-center py-3 px-4 rounded-xl bg-white/10 border border-white/40 shadow-md backdrop-blur-md">
       <Text className="text-lg mb-2 font-medium text-gray-800">
         Select User Type
       </Text>
@@ -27,7 +27,7 @@ const LoginTypeSelector: React.FC<LoginTypeSelectorProps> = ({
       >
         <Radio.Button
           value="student"
-          className={`px-6 py-1 ${
+          className={` ${
             selectedType === "student" ? "bg-blue-600 text-white" : ""
           }`}
         >
@@ -35,7 +35,7 @@ const LoginTypeSelector: React.FC<LoginTypeSelectorProps> = ({
         </Radio.Button>
         <Radio.Button
           value="teacher"
-          className={`px-6 py-1 ${
+          className={` ${
             selectedType === "teacher" ? "bg-green-600 text-white" : ""
           }`}
         >
@@ -43,7 +43,7 @@ const LoginTypeSelector: React.FC<LoginTypeSelectorProps> = ({
         </Radio.Button>
         <Radio.Button
           value="admin"
-          className={`px-6 py-1 ${
+          className={` ${
             selectedType === "admin" ? "bg-indigo-600 text-white" : ""
           }`}
         >

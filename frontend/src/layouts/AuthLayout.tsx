@@ -88,7 +88,7 @@ const AuthLayout = () => {
   }, []);
 
   return (
-    <Layout className="min-h-screen">
+    <Layout className="min-h-screen ">
       {/* Background Image */}
       <div className="fixed inset-0 z-0">
         <div className="absolute inset-0 bg-gradient-to-br from-blue-600 to-purple-700"></div>

@@ -4,3 +4,8 @@ node_modules
 issues.txt
 create-pages.js
 navigationDesignGuide.txt
+diagrams.txt
+sequence_diagrams.txt
+use_case_diagrams.txt
+component_diagram.txt
+system_context_diagram.txt
