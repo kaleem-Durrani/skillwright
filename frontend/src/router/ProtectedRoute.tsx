@@ -9,6 +9,9 @@ interface ProtectedRouteProps {
   requiresVerification?: boolean;
 }
 
+// command for checking the mock authentication
+// localStorage.setItem('user', JSON.stringify({ id: '1', name: 'Test User', userType: 'admin' }));
+
 // Mock authentication - replace with actual auth logic later
 const useAuth = () => {
   // This is a placeholder. In a real app, you would use a context or hook to get the user's auth state
