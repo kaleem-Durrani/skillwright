@@ -10,6 +10,7 @@ import {
   BellOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
+import { LogoutButton } from "@/components/common";
 
 const { Header, Sider, Content } = Layout;
 const { Title, Text } = Typography;
@@ -39,7 +40,7 @@ const AppLayout = () => {
     {
       key: "logout",
       icon: <LogoutOutlined />,
-      label: "Logout",
+      label: <LogoutButton type="text" icon={false} />,
     },
   ];
 

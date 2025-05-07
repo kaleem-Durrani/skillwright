@@ -2,12 +2,11 @@ import { Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import { validationResult } from "express-validator";
 import asyncHandler from "../middleware/asyncHandler.js";
-import prisma from "../db/prisma.js";
-import { sendEmail } from "../utils/sendEmail.js";
+import { sendEmail, sendVerificationEmail, sendPasswordResetEmail, sendWelcomeEmail } from "../utils/sendEmail.js";
 import { generateOTP } from "../utils/generateOTP.js";
 import { ValidationError, NotFoundError, ForbiddenError, AuthenticationError } from "../utils/customErrors.js";
 import { parseValidationErrors } from "../utils/validationErrorParser.js";
-import { generateAccessToken, generateRefreshToken, storeRefreshToken, deleteAllRefreshTokens, clearTokens, setTokens } from "../utils/tokenUtils.js";
+import { generateAccessToken, generateRefreshToken, clearTokens, setTokens } from "../utils/tokenUtils.js";
 import { withTransaction } from "../utils/transactionUtils.js";
 
 // @desc    Register a new student
@@ -70,10 +69,10 @@ export const signupStudent = asyncHandler(async (req: Request, res: Response) =>
     });
 
     // Send OTP email
-    await sendEmail(
+    await sendVerificationEmail(
       email,
-      "Verify Your Email - Millat Vocational Training",
-      `Your verification code is: ${otp}\nThis code will expire in 15 minutes.`
+      otp,
+      name
     );
 
     // Generate tokens
@@ -126,35 +125,53 @@ export const loginStudent = asyncHandler(async (req: Request, res: Response) => 
 
   const { email, password } = req.body;
 
-  // Find student by email
-  const student = await prisma.student.findUnique({
-    where: { email },
+  // Use transaction utility for the entire process
+  const result = await withTransaction(async (tx) => {
+    // Find student by email
+    const student = await tx.student.findUnique({
+      where: { email },
+    });
+
+    if (!student) {
+      throw new AuthenticationError("Invalid credentials");
+    }
+
+    // Check if student is banned
+    if (student.isBanned) {
+      throw new AuthenticationError("Your account has been banned");
+    }
+
+    // Check password
+    const isMatch = await bcrypt.compare(password, student.password);
+    if (!isMatch) {
+      throw new AuthenticationError("Invalid credentials");
+    }
+
+    // Generate tokens
+    const accessToken = generateAccessToken(student.id, 'student');
+    const refreshToken = generateRefreshToken();
+
+    // Store refresh token in database
+    await tx.refreshToken.create({
+      data: {
+        token: refreshToken,
+        studentId: student.id,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+      },
+    });
+
+    return {
+      student,
+      accessToken,
+      refreshToken
+    };
   });
 
-  if (!student) {
-    throw new AuthenticationError("Invalid credentials");
-  }
+  // Set tokens in cookies (this has to be outside the transaction as it modifies the response)
+  setTokens(res, result.accessToken, result.refreshToken);
 
-  // Check if student is banned
-  if (student.isBanned) {
-    throw new AuthenticationError("Your account has been banned");
-  }
-
-  // Check password
-  const isMatch = await bcrypt.compare(password, student.password);
-  if (!isMatch) {
-    throw new AuthenticationError("Invalid credentials");
-  }
-
-  // Generate tokens
-  const accessToken = generateAccessToken(student.id, 'student');
-  const refreshToken = generateRefreshToken();
-
-  // Store refresh token in database
-  await storeRefreshToken(refreshToken, student.id, 'student');
-
-  // Set tokens in cookies
-  setTokens(res, accessToken, refreshToken);
+  // Extract student from result
+  const student = result.student;
 
   res.status(200).json({
     success: true,
@@ -175,17 +192,17 @@ export const loginStudent = asyncHandler(async (req: Request, res: Response) => 
 export const logoutStudent = asyncHandler(async (req: Request, res: Response) => {
   const refreshToken = req.cookies.refreshToken;
 
-  // Delete refresh token from database if it exists
-  if (refreshToken && req.student?.id) {
-    try {
-      await deleteAllRefreshTokens(req.student.id, 'student');
-    } catch (error) {
-      // Continue even if token deletion fails
-      console.error("Error deleting refresh token:", error);
+  // Use transaction utility
+  await withTransaction(async (tx) => {
+    // Delete refresh token from database if it exists
+    if (refreshToken && req.student?.id) {
+      await tx.refreshToken.deleteMany({
+        where: { studentId: req.student.id }
+      });
     }
-  }
+  });
 
-  // Clear cookies
+  // Clear cookies (outside transaction as it modifies the response)
   clearTokens(res);
 
   res.status(200).json({
@@ -301,10 +318,10 @@ export const resendOtp = asyncHandler(async (req: Request, res: Response) => {
     });
 
     // Send OTP email inside transaction
-    await sendEmail(
+    await sendVerificationEmail(
       email,
-      "Verify Your Email - Millat Vocational Training",
-      `Your verification code is: ${otp}\nThis code will expire in 15 minutes.`
+      otp,
+      student.name
     );
   });
 
@@ -353,10 +370,10 @@ export const forgotPassword = asyncHandler(async (req: Request, res: Response) =
     });
 
     // Send OTP email inside transaction
-    await sendEmail(
+    await sendPasswordResetEmail(
       email,
-      "Reset Password - Millat Vocational Training",
-      `Your password reset code is: ${otp}\nThis code will expire in 15 minutes.`
+      otp,
+      student.name
     );
   });
 

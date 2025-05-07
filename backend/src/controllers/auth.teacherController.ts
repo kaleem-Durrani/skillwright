@@ -2,19 +2,17 @@ import { Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import { validationResult } from "express-validator";
 import asyncHandler from "../middleware/asyncHandler.js";
-import prisma from "../db/prisma.js";
-import { sendEmail } from "../utils/sendEmail.js";
+import { sendEmail, sendVerificationEmail, sendPasswordResetEmail, sendWelcomeEmail } from "../utils/sendEmail.js";
 import { generateOTP } from "../utils/generateOTP.js";
-import { ValidationError, NotFoundError, ForbiddenError, AuthenticationError } from "../utils/customErrors.js";
+import { ValidationError, NotFoundError, AuthenticationError } from "../utils/customErrors.js";
 import { parseValidationErrors } from "../utils/validationErrorParser.js";
-import { 
-  generateAccessToken, 
-  generateRefreshToken, 
-  storeRefreshToken, 
+import {
+  generateAccessToken,
+  generateRefreshToken,
   setTokens,
-  clearTokens,
-  deleteAllRefreshTokens
+  clearTokens
 } from "../utils/tokenUtils.js";
+import { withTransaction } from "../utils/transactionUtils.js";
 
 // @desc    Register a new teacher
 // @route   POST /api/auth/teacher/signup
@@ -31,8 +29,8 @@ export const signupTeacher = asyncHandler(async (req: Request, res: Response) =>
   const otp = generateOTP();
   const otpExpiry = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
 
-  // Start transaction
-  const teacher = await prisma.$transaction(async (tx) => {
+  // Use transaction utility for the entire process
+  const result = await withTransaction(async (tx) => {
     // Check if teacher already exists
     const teacherExists = await tx.teacher.findUnique({
       where: { email },
@@ -60,7 +58,7 @@ export const signupTeacher = asyncHandler(async (req: Request, res: Response) =>
     const hashedPassword = await bcrypt.hash(password, salt);
 
     // Create teacher
-    return await tx.teacher.create({
+    const newTeacher = await tx.teacher.create({
       data: {
         email,
         password: hashedPassword,
@@ -73,24 +71,39 @@ export const signupTeacher = asyncHandler(async (req: Request, res: Response) =>
         otpExpiry,
       },
     });
+
+    // Send OTP email
+    await sendVerificationEmail(
+      email,
+      otp,
+      name
+    );
+
+    // Generate tokens
+    const accessToken = generateAccessToken(newTeacher.id, 'teacher');
+    const refreshToken = generateRefreshToken();
+
+    // Store refresh token in database
+    await tx.refreshToken.create({
+      data: {
+        token: refreshToken,
+        teacherId: newTeacher.id,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+      },
+    });
+
+    return {
+      teacher: newTeacher,
+      accessToken,
+      refreshToken
+    };
   });
 
-  // Send OTP email
-  await sendEmail(
-    email,
-    "Verify Your Email - Millat Vocational Training",
-    `Your verification code is: ${otp}\nThis code will expire in 15 minutes.`
-  );
+  // Set tokens in cookies (this has to be outside the transaction as it modifies the response)
+  setTokens(res, result.accessToken, result.refreshToken);
 
-  // Generate tokens
-  const accessToken = generateAccessToken(teacher.id, 'teacher');
-  const refreshToken = generateRefreshToken();
-
-  // Store refresh token in database
-  await storeRefreshToken(refreshToken, teacher.id, 'teacher');
-
-  // Set tokens in cookies
-  setTokens(res, accessToken, refreshToken);
+  // Extract teacher from result
+  const teacher = result.teacher;
 
   res.status(201).json({
     success: true,
@@ -116,35 +129,53 @@ export const loginTeacher = asyncHandler(async (req: Request, res: Response) => 
 
   const { email, password } = req.body;
 
-  // Find teacher by email
-  const teacher = await prisma.teacher.findUnique({
-    where: { email },
+  // Use transaction utility for the entire process
+  const result = await withTransaction(async (tx) => {
+    // Find teacher by email
+    const teacher = await tx.teacher.findUnique({
+      where: { email },
+    });
+
+    if (!teacher) {
+      throw new AuthenticationError("Invalid credentials");
+    }
+
+    // Check if teacher is banned
+    if (teacher.isBanned) {
+      throw new AuthenticationError("Your account has been banned");
+    }
+
+    // Check password
+    const isMatch = await bcrypt.compare(password, teacher.password);
+    if (!isMatch) {
+      throw new AuthenticationError("Invalid credentials");
+    }
+
+    // Generate tokens
+    const accessToken = generateAccessToken(teacher.id, 'teacher');
+    const refreshToken = generateRefreshToken();
+
+    // Store refresh token in database
+    await tx.refreshToken.create({
+      data: {
+        token: refreshToken,
+        teacherId: teacher.id,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+      },
+    });
+
+    return {
+      teacher,
+      accessToken,
+      refreshToken
+    };
   });
 
-  if (!teacher) {
-    throw new AuthenticationError("Invalid credentials");
-  }
+  // Set tokens in cookies (this has to be outside the transaction as it modifies the response)
+  setTokens(res, result.accessToken, result.refreshToken);
 
-  // Check if teacher is banned
-  if (teacher.isBanned) {
-    throw new AuthenticationError("Your account has been banned");
-  }
-
-  // Check password
-  const isMatch = await bcrypt.compare(password, teacher.password);
-  if (!isMatch) {
-    throw new AuthenticationError("Invalid credentials");
-  }
-
-  // Generate tokens
-  const accessToken = generateAccessToken(teacher.id, 'teacher');
-  const refreshToken = generateRefreshToken();
-
-  // Store refresh token in database
-  await storeRefreshToken(refreshToken, teacher.id, 'teacher');
-
-  // Set tokens in cookies
-  setTokens(res, accessToken, refreshToken);
+  // Extract teacher from result
+  const teacher = result.teacher;
 
   res.status(200).json({
     success: true,
@@ -164,18 +195,18 @@ export const loginTeacher = asyncHandler(async (req: Request, res: Response) => 
 // @access  Private
 export const logoutTeacher = asyncHandler(async (req: Request, res: Response) => {
   const refreshToken = req.cookies.refreshToken;
-  
-  // Delete refresh token from database if it exists
-  if (refreshToken && req.teacher?.id) {
-    try {
-      await deleteAllRefreshTokens(req.teacher.id, 'teacher');
-    } catch (error) {
-      // Continue even if token deletion fails
-      console.error("Error deleting refresh token:", error);
+
+  // Use transaction utility
+  await withTransaction(async (tx) => {
+    // Delete refresh token from database if it exists
+    if (refreshToken && req.teacher?.id) {
+      await tx.refreshToken.deleteMany({
+        where: { teacherId: req.teacher.id }
+      });
     }
-  }
-  
-  // Clear cookies
+  });
+
+  // Clear cookies (outside transaction as it modifies the response)
   clearTokens(res);
 
   res.status(200).json({
@@ -196,8 +227,8 @@ export const verifyOtp = asyncHandler(async (req: Request, res: Response) => {
 
   const { email, otp } = req.body;
 
-  // Start transaction
-  await prisma.$transaction(async (tx) => {
+  // Use transaction utility
+  await withTransaction(async (tx) => {
     const teacher = await tx.teacher.findUnique({
       where: { email },
     });
@@ -259,8 +290,8 @@ export const resendOtp = asyncHandler(async (req: Request, res: Response) => {
   const otp = generateOTP();
   const otpExpiry = new Date(Date.now() + 15 * 60 * 1000);
 
-  // Start transaction
-  const teacher = await prisma.$transaction(async (tx) => {
+  // Use transaction utility
+  await withTransaction(async (tx) => {
     const teacher = await tx.teacher.findUnique({
       where: { email },
     });
@@ -275,21 +306,21 @@ export const resendOtp = asyncHandler(async (req: Request, res: Response) => {
       });
     }
 
-    return await tx.teacher.update({
+    await tx.teacher.update({
       where: { email },
       data: {
         otp,
         otpExpiry,
       },
     });
-  });
 
-  // Send OTP email
-  await sendEmail(
-    email,
-    "Verify Your Email - Millat Vocational Training",
-    `Your verification code is: ${otp}\nThis code will expire in 15 minutes.`
-  );
+    // Send OTP email inside transaction
+    await sendVerificationEmail(
+      email,
+      otp,
+      teacher.name
+    );
+  });
 
   res.status(200).json({
     success: true,
@@ -312,7 +343,7 @@ export const forgotPassword = asyncHandler(async (req: Request, res: Response) =
   const otp = generateOTP();
   const otpExpiry = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
 
-  await prisma.$transaction(async (tx) => {
+  await withTransaction(async (tx) => {
     // Check if teacher exists
     const teacher = await tx.teacher.findUnique({
       where: { email },
@@ -332,10 +363,10 @@ export const forgotPassword = asyncHandler(async (req: Request, res: Response) =
     });
 
     // Send OTP to teacher's email
-    await sendEmail(
+    await sendPasswordResetEmail(
       email,
-      "Password Reset OTP",
-      `Your OTP for password reset is ${otp}. It will expire in 15 minutes.`
+      otp,
+      teacher.name
     );
   });
 
@@ -357,7 +388,7 @@ export const resetPassword = asyncHandler(async (req: Request, res: Response) =>
 
   const { email, otp, password } = req.body;
 
-  await prisma.$transaction(async (tx) => {
+  await withTransaction(async (tx) => {
     // Check if teacher exists
     const teacher = await tx.teacher.findUnique({
       where: { email },

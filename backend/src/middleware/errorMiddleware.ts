@@ -34,7 +34,7 @@ const errorHandler = (err: any, req: Request, res: Response, next: NextFunction)
     };
   }
 
-  console.log(statusCode)
+  console.log(statusCode);
   console.log(response);
 
   res.status(statusCode).json(response);

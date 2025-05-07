@@ -1,4 +1,4 @@
-import prisma from '../db/prisma';
+import prisma from '../db/prisma.js'
 import { PrismaClient, Prisma } from '@prisma/client';
 
 /**
@@ -54,9 +54,15 @@ export const withTransaction = async <T>(
  *   }
  * );
  */
+
+
+type TransactionOptions = Parameters<
+  PrismaClient['$transaction']
+>[1];
+
 export const withTransactionOptions = async <T>(
   callback: (tx: Prisma.TransactionClient) => Promise<T>,
-  options: Prisma.TransactionOptions
+  options: TransactionOptions
 ): Promise<T> => {
   return await prisma.$transaction(async (tx) => {
     return await callback(tx);
