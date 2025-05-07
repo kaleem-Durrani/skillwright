@@ -1,4 +1,4 @@
-export const API_BASE_URL = '/api';
+export const API_BASE_URL = 'http://localhost:5000/api';
 
 export const API_ENDPOINTS = {
   AUTH: {
@@ -27,19 +27,19 @@ export const API_ENDPOINTS = {
     },
     REFRESH: '/auth/refresh',
   },
-  
+
   ADMIN: {
     PROFILE: '/admin/profile',
     TEACHERS: '/admin/teachers',
     TEACHERS_BY_ID: (id: string) => `/admin/teachers/${id}`,
     TOGGLE_TEACHER_BAN: (id: string) => `/admin/teachers/${id}/ban`,
     DELETE_TEACHER: (id: string) => `/admin/teachers/${id}`,
-    
+
     STUDENTS: '/admin/students',
     STUDENTS_BY_ID: (id: string) => `/admin/students/${id}`,
     TOGGLE_STUDENT_BAN: (id: string) => `/admin/students/${id}/ban`,
     DELETE_STUDENT: (id: string) => `/admin/students/${id}`,
-    
+
     NEWS_EVENTS: '/admin/news-events',
     NEWS_EVENTS_BY_ID: (id: string) => `/admin/news-events/${id}`,
     TOGGLE_NEWS_EVENT_PUBLISH: (id: string) => `/admin/news-events/${id}/publish`,
@@ -51,9 +51,9 @@ export const API_ENDPOINTS = {
     COURSE_DETAILS: (id: string) => `/teacher/courses/${id}`,
     COURSE_STUDENTS: (id: string) => `/teacher/courses/${id}/students`,
     COURSE_RESOURCES: (id: string) => `/teacher/courses/${id}/resources`,
-    UPDATE_ENROLLMENT: (courseId: string, enrollmentId: string) => 
+    UPDATE_ENROLLMENT: (courseId: string, enrollmentId: string) =>
       `/teacher/courses/${courseId}/enrollments/${enrollmentId}`,
-    
+
     RESOURCES: '/teacher/resources',
     RESOURCE_BY_ID: (id: string) => `/teacher/resources/${id}`,
     RESOURCE_COMMENTS: (id: string) => `/teacher/resources/${id}/comments`,
@@ -68,15 +68,15 @@ export const API_ENDPOINTS = {
     COURSE_RESOURCES: (id: string) => `/student/courses/${id}/resources`,
     ENROLL_COURSE: (id: string) => `/student/courses/${id}/enroll`,
     WITHDRAW_COURSE: (id: string) => `/student/courses/${id}/withdraw`,
-    
+
     RESOURCE_COMMENTS: (resourceId: string) => `/student/resources/${resourceId}/comments`,
     UPDATE_COMMENT: (commentId: string) => `/student/resources/comments/${commentId}`,
     DELETE_COMMENT: (commentId: string) => `/student/resources/comments/${commentId}`,
   },
 
   DEPARTMENTS: {
-    LIST: '/departments',
-    BY_ID: (id: string) => `/departments/${id}`,
+    LIST: '/department',
+    BY_ID: (id: string) => `/department/${id}`,
   },
 
   COURSES: {
@@ -124,4 +124,4 @@ export const API_ENDPOINTS = {
     UPDATE_TEACHER_COMMENT: (commentId: string) => `/news/comments/${commentId}/teacher`,
     DELETE_TEACHER_COMMENT: (commentId: string) => `/news/comments/${commentId}/teacher`,
   },
-}; 
+};

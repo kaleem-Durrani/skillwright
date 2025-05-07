@@ -8,6 +8,7 @@ import { generateOTP } from "../utils/generateOTP.js";
 import { ValidationError, NotFoundError, ForbiddenError, AuthenticationError } from "../utils/customErrors.js";
 import { parseValidationErrors } from "../utils/validationErrorParser.js";
 import { generateAccessToken, generateRefreshToken, storeRefreshToken, deleteAllRefreshTokens, clearTokens, setTokens } from "../utils/tokenUtils.js";
+import { withTransaction } from "../utils/transactionUtils.js";
 
 // @desc    Register a new student
 // @route   POST /api/auth/student/signup
@@ -24,8 +25,8 @@ export const signupStudent = asyncHandler(async (req: Request, res: Response) =>
   const otp = generateOTP();
   const otpExpiry = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
 
-  // Start transaction
-  const student = await prisma.$transaction(async (tx) => {
+  // Use transaction utility for the entire process
+  const result = await withTransaction(async (tx) => {
     // Check if student already exists
     const studentExists = await tx.student.findFirst({
       where: {
@@ -55,7 +56,7 @@ export const signupStudent = asyncHandler(async (req: Request, res: Response) =>
     const hashedPassword = await bcrypt.hash(password, salt);
 
     // Create student
-    return await tx.student.create({
+    const newStudent = await tx.student.create({
       data: {
         email,
         password: hashedPassword,
@@ -67,24 +68,39 @@ export const signupStudent = asyncHandler(async (req: Request, res: Response) =>
         otpExpiry,
       },
     });
+
+    // Send OTP email
+    await sendEmail(
+      email,
+      "Verify Your Email - Millat Vocational Training",
+      `Your verification code is: ${otp}\nThis code will expire in 15 minutes.`
+    );
+
+    // Generate tokens
+    const accessToken = generateAccessToken(newStudent.id, 'student');
+    const refreshToken = generateRefreshToken();
+
+    // Store refresh token in database
+    await tx.refreshToken.create({
+      data: {
+        token: refreshToken,
+        studentId: newStudent.id,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+      },
+    });
+
+    return {
+      student: newStudent,
+      accessToken,
+      refreshToken
+    };
   });
 
-  // Send OTP email
-  await sendEmail(
-    email,
-    "Verify Your Email - Millat Vocational Training",
-    `Your verification code is: ${otp}\nThis code will expire in 15 minutes.`
-  );
+  // Set tokens in cookies (this has to be outside the transaction as it modifies the response)
+  setTokens(res, result.accessToken, result.refreshToken);
 
-  // Generate tokens
-  const accessToken = generateAccessToken(student.id, 'student');
-  const refreshToken = generateRefreshToken();
-
-  // Store refresh token in database
-  await storeRefreshToken(refreshToken, student.id, 'student');
-
-  // Set tokens in cookies
-  setTokens(res, accessToken, refreshToken);
+  // Extract student from result
+  const student = result.student;
 
   res.status(201).json({
     success: true,
@@ -158,7 +174,7 @@ export const loginStudent = asyncHandler(async (req: Request, res: Response) => 
 // @access  Private
 export const logoutStudent = asyncHandler(async (req: Request, res: Response) => {
   const refreshToken = req.cookies.refreshToken;
-  
+
   // Delete refresh token from database if it exists
   if (refreshToken && req.student?.id) {
     try {
@@ -168,7 +184,7 @@ export const logoutStudent = asyncHandler(async (req: Request, res: Response) =>
       console.error("Error deleting refresh token:", error);
     }
   }
-  
+
   // Clear cookies
   clearTokens(res);
 
@@ -190,8 +206,8 @@ export const verifyOtp = asyncHandler(async (req: Request, res: Response) => {
 
   const { email, otp } = req.body;
 
-  // Start transaction
-  await prisma.$transaction(async (tx) => {
+  // Use transaction utility
+  await withTransaction(async (tx) => {
     const student = await tx.student.findUnique({
       where: { email },
     });
@@ -254,8 +270,8 @@ export const resendOtp = asyncHandler(async (req: Request, res: Response) => {
   const otp = generateOTP();
   const otpExpiry = new Date(Date.now() + 15 * 60 * 1000);
 
-  // Start transaction
-  const student = await prisma.$transaction(async (tx) => {
+  // Use transaction utility
+  await withTransaction(async (tx) => {
     const student = await tx.student.findUnique({
       where: { email },
     });
@@ -276,20 +292,21 @@ export const resendOtp = asyncHandler(async (req: Request, res: Response) => {
       });
     }
 
-    return await tx.student.update({
+    await tx.student.update({
       where: { email },
       data: {
         otp,
         otpExpiry,
       },
     });
-  });
 
-  await sendEmail(
-    email,
-    "Verify Your Email - Millat Vocational Training",
-    `Your verification code is: ${otp}\nThis code will expire in 15 minutes.`
-  );
+    // Send OTP email inside transaction
+    await sendEmail(
+      email,
+      "Verify Your Email - Millat Vocational Training",
+      `Your verification code is: ${otp}\nThis code will expire in 15 minutes.`
+    );
+  });
 
   res.status(200).json({
     success: true,
@@ -311,8 +328,8 @@ export const forgotPassword = asyncHandler(async (req: Request, res: Response) =
   const otp = generateOTP();
   const otpExpiry = new Date(Date.now() + 15 * 60 * 1000);
 
-  // Start transaction
-  const student = await prisma.$transaction(async (tx) => {
+  // Use transaction utility
+  await withTransaction(async (tx) => {
     const student = await tx.student.findUnique({
       where: { email },
     });
@@ -327,20 +344,21 @@ export const forgotPassword = asyncHandler(async (req: Request, res: Response) =
       });
     }
 
-    return await tx.student.update({
+    await tx.student.update({
       where: { email },
       data: {
         otp,
         otpExpiry,
       },
     });
-  });
 
-  await sendEmail(
-    email,
-    "Reset Password - Millat Vocational Training",
-    `Your password reset code is: ${otp}\nThis code will expire in 15 minutes.`
-  );
+    // Send OTP email inside transaction
+    await sendEmail(
+      email,
+      "Reset Password - Millat Vocational Training",
+      `Your password reset code is: ${otp}\nThis code will expire in 15 minutes.`
+    );
+  });
 
   res.status(200).json({
     success: true,
@@ -360,8 +378,8 @@ export const resetPassword = asyncHandler(async (req: Request, res: Response) =>
 
   const { email, otp, newPassword } = req.body;
 
-  // Start transaction
-  await prisma.$transaction(async (tx) => {
+  // Use transaction utility
+  await withTransaction(async (tx) => {
     const student = await tx.student.findUnique({
       where: { email },
     });

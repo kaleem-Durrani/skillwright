@@ -1,6 +1,7 @@
 import express from "express";
 import dotenv from "dotenv";
 import cookieParser from "cookie-parser";
+import cors from "cors";
 
 import { notFound, errorHandler } from "./middleware/errorMiddleware.js";
 
@@ -27,7 +28,15 @@ app.use(express.json());
 // app.use(express.urlencoded({extended:true}));
 app.use(cookieParser());
 
-// app.use(cors());
+app.use((req, res, next) => {
+	console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
+	next();
+  });
+
+app.use(cors({
+	origin: "http://localhost:5173",
+	credentials: true,
+}));
 
 app.use("/api/auth/admin", authAdminRouter);
 app.use("/api/auth/student", authStudentRouter);

@@ -14,13 +14,13 @@ export const getAllDepartments = asyncHandler(async (req: Request, res: Response
       id: true,
       name: true,
       description: true,
-      _count: {
-        select: {
-          teachers: true,
-          students: true,
-          courses: true,
-        },
-      },
+      // _count: {
+      //   select: {
+      //     teachers: true,
+      //     students: true,
+      //     courses: true,
+      //   },
+      // },
     },
   });
 

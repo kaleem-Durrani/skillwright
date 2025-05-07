@@ -1,9 +1,19 @@
 import React from "react";
-import { Form, Input, Button, Typography, Checkbox, Divider } from "antd";
+import {
+  Form,
+  Input,
+  Button,
+  Typography,
+  Checkbox,
+  Divider,
+  notification,
+} from "antd";
 import { UserOutlined, LockOutlined } from "@ant-design/icons";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { ROUTES } from "@/common/constants";
 import LoginTypeSelector, { LoginType } from "./LoginTypeSelector";
+import { useAuthQuery } from "@/hooks";
+import { LoginCredentials } from "@/common/types";
 
 const { Title, Text } = Typography;
 
@@ -16,9 +26,41 @@ const TeacherLogin: React.FC<TeacherLoginProps> = ({
   className = "",
   onTypeChange,
 }) => {
-  const onFinish = (values: any) => {
-    console.log("Teacher login values:", values);
-    // Handle teacher login logic here
+  const navigate = useNavigate();
+  const { teacherLoginMutation } = useAuthQuery();
+  const [form] = Form.useForm();
+
+  const onFinish = async (values: LoginCredentials) => {
+    try {
+      const response = await teacherLoginMutation.mutateAsync(values);
+
+      if (response?.data?.success) {
+        // Store user data in localStorage
+        const userData = response.data.data;
+        localStorage.setItem("user", JSON.stringify(userData));
+
+        // Show success notification
+        notification.success({
+          message: "Login Successful",
+          description: "Welcome back to the platform!",
+        });
+
+        // Redirect based on verification status
+        if (userData?.isVerified) {
+          navigate(ROUTES.TEACHER.DASHBOARD);
+        } else {
+          navigate(ROUTES.VERIFY_EMAIL);
+        }
+      }
+    } catch (error: any) {
+      // Handle error
+      notification.error({
+        message: "Login Failed",
+        description:
+          error?.response?.data?.message ||
+          "Please check your credentials and try again",
+      });
+    }
   };
 
   return (
@@ -32,6 +74,7 @@ const TeacherLogin: React.FC<TeacherLoginProps> = ({
       </Title>
 
       <Form
+        form={form}
         name="teacher_login"
         initialValues={{ remember: true }}
         onFinish={onFinish}
@@ -82,9 +125,10 @@ const TeacherLogin: React.FC<TeacherLoginProps> = ({
           <Button
             type="primary"
             htmlType="submit"
+            loading={teacherLoginMutation.isPending}
             className="w-full rounded-lg h-12 text-lg bg-green-600 hover:bg-green-700 border-green-600"
           >
-            Log in
+            {teacherLoginMutation.isPending ? "Logging in..." : "Log in"}
           </Button>
         </Form.Item>
 
