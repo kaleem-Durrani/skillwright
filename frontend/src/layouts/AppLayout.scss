@@ -1,0 +1,144 @@
+/* Prevent scrolling on body and html */
+html, body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  height: 100%;
+  width: 100%;
+}
+
+.app-layout {
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden; /* Prevent the entire layout from scrolling */
+  display: flex;
+  flex-direction: column;
+  position: fixed; /* Fix the layout to prevent any scrolling of the entire page */
+  top: 0;
+  left: 0;
+
+  .app-header {
+    height: var(--header-height);
+    box-shadow: rgba(99, 99, 99, 0.2) 0px 2px 8px 0px;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding-left: 5px;
+    padding-right: 15px;
+
+    .sider-control-btn {
+      @media screen and (max-width: 991px) {
+        display: none;
+      }
+    }
+
+    .logo {
+      cursor: pointer;
+      color: var(--text-color);
+      padding-block: 10px;
+      height: var(--header-height);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+
+      img {
+        height: 100%;
+      }
+    }
+
+    .user-area {
+      .ant-divider-vertical {
+        height: 2.5em;
+      }
+    }
+
+    @media screen and (max-width: 580px) {
+      gap: 0px;
+      padding: 0px;
+
+      .app-inner-header {
+        padding-top: 10px;
+        padding-inline: 10px;
+        flex-direction: column;
+        justify-content: flex-start;
+        gap: 0px;
+
+        .logo {
+          height: 30px;
+          padding-block: 0px;
+        }
+
+        .user-area {
+          justify-content: flex-end;
+        }
+      }
+    }
+  }
+
+  .app-sider {
+    height: calc(100vh - var(--header-height));
+    overflow-x: hidden; /* Prevent horizontal scrolling in the sidebar */
+    overflow-y: auto; /* Allow vertical scrolling only when needed */
+
+    .ant-menu-inline-collapsed > .ant-menu-item {
+      padding-inline: calc(50% - 8px - 5px);
+    }
+
+    .ant-menu {
+      padding-top: 10px;
+      overflow-x: hidden; /* Prevent horizontal scrolling in the menu */
+      width: 100%; /* Ensure menu doesn't exceed sidebar width */
+
+      .ant-menu-item {
+        width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .ant-menu-title-content {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+    }
+  }
+
+  .app-content {
+    height: calc(100vh - var(--header-height));
+    overflow-x: hidden; /* Prevent horizontal scrolling */
+    overflow-y: hidden; /* Don't scroll the content container itself */
+    border-radius: 0px;
+    flex: 1;
+
+    section.content-section {
+      padding: 10px;
+      height: 100%;
+      overflow-y: auto; /* Allow vertical scrolling for the section content */
+      overflow-x: hidden; /* Prevent horizontal scrolling */
+      display: block; /* Ensure proper display mode */
+      width: 100%; /* Take full width */
+    }
+  }
+
+  .layout-content {
+    display: flex;
+    flex: 1;
+    overflow: hidden; /* Prevent any scrolling in the layout container */
+    height: calc(100vh - var(--header-height)); /* Ensure it takes the correct height */
+    width: 100%; /* Ensure it takes full width */
+  }
+}
+
+.user-dropdown {
+  ul {
+    padding-inline: 0px !important;
+    padding-bottom: 0px !important;
+
+    li {
+      width: 210px !important;
+      height: 40px;
+    }
+  }
+}

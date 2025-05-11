@@ -3,6 +3,24 @@
 @tailwind components;
 @tailwind utilities;
 
+
+*{
+  padding: 0px;
+  margin: 0px;
+  box-sizing: border-box;
+  --header-height: 70px;
+  transition: color 0.1s ease-in-out, background-color 0.3s ease-in-out;
+  font-family: 'Times New Roman', Times, serif;
+}
+
+/* Prevent scrolling on root elements */
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  position: fixed;
+}
+
 /* Custom styles that combine Ant Design and Tailwind */
 .ant-layout {
   @apply min-h-screen;
