@@ -34,8 +34,12 @@ const errorHandler = (err: any, req: Request, res: Response, next: NextFunction)
     };
   }
 
+  console.log('printing status code')
   console.log(statusCode);
+  
+  console.log('printing response')  
   console.log(response);
+  console.log('printing response end')
 
   res.status(statusCode).json(response);
 };

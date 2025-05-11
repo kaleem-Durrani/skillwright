@@ -2,9 +2,9 @@
 html, body {
   margin: 0;
   padding: 0;
-  overflow: hidden;
-  height: 100%;
-  width: 100%;
+  // overflow: hidden;
+  // height: 100%;
+  // width: 100%;
 }
 
 .app-layout {
@@ -95,12 +95,33 @@ html, body {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        color: #ffffff; /* Set text color to white */
+        font-weight: 500; /* Make text a bit bolder */
+
+        /* Add hover effect */
+        &:hover {
+          background-color: rgba(255, 255, 255, 0.2) !important;
+        }
+
+        /* Style for selected menu item */
+        &.ant-menu-item-selected {
+          background-color: rgba(0, 0, 0, 0.2) !important; /* Dark semi-transparent background */
+          color: #ffffff !important; /* White text for selected item */
+          font-weight: 600; /* Make selected text bolder */
+          border-right: 3px solid #ffffff; /* Add a white border on the right */
+        }
       }
 
       .ant-menu-title-content {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        color: #ffffff !important; /* Force white text color */
+      }
+
+      /* Style for menu item icons */
+      .anticon {
+        color: #ffffff !important; /* Make icons white */
       }
     }
   }

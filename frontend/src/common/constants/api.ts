@@ -47,12 +47,12 @@ export const API_ENDPOINTS = {
 
   TEACHER: {
     PROFILE: '/teacher/profile',
-    COURSES: '/teacher/courses',
-    COURSE_DETAILS: (id: string) => `/teacher/courses/${id}`,
-    COURSE_STUDENTS: (id: string) => `/teacher/courses/${id}/students`,
-    COURSE_RESOURCES: (id: string) => `/teacher/courses/${id}/resources`,
+    COURSES: '/teacher/course',
+    COURSE_DETAILS: (id: string) => `/teacher/course/${id}`,
+    COURSE_STUDENTS: (id: string) => `/teacher/course/${id}/students`,
+    COURSE_RESOURCES: (id: string) => `/teacher/course/${id}/resources`,
     UPDATE_ENROLLMENT: (courseId: string, enrollmentId: string) =>
-      `/teacher/courses/${courseId}/enrollments/${enrollmentId}`,
+      `/teacher/course/${courseId}/enrollments/${enrollmentId}`,
 
     RESOURCES: '/teacher/resources',
     RESOURCE_BY_ID: (id: string) => `/teacher/resources/${id}`,
@@ -63,11 +63,11 @@ export const API_ENDPOINTS = {
 
   STUDENT: {
     PROFILE: '/student/profile',
-    COURSES: '/student/courses',
-    COURSE_DETAILS: (id: string) => `/student/courses/${id}`,
-    COURSE_RESOURCES: (id: string) => `/student/courses/${id}/resources`,
-    ENROLL_COURSE: (id: string) => `/student/courses/${id}/enroll`,
-    WITHDRAW_COURSE: (id: string) => `/student/courses/${id}/withdraw`,
+    COURSES: '/student/course',
+    COURSE_DETAILS: (id: string) => `/student/course/${id}`,
+    COURSE_RESOURCES: (id: string) => `/student/course/${id}/resources`,
+    ENROLL_COURSE: (id: string) => `/student/course/${id}/enroll`,
+    WITHDRAW_COURSE: (id: string) => `/student/course/${id}/withdraw`,
 
     RESOURCE_COMMENTS: (resourceId: string) => `/student/resources/${resourceId}/comments`,
     UPDATE_COMMENT: (commentId: string) => `/student/resources/comments/${commentId}`,
@@ -80,8 +80,8 @@ export const API_ENDPOINTS = {
   },
 
   COURSES: {
-    LIST: '/courses',
-    BY_ID: (id: string) => `/courses/${id}`,
+    LIST: '/course',
+    BY_ID: (id: string) => `/course/${id}`,
   },
 
   RESOURCES: {
