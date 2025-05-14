@@ -18,6 +18,8 @@ export const getProfile = asyncHandler(async (req: Request, res: Response) => {
       phoneNumber: true,
       createdAt: true,
       updatedAt: true,
+      isVerified: true,
+      isBanned: true,
       enrollments: {
         select: {
           id: true,

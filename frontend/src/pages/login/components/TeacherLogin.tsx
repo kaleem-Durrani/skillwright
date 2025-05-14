@@ -1,13 +1,5 @@
 import React from "react";
-import {
-  Form,
-  Input,
-  Button,
-  Typography,
-  Checkbox,
-  Divider,
-  notification,
-} from "antd";
+import { Form, Input, Button, Typography, Checkbox, Divider, App } from "antd";
 import { UserOutlined, LockOutlined } from "@ant-design/icons";
 import { Link, useNavigate } from "react-router-dom";
 import { ROUTES } from "@/common/constants";
@@ -29,14 +21,20 @@ const TeacherLogin: React.FC<TeacherLoginProps> = ({
   const navigate = useNavigate();
   const { teacherLoginMutation } = useAuthQuery();
   const [form] = Form.useForm();
+  const { notification } = App.useApp();
 
   const onFinish = async (values: LoginCredentials) => {
     try {
       const response = await teacherLoginMutation.mutateAsync(values);
 
+      // Check if the response was successful
       if (response?.data?.success) {
         // Store user data in localStorage
         const userData = response.data.data;
+        if (!userData) {
+          throw new Error("No user data received");
+        }
+
         localStorage.setItem("user", JSON.stringify(userData));
 
         // Show success notification
@@ -46,19 +44,41 @@ const TeacherLogin: React.FC<TeacherLoginProps> = ({
         });
 
         // Redirect based on verification status
-        if (userData?.isVerified) {
+        // Use type assertion to help TypeScript understand the structure
+        const user = userData as unknown as {
+          isVerified?: boolean;
+        };
+
+        if (user.isVerified) {
           navigate(ROUTES.TEACHER.DASHBOARD);
         } else {
           navigate(ROUTES.VERIFY_EMAIL);
         }
+      } else {
+        // Handle unsuccessful response
+        notification.error({
+          message: "Login Failed",
+          description: response?.data?.message || "Login was unsuccessful",
+        });
       }
     } catch (error: any) {
       // Handle error
+      console.error("Login error:", error);
+
+      // Extract the error message from the response
+      let errorMessage = "Please check your credentials and try again";
+
+      if (error?.response?.data?.message) {
+        // Use the error message from the API response
+        errorMessage = error.response.data.message;
+      } else if (error?.message) {
+        // Use the error message from the Error object
+        errorMessage = error.message;
+      }
+
       notification.error({
         message: "Login Failed",
-        description:
-          error?.response?.data?.message ||
-          "Please check your credentials and try again",
+        description: errorMessage,
       });
     }
   };
@@ -72,7 +92,6 @@ const TeacherLogin: React.FC<TeacherLoginProps> = ({
       <Title level={2} className="mb-6 text-center text-green-700">
         Teacher Login
       </Title>
-
       <Form
         form={form}
         name="teacher_login"

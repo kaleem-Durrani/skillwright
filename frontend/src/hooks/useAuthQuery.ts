@@ -1,13 +1,13 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { 
-  LoginCredentials, 
-  TeacherSignupData, 
-  StudentSignupData, 
-  OtpVerificationData, 
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  LoginCredentials,
+  TeacherSignupData,
+  StudentSignupData,
+  OtpVerificationData,
   PasswordResetData,
-  AuthResponse
-} from '../common/types';
-import { authApi } from '../api';
+  AuthResponse,
+} from "../common/types";
+import { authApi } from "../api";
 
 /**
  * Custom hook for authentication-related queries and mutations
@@ -20,11 +20,11 @@ export const useAuthQuery = () => {
    * Mutation for admin login
    */
   const adminLoginMutation = useMutation({
-    mutationFn: (credentials: LoginCredentials) => 
+    mutationFn: (credentials: LoginCredentials) =>
       authApi.adminLogin(credentials),
     onSuccess: () => {
       // Invalidate any auth-related queries to refetch user data
-      queryClient.invalidateQueries({ queryKey: ['auth'] });
+      queryClient.invalidateQueries({ queryKey: ["auth"] });
     },
   });
 
@@ -35,7 +35,7 @@ export const useAuthQuery = () => {
     mutationFn: () => authApi.adminLogout(),
     onSuccess: () => {
       // Clear auth data and invalidate queries
-      queryClient.setQueryData(['auth'], null);
+      queryClient.setQueryData(["auth"], null);
       queryClient.invalidateQueries();
     },
   });
@@ -44,10 +44,10 @@ export const useAuthQuery = () => {
    * Mutation for teacher login
    */
   const teacherLoginMutation = useMutation({
-    mutationFn: (credentials: LoginCredentials) => 
+    mutationFn: (credentials: LoginCredentials) =>
       authApi.teacherLogin(credentials),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['auth'] });
+      queryClient.invalidateQueries({ queryKey: ["auth"] });
     },
   });
 
@@ -55,18 +55,16 @@ export const useAuthQuery = () => {
    * Mutation for teacher signup
    */
   const teacherSignupMutation = useMutation({
-    mutationFn: (data: TeacherSignupData) => 
-      authApi.teacherSignup(data),
+    mutationFn: (data: TeacherSignupData) => authApi.teacherSignup(data),
   });
 
   /**
    * Mutation for teacher OTP verification
    */
   const teacherVerifyOtpMutation = useMutation({
-    mutationFn: (data: OtpVerificationData) => 
-      authApi.teacherVerifyOtp(data),
+    mutationFn: (data: OtpVerificationData) => authApi.teacherVerifyOtp(data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['auth'] });
+      queryClient.invalidateQueries({ queryKey: ["auth"] });
     },
   });
 
@@ -74,24 +72,21 @@ export const useAuthQuery = () => {
    * Mutation for teacher resend OTP
    */
   const teacherResendOtpMutation = useMutation({
-    mutationFn: (email: string) => 
-      authApi.teacherResendOtp({ email }),
+    mutationFn: (email: string) => authApi.teacherResendOtp({ email }),
   });
 
   /**
    * Mutation for teacher forgot password
    */
   const teacherForgotPasswordMutation = useMutation({
-    mutationFn: (email: string) => 
-      authApi.teacherForgotPassword({ email }),
+    mutationFn: (email: string) => authApi.teacherForgotPassword({ email }),
   });
 
   /**
    * Mutation for teacher reset password
    */
   const teacherResetPasswordMutation = useMutation({
-    mutationFn: (data: PasswordResetData) => 
-      authApi.teacherResetPassword(data),
+    mutationFn: (data: PasswordResetData) => authApi.teacherResetPassword(data),
   });
 
   /**
@@ -100,7 +95,7 @@ export const useAuthQuery = () => {
   const teacherLogoutMutation = useMutation({
     mutationFn: () => authApi.teacherLogout(),
     onSuccess: () => {
-      queryClient.setQueryData(['auth'], null);
+      queryClient.setQueryData(["auth"], null);
       queryClient.invalidateQueries();
     },
   });
@@ -109,10 +104,10 @@ export const useAuthQuery = () => {
    * Mutation for student login
    */
   const studentLoginMutation = useMutation({
-    mutationFn: (credentials: LoginCredentials) => 
+    mutationFn: (credentials: LoginCredentials) =>
       authApi.studentLogin(credentials),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['auth'] });
+      queryClient.invalidateQueries({ queryKey: ["auth"] });
     },
   });
 
@@ -120,18 +115,16 @@ export const useAuthQuery = () => {
    * Mutation for student signup
    */
   const studentSignupMutation = useMutation({
-    mutationFn: (data: StudentSignupData) => 
-      authApi.studentSignup(data),
+    mutationFn: (data: StudentSignupData) => authApi.studentSignup(data),
   });
 
   /**
    * Mutation for student OTP verification
    */
   const studentVerifyOtpMutation = useMutation({
-    mutationFn: (data: OtpVerificationData) => 
-      authApi.studentVerifyOtp(data),
+    mutationFn: (data: OtpVerificationData) => authApi.studentVerifyOtp(data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['auth'] });
+      queryClient.invalidateQueries({ queryKey: ["auth"] });
     },
   });
 
@@ -139,24 +132,21 @@ export const useAuthQuery = () => {
    * Mutation for student resend OTP
    */
   const studentResendOtpMutation = useMutation({
-    mutationFn: (email: string) => 
-      authApi.studentResendOtp({ email }),
+    mutationFn: (email: string) => authApi.studentResendOtp({ email }),
   });
 
   /**
    * Mutation for student forgot password
    */
   const studentForgotPasswordMutation = useMutation({
-    mutationFn: (email: string) => 
-      authApi.studentForgotPassword({ email }),
+    mutationFn: (email: string) => authApi.studentForgotPassword({ email }),
   });
 
   /**
    * Mutation for student reset password
    */
   const studentResetPasswordMutation = useMutation({
-    mutationFn: (data: PasswordResetData) => 
-      authApi.studentResetPassword(data),
+    mutationFn: (data: PasswordResetData) => authApi.studentResetPassword(data),
   });
 
   /**
@@ -165,7 +155,7 @@ export const useAuthQuery = () => {
   const studentLogoutMutation = useMutation({
     mutationFn: () => authApi.studentLogout(),
     onSuccess: () => {
-      queryClient.setQueryData(['auth'], null);
+      queryClient.setQueryData(["auth"], null);
       queryClient.invalidateQueries();
     },
   });
@@ -176,7 +166,7 @@ export const useAuthQuery = () => {
   const refreshTokenMutation = useMutation({
     mutationFn: () => authApi.refreshToken(),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['auth'] });
+      queryClient.invalidateQueries({ queryKey: ["auth"] });
     },
   });
 

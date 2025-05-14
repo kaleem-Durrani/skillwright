@@ -1,23 +1,23 @@
-import React from 'react';
-import { 
-  Card, 
-  Avatar, 
-  Typography, 
-  Descriptions, 
-  Button, 
-  Form, 
-  Input, 
-  Tag 
-} from 'antd';
-import { 
-  UserOutlined, 
-  EditOutlined, 
-  SaveOutlined, 
-  CloseOutlined, 
-  PhoneOutlined, 
-  MailOutlined 
-} from '@ant-design/icons';
-import { StudentWithDetails } from '@/common/types';
+import React from "react";
+import {
+  Card,
+  Avatar,
+  Typography,
+  Descriptions,
+  Button,
+  Form,
+  Input,
+  Tag,
+} from "antd";
+import {
+  UserOutlined,
+  EditOutlined,
+  SaveOutlined,
+  CloseOutlined,
+  PhoneOutlined,
+  MailOutlined,
+} from "@ant-design/icons";
+import { StudentWithDetails } from "@/common/types";
 
 const { Title, Text } = Typography;
 
@@ -48,9 +48,9 @@ const ProfileInfo: React.FC<ProfileInfoProps> = ({
       <div className="flex flex-col md:flex-row gap-8">
         {/* Profile Avatar */}
         <div className="flex flex-col items-center">
-          <Avatar 
-            size={120} 
-            icon={<UserOutlined />} 
+          <Avatar
+            size={120}
+            icon={<UserOutlined />}
             className="bg-blue-500 mb-4"
           />
           <Title level={4}>{student?.name}</Title>
@@ -66,13 +66,13 @@ const ProfileInfo: React.FC<ProfileInfoProps> = ({
               initialValues={{
                 name: student?.name,
                 email: student?.email,
-                phoneNumber: student?.phoneNumber || '',
+                phoneNumber: student?.phoneNumber || "",
               }}
             >
               <Form.Item
                 name="name"
                 label="Full Name"
-                rules={[{ required: true, message: 'Please enter your name' }]}
+                rules={[{ required: true, message: "Please enter your name" }]}
               >
                 <Input prefix={<UserOutlined />} />
               </Form.Item>
@@ -81,30 +81,24 @@ const ProfileInfo: React.FC<ProfileInfoProps> = ({
                 name="email"
                 label="Email"
                 rules={[
-                  { required: true, message: 'Please enter your email' },
-                  { type: 'email', message: 'Please enter a valid email' },
+                  { required: true, message: "Please enter your email" },
+                  { type: "email", message: "Please enter a valid email" },
                 ]}
               >
                 <Input prefix={<MailOutlined />} disabled />
               </Form.Item>
 
-              <Form.Item
-                name="phoneNumber"
-                label="Phone Number"
-              >
+              <Form.Item name="phoneNumber" label="Phone Number">
                 <Input prefix={<PhoneOutlined />} />
               </Form.Item>
 
               <div className="flex justify-end gap-2 mt-4">
-                <Button 
-                  icon={<CloseOutlined />} 
-                  onClick={onCancel}
-                >
+                <Button icon={<CloseOutlined />} onClick={onCancel}>
                   Cancel
                 </Button>
-                <Button 
-                  type="primary" 
-                  icon={<SaveOutlined />} 
+                <Button
+                  type="primary"
+                  icon={<SaveOutlined />}
                   onClick={onSave}
                   loading={isLoading}
                 >
@@ -115,11 +109,7 @@ const ProfileInfo: React.FC<ProfileInfoProps> = ({
           ) : (
             <>
               <div className="flex justify-end mb-4">
-                <Button 
-                  type="primary" 
-                  icon={<EditOutlined />} 
-                  onClick={onEdit}
-                >
+                <Button type="primary" icon={<EditOutlined />} onClick={onEdit}>
                   Edit Profile
                 </Button>
               </div>
@@ -132,13 +122,13 @@ const ProfileInfo: React.FC<ProfileInfoProps> = ({
                   {student?.email}
                 </Descriptions.Item>
                 <Descriptions.Item label="Phone Number">
-                  {student?.phoneNumber || 'Not provided'}
+                  {student?.phoneNumber || "Not provided"}
                 </Descriptions.Item>
                 <Descriptions.Item label="Enrollment Number">
                   {student?.enrollmentNo}
                 </Descriptions.Item>
                 <Descriptions.Item label="Department">
-                  {student?.department?.name || 'Not assigned'}
+                  {student?.department?.name || "Not assigned"}
                 </Descriptions.Item>
                 <Descriptions.Item label="Account Status">
                   {student?.isBanned ? (
@@ -155,7 +145,9 @@ const ProfileInfo: React.FC<ProfileInfoProps> = ({
                   )}
                 </Descriptions.Item>
                 <Descriptions.Item label="Joined On">
-                  {student?.createdAt ? new Date(student.createdAt).toLocaleDateString() : 'Unknown'}
+                  {student?.createdAt
+                    ? new Date(student.createdAt).toLocaleDateString()
+                    : "Unknown"}
                 </Descriptions.Item>
               </Descriptions>
             </>

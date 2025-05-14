@@ -76,5 +76,9 @@ export interface AuthResponse {
     name: string;
     email: string;
     userType: UserType;
+    isVerified?: boolean;
+    isBanned?: boolean;
+    createdAt?: string;
+    updatedAt?: string;
   } | null;
 } 
