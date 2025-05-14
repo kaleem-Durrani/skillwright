@@ -47,12 +47,12 @@ export const API_ENDPOINTS = {
 
   TEACHER: {
     PROFILE: '/teacher/profile',
-    COURSES: '/teacher/course',
-    COURSE_DETAILS: (id: string) => `/teacher/course/${id}`,
-    COURSE_STUDENTS: (id: string) => `/teacher/course/${id}/students`,
-    COURSE_RESOURCES: (id: string) => `/teacher/course/${id}/resources`,
+    COURSES: '/teacher/courses',
+    COURSE_DETAILS: (id: string) => `/teacher/courses/${id}`,
+    COURSE_STUDENTS: (id: string) => `/teacher/courses/${id}/students`,
+    COURSE_RESOURCES: (id: string) => `/teacher/courses/${id}/resources`,
     UPDATE_ENROLLMENT: (courseId: string, enrollmentId: string) =>
-      `/teacher/course/${courseId}/enrollments/${enrollmentId}`,
+      `/teacher/courses/${courseId}/enrollments/${enrollmentId}`,
 
     RESOURCES: '/teacher/resources',
     RESOURCE_BY_ID: (id: string) => `/teacher/resources/${id}`,
@@ -63,11 +63,11 @@ export const API_ENDPOINTS = {
 
   STUDENT: {
     PROFILE: '/student/profile',
-    COURSES: '/student/course',
-    COURSE_DETAILS: (id: string) => `/student/course/${id}`,
-    COURSE_RESOURCES: (id: string) => `/student/course/${id}/resources`,
-    ENROLL_COURSE: (id: string) => `/student/course/${id}/enroll`,
-    WITHDRAW_COURSE: (id: string) => `/student/course/${id}/withdraw`,
+    COURSES: '/student/courses',
+    COURSE_DETAILS: (courseId: string) => `/student/courses/${courseId}`,
+    COURSE_RESOURCES: (courseId: string) => `/student/courses/${courseId}/resources`,
+    ENROLL_COURSE: (courseId: string) => `/student/courses/${courseId}/enroll`,
+    WITHDRAW_COURSE: (courseId: string) => `/student/courses/${courseId}/withdraw`,
 
     RESOURCE_COMMENTS: (resourceId: string) => `/student/resources/${resourceId}/comments`,
     UPDATE_COMMENT: (commentId: string) => `/student/resources/comments/${commentId}`,
@@ -85,8 +85,8 @@ export const API_ENDPOINTS = {
   },
 
   RESOURCES: {
-    PUBLIC: '/resources/public',
-    PUBLIC_BY_ID: (id: string) => `/resources/public/${id}`,
+    PUBLIC: '/resource/public',
+    PUBLIC_BY_ID: (id: string) => `/resource/public/${id}`,
   },
 
   CONVERSATIONS: {
