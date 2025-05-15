@@ -46,16 +46,21 @@ const VerifyEmail = () => {
       : null;
 
     if (userData) {
+      // If user is admin, redirect to admin dashboard immediately
+      // Admins don't need email verification
+      if (userData.userType === "admin") {
+        navigate(ROUTES.ADMIN.DASHBOARD);
+        return;
+      }
+
       setUserEmail(userData.email || "");
-      setUserType(userData.userType === "admin" ? null : userData.userType);
+      setUserType(userData.userType as "student" | "teacher");
       form.setFieldsValue({ email: userData.email || "" });
 
-      // If user is already verified or is admin, redirect to dashboard
-      if (userData.isVerified || userData.userType === "admin") {
+      // If user is already verified, redirect to dashboard
+      if (userData.isVerified) {
         const dashboardRoute =
-          userData.userType === "admin"
-            ? ROUTES.ADMIN.DASHBOARD
-            : userData.userType === "teacher"
+          userData.userType === "teacher"
             ? ROUTES.TEACHER.DASHBOARD
             : ROUTES.STUDENT.DASHBOARD;
         navigate(dashboardRoute);

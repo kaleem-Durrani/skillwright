@@ -29,7 +29,15 @@ const AdminLogin: React.FC<AdminLoginProps> = ({
       if (response?.data?.success) {
         // Store user data in localStorage
         const userData = response.data.data;
-        localStorage.setItem("user", JSON.stringify(userData));
+
+        // Explicitly set isVerified to true for admin users
+        // This ensures admins are never redirected to the verification page
+        const adminData = {
+          ...userData,
+          isVerified: true,
+        };
+
+        localStorage.setItem("user", JSON.stringify(adminData));
 
         // Show success notification
         notification.success({

@@ -45,9 +45,10 @@ const seedAdmin = async () => {
   }
 };
 
-// Run seeder if this file is run directly
-if (require.main === module) {
-  seedAdmin();
-}
+// In ES modules, there's no direct equivalent to require.main === module
+// So we'll just run the seeder directly
+seedAdmin()
+  .then(() => console.log('Admin seeding completed'))
+  .catch(err => console.error('Error during admin seeding:', err));
 
-export { seedAdmin }; 
+export { seedAdmin };

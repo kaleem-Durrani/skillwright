@@ -12,17 +12,24 @@ interface ProtectedRouteProps {
 // command for checking the mock authentication
 // localStorage.setItem('user', JSON.stringify({ id: '1', name: 'Test User', userType: 'admin' }));
 
-// Mock authentication - replace with actual auth logic later
-const useAuth = () => {
-  // This is a placeholder. In a real app, you would use a context or hook to get the user's auth state
+// Authentication hook
+export const useAuth = () => {
+  // Get user data from localStorage
   const user = localStorage.getItem("user")
     ? JSON.parse(localStorage.getItem("user") || "{}")
     : null;
+
+  // For admin users, always consider them verified
+  const isVerified =
+    user?.userType === "admin"
+      ? true
+      : (user?.isVerified as boolean | undefined);
+
   return {
     user,
     isAuthenticated: !!user,
     userType: user?.userType as UserType | undefined,
-    isVerified: user?.isVerified as boolean | undefined,
+    isVerified,
   };
 };
 
@@ -56,8 +63,8 @@ const ProtectedRoute = ({
         return;
       }
     } else {
-      // For non-verification routes, if user is not verified, redirect to verify email
-      if (!isVerified) {
+      // For non-verification routes, if user is not verified and not an admin, redirect to verify email
+      if (!isVerified && user?.userType !== "admin") {
         navigate(ROUTES.VERIFY_EMAIL, { replace: true });
         return;
       }
@@ -82,7 +89,7 @@ const ProtectedRoute = ({
   if (
     !isAuthenticated ||
     (requiresVerification && isVerified) ||
-    (!requiresVerification && !isVerified) ||
+    (!requiresVerification && !isVerified && user?.userType !== "admin") ||
     (userType && user?.userType !== userType)
   ) {
     return null;
