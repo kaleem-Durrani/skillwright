@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
-import { Modal, Form, Input, Select, Button } from 'antd';
-import { useAdminQuery, useStudentQuery } from '@/hooks';
-import { ConversationCreateData } from '@/common/types';
+import React, { useEffect, useState } from "react";
+import { Modal, Form, Input, Select, Button } from "antd";
+import { useAdminQuery, useStudentQuery } from "@/hooks";
+import { ConversationCreateData } from "@/common/types";
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -32,10 +32,15 @@ const CreateConversationModal: React.FC<CreateConversationModalProps> = ({
   const { getStudentsQuery } = useAdminQuery();
   const studentsQuery = getStudentsQuery();
   const students = studentsQuery.data?.data?.data || [];
-  
-  const { getAdminsQuery } = useAdminQuery();
-  const adminsQuery = getAdminsQuery();
-  const admins = adminsQuery.data?.data?.data || [];
+
+  // const { getAdminsQuery } = useAdminQuery();
+  // const adminsQuery = getAdminsQuery();
+  // const admins = adminsQuery.data?.data?.data || [];
+
+  const admins = [
+    { id: "1", name: "Admin 1" },
+    { id: "2", name: "Admin 2" },
+  ];
 
   // Reset form when modal is opened/closed
   useEffect(() => {
@@ -56,32 +61,33 @@ const CreateConversationModal: React.FC<CreateConversationModalProps> = ({
       footer={null}
       width={600}
     >
-      <Form
-        form={form}
-        layout="vertical"
-        onFinish={handleSubmit}
-      >
-        <Form.Item
-          name="title"
-          label="Conversation Title (Optional)"
-        >
+      <Form form={form} layout="vertical" onFinish={handleSubmit}>
+        <Form.Item name="title" label="Conversation Title (Optional)">
           <Input placeholder="Enter conversation title" />
         </Form.Item>
 
         <Form.Item
           name="participants"
           label="Select Participants"
-          rules={[{ required: true, message: 'Please select at least one participant' }]}
+          rules={[
+            {
+              required: true,
+              message: "Please select at least one participant",
+            },
+          ]}
         >
           <Select
             mode="multiple"
             placeholder="Select students or admins"
-            loading={studentsQuery.isLoading || adminsQuery.isLoading}
+            loading={studentsQuery.isLoading}
             optionFilterProp="children"
           >
             <Select.OptGroup label="Students">
               {students.map((student) => (
-                <Option key={`student-${student.id}`} value={`student-${student.id}`}>
+                <Option
+                  key={`student-${student.id}`}
+                  value={`student-${student.id}`}
+                >
                   {student.name} (Student)
                 </Option>
               ))}
@@ -96,10 +102,7 @@ const CreateConversationModal: React.FC<CreateConversationModalProps> = ({
           </Select>
         </Form.Item>
 
-        <Form.Item
-          name="initialMessage"
-          label="Initial Message (Optional)"
-        >
+        <Form.Item name="initialMessage" label="Initial Message (Optional)">
           <TextArea
             placeholder="Type your first message"
             autoSize={{ minRows: 3, maxRows: 6 }}

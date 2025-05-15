@@ -148,7 +148,7 @@ const AdminTeachers: React.FC = () => {
         visible={isModalVisible}
         onCancel={handleCancel}
         onSubmit={handleCreateTeacher}
-        isSubmitting={createTeacherMutation.isPending}
+        isSubmitting={createTeacherMutation?.isPending}
       />
     </div>
   );

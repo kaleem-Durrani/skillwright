@@ -148,7 +148,7 @@ const AdminStudents: React.FC = () => {
         visible={isModalVisible}
         onCancel={handleCancel}
         onSubmit={handleCreateStudent}
-        isSubmitting={createStudentMutation.isPending}
+        isSubmitting={createStudentMutation?.isPending}
       />
     </div>
   );
