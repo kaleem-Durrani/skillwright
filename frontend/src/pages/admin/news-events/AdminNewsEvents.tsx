@@ -1,115 +1,109 @@
 import React, { useState } from "react";
 import { Typography, Button, App } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
-import { NewsEvent, QueryParams } from "@/common/types";
+import {
+  NewsEvent,
+  NewsEventCreateData,
+  NewsEventUpdateData,
+} from "@/common/types";
 import {
   NewsEventTable,
   NewsEventFilter,
   CreateNewsEventModal,
 } from "./components";
-import dayjs from "dayjs";
-import { newsApi } from "@/api";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useApi, useMutation } from "@/hooks";
+import { adminService, AdminQueryParams } from "@/services";
 
 const { Title } = Typography;
 
 const AdminNewsEvents: React.FC = () => {
   const { notification } = App.useApp();
-  const queryClient = useQueryClient();
 
   // State
-  const [filterParams, setFilterParams] = useState<QueryParams>({});
+  const [filterParams, setFilterParams] = useState<AdminQueryParams>({
+    page: 1,
+    limit: 10,
+  });
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [editingNewsEvent, setEditingNewsEvent] = useState<NewsEvent | null>(
     null
   );
 
-  // Queries
-  const newsEventsQuery = useQuery({
-    queryKey: ["admin", "newsEvents", filterParams],
-    queryFn: () => newsApi.adminGetAllNewsEvents(filterParams),
-  });
+  // API calls
+  const newsEventsQuery = useApi(
+    () => adminService.getNewsEvents(filterParams),
+    {
+      dependencies: [filterParams],
+      immediate: true,
+    }
+  );
 
   // Mutations
-  const createNewsEventMutation = useMutation({
-    mutationFn: (data: any) => newsApi.adminCreateNewsEvent(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "newsEvents"] });
-      notification.success({
-        message: "Success",
-        description: "Item created successfully.",
-      });
-      setIsModalVisible(false);
-    },
-    onError: () => {
-      notification.error({
-        message: "Error",
-        description: "Failed to create item. Please try again.",
-      });
-    },
-  });
+  const createNewsEventMutation = useMutation(
+    (data: NewsEventCreateData) => adminService.createNewsEvent(data),
+    {
+      onSuccess: () => {
+        notification.success({
+          message: "Success",
+          description: "News event created successfully.",
+        });
+        setIsModalVisible(false);
+        newsEventsQuery.refetch();
+      },
+    }
+  );
 
-  const updateNewsEventMutation = useMutation({
-    mutationFn: (data: any) => newsApi.adminUpdateNewsEvent(data.id, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "newsEvents"] });
-      notification.success({
-        message: "Success",
-        description: "Item updated successfully.",
-      });
-      setIsModalVisible(false);
-      setEditingNewsEvent(null);
-    },
-    onError: () => {
-      notification.error({
-        message: "Error",
-        description: "Failed to update item. Please try again.",
-      });
-    },
-  });
+  const updateNewsEventMutation = useMutation(
+    ({ id, data }: { id: string; data: NewsEventUpdateData }) =>
+      adminService.updateNewsEvent(id, data),
+    {
+      onSuccess: () => {
+        notification.success({
+          message: "Success",
+          description: "News event updated successfully.",
+        });
+        setIsModalVisible(false);
+        setEditingNewsEvent(null);
+        newsEventsQuery.refetch();
+      },
+    }
+  );
 
-  const deleteNewsEventMutation = useMutation({
-    mutationFn: (id: string) => newsApi.adminDeleteNewsEvent(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "newsEvents"] });
-      notification.success({
-        message: "Success",
-        description: "Item deleted successfully.",
-      });
-    },
-    onError: () => {
-      notification.error({
-        message: "Error",
-        description: "Failed to delete item. Please try again.",
-      });
-    },
-  });
+  const deleteNewsEventMutation = useMutation(
+    (id: string) => adminService.deleteNewsEvent(id),
+    {
+      onSuccess: () => {
+        notification.success({
+          message: "Success",
+          description: "News event deleted successfully.",
+        });
+        newsEventsQuery.refetch();
+      },
+    }
+  );
 
-  const toggleNewsEventPublishMutation = useMutation({
-    mutationFn: ({ id }: { id: string; isPublished: boolean }) =>
-      newsApi.adminToggleNewsEventPublish(id),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "newsEvents"] });
-      notification.success({
-        message: "Success",
-        description: `Item ${
-          variables.isPublished ? "published" : "unpublished"
-        } successfully.`,
-      });
-    },
-    onError: (_, variables) => {
-      notification.error({
-        message: "Error",
-        description: `Failed to ${
-          variables.isPublished ? "publish" : "unpublish"
-        } item. Please try again.`,
-      });
-    },
-  });
+  const toggleNewsEventPublishMutation = useMutation(
+    (id: string) => adminService.toggleNewsEventPublish(id),
+    {
+      onSuccess: () => {
+        notification.success({
+          message: "Success",
+          description: "News event publish status updated successfully.",
+        });
+        newsEventsQuery.refetch();
+      },
+    }
+  );
+
+  // Extract data from API response
+  const newsEvents = newsEventsQuery.data?.data?.items || [];
 
   // Handlers
   const handleFilter = (values: any) => {
-    const params: QueryParams = {};
+    const params: AdminQueryParams = {
+      page: 1, // Reset to first page when filtering
+      limit: filterParams.limit || 10,
+    };
 
     if (values.search) {
       params.search = values.search;
@@ -117,11 +111,6 @@ const AdminNewsEvents: React.FC = () => {
 
     if (values.type) {
       params.type = values.type;
-    }
-
-    if (values.dateRange && values.dateRange.length === 2) {
-      params.startDate = values.dateRange[0].startOf("day").toISOString();
-      params.endDate = values.dateRange[1].endOf("day").toISOString();
     }
 
     if (values.isPublished !== undefined) {
@@ -132,7 +121,10 @@ const AdminNewsEvents: React.FC = () => {
   };
 
   const handleResetFilter = () => {
-    setFilterParams({});
+    setFilterParams({
+      page: 1,
+      limit: filterParams.limit || 10,
+    });
   };
 
   const showModal = () => {
@@ -150,27 +142,30 @@ const AdminNewsEvents: React.FC = () => {
     setIsModalVisible(true);
   };
 
-  const handleSubmit = (values: any) => {
+  const handleSubmit = async (
+    values: NewsEventCreateData | NewsEventUpdateData
+  ) => {
     if (editingNewsEvent) {
-      updateNewsEventMutation.mutate({ ...values, id: editingNewsEvent.id });
+      await updateNewsEventMutation.mutateAsync({
+        id: editingNewsEvent.id,
+        data: values as NewsEventUpdateData,
+      });
     } else {
-      createNewsEventMutation.mutate(values);
+      await createNewsEventMutation.mutateAsync(values as NewsEventCreateData);
     }
   };
 
-  const handleDelete = (id: string) => {
-    deleteNewsEventMutation.mutate(id);
+  const handleDelete = async (id: string) => {
+    await deleteNewsEventMutation.mutateAsync(id);
   };
 
-  const handleTogglePublish = (id: string, isPublished: boolean) => {
-    toggleNewsEventPublishMutation.mutate({ id, isPublished });
+  const handleTogglePublish = async (id: string, _isPublished: boolean) => {
+    await toggleNewsEventPublishMutation.mutateAsync(id);
   };
 
-  // Get data from query
-  const newsEvents = newsEventsQuery.data?.data?.data || [];
-  const isLoading = newsEventsQuery.isLoading;
+  const isLoading = newsEventsQuery.loading;
   const isSubmitting =
-    createNewsEventMutation.isPending || updateNewsEventMutation.isPending;
+    createNewsEventMutation.loading || updateNewsEventMutation.loading;
 
   return (
     <div className="p-6">
