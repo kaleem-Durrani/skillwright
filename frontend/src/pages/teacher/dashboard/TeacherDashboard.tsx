@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { Row, Col, Typography, Spin, App } from "antd";
 import { BookOutlined, FileOutlined, TeamOutlined } from "@ant-design/icons";
-import { useTeacherQuery } from "@/hooks";
+import { useApi } from "@/hooks";
+import { teacherService } from "@/services";
 import { Course } from "@/common/types";
 import {
   StatisticsCard,
@@ -18,24 +19,14 @@ const { Title } = Typography;
 
 const TeacherDashboard: React.FC = () => {
   const { notification } = App.useApp();
-  const { getProfileQuery, getMyCoursesQuery } = useTeacherQuery();
-  const [courses, setCourses] = useState<Course[]>([]);
+  // API calls
+  const coursesQuery = useApi(
+    () => teacherService.getMyCourses({ limit: 50 }),
+    { immediate: true }
+  );
 
-  // Fetch teacher's courses
-  const coursesQuery = getMyCoursesQuery();
-
-  useEffect(() => {
-    if (coursesQuery.isError) {
-      notification.error({
-        message: "Error",
-        description: "Failed to load courses. Please try again later.",
-      });
-    }
-
-    if (coursesQuery.data?.data?.data) {
-      setCourses(coursesQuery.data.data.data);
-    }
-  }, [coursesQuery.data, coursesQuery.isError, notification]);
+  // Extract data
+  const courses = coursesQuery.data?.data?.items || [];
 
   // Calculate resource statistics
   const resourceStats = calculateResourceStats(courses);
@@ -56,7 +47,7 @@ const TeacherDashboard: React.FC = () => {
             title="Total Courses"
             value={courses.length}
             prefix={<BookOutlined className="mr-2 text-blue-500" />}
-            loading={coursesQuery.isLoading}
+            loading={coursesQuery.loading}
             valueStyle={{ color: "#1890ff" }}
           />
         </Col>
@@ -65,7 +56,7 @@ const TeacherDashboard: React.FC = () => {
             title="Total Resources"
             value={resourceStats.total}
             prefix={<FileOutlined className="mr-2 text-green-500" />}
-            loading={coursesQuery.isLoading}
+            loading={coursesQuery.loading}
             valueStyle={{ color: "#52c41a" }}
           />
         </Col>
@@ -77,7 +68,7 @@ const TeacherDashboard: React.FC = () => {
               0
             )}
             prefix={<TeamOutlined className="mr-2 text-purple-500" />}
-            loading={coursesQuery.isLoading}
+            loading={coursesQuery.loading}
             valueStyle={{ color: "#722ed1" }}
           />
         </Col>
@@ -86,20 +77,20 @@ const TeacherDashboard: React.FC = () => {
       {/* Main Content */}
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={12}>
-          <RecentCourses courses={courses} loading={coursesQuery.isLoading} />
+          <RecentCourses courses={courses} loading={coursesQuery.loading} />
         </Col>
         <Col xs={24} lg={12}>
           <Row gutter={[16, 16]}>
             <Col xs={24}>
               <UpcomingEvents
                 events={upcomingEvents}
-                loading={coursesQuery.isLoading}
+                loading={coursesQuery.loading}
               />
             </Col>
             <Col xs={24} className="mt-4">
               <ResourcesOverview
                 stats={resourceStats}
-                loading={coursesQuery.isLoading}
+                loading={coursesQuery.loading}
               />
             </Col>
           </Row>
