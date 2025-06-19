@@ -1,101 +1,111 @@
-import React, { useState, useEffect } from "react";
-import { Typography, Button, App, Pagination, Modal } from "antd";
+import React, { useState } from "react";
+import { Typography, Button, App, Pagination } from "antd";
 import { PlusOutlined, ExclamationCircleOutlined } from "@ant-design/icons";
-import { useTeacherQuery } from "@/hooks";
-import { Resource, QueryParams, ResourceCreateData } from "@/common/types";
+import { useApi, useMutation } from "@/hooks";
+import { teacherService, resourceService } from "@/services";
+import { Resource, QueryParams } from "@/common/types";
 import {
   ResourceList,
   ResourceFilter,
   CreateResourceModal,
+  ViewResourceModal,
+  EditResourceModal,
 } from "./components";
 
 const { Title } = Typography;
-const { confirm } = Modal;
 
 const TeacherResources: React.FC = () => {
-  const { notification } = App.useApp();
-  const {
-    getMyCoursesQuery,
-    getCourseResourcesQuery,
-    createResourceMutation,
-    deleteResourceMutation,
-  } = useTeacherQuery();
-
+  const { notification, modal } = App.useApp();
   // State
-  const [resources, setResources] = useState<Resource[]>([]);
-  const [totalResources, setTotalResources] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(12);
   const [filterParams, setFilterParams] = useState<QueryParams>({});
-  const [isModalVisible, setIsModalVisible] = useState(false);
-  const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
+  const [isCreateModalVisible, setIsCreateModalVisible] = useState(false);
+  const [isViewModalVisible, setIsViewModalVisible] = useState(false);
+  const [isEditModalVisible, setIsEditModalVisible] = useState(false);
+  const [selectedResource, setSelectedResource] = useState<Resource | null>(
+    null
+  );
 
-  // Get all courses to extract resources
-  const coursesQuery = getMyCoursesQuery();
-
-  // Fetch resources from all courses
-  useEffect(() => {
-    if (coursesQuery.data?.data?.data) {
-      const courses = coursesQuery.data.data.data;
-      let allResources: Resource[] = [];
-
-      // Extract resources from all courses
-      courses.forEach((course) => {
-        if (course.resources) {
-          allResources = [...allResources, ...course.resources];
-        }
-      });
-
-      // Apply filters
-      if (filterParams.search) {
-        allResources = allResources.filter((resource) =>
-          resource.title
-            .toLowerCase()
-            .includes(filterParams.search!.toLowerCase())
-        );
-      }
-
-      if (filterParams.courseId) {
-        allResources = allResources.filter(
-          (resource) => resource.courseId === filterParams.courseId
-        );
-      }
-
-      if (filterParams.type) {
-        allResources = allResources.filter(
-          (resource) => resource.type === filterParams.type
-        );
-      }
-
-      if (filterParams.isPublic) {
-        allResources = allResources.filter(
-          (resource) => resource.isPublic === true
-        );
-      }
-
-      // Sort by creation date (newest first)
-      allResources.sort(
-        (a, b) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      );
-
-      setTotalResources(allResources.length);
-
-      // Apply pagination
-      const start = (currentPage - 1) * pageSize;
-      const end = start + pageSize;
-      setResources(allResources.slice(start, end));
+  // API calls
+  const resourcesQuery = useApi(
+    () =>
+      teacherService.getMyResources({
+        page: currentPage,
+        limit: pageSize,
+        ...filterParams,
+      }),
+    {
+      immediate: true,
+      dependencies: [currentPage, pageSize, filterParams],
     }
-  }, [coursesQuery.data, filterParams, currentPage, pageSize]);
+  );
 
-  useEffect(() => {
-    if (coursesQuery.isError) {
+  const createResourceMutation = useMutation(resourceService.createResource, {
+    onSuccess: () => {
+      notification.success({
+        message: "Success",
+        description: "Resource created successfully.",
+      });
+      setIsCreateModalVisible(false);
+      resourcesQuery.refetch();
+    },
+    onError: () => {
       notification.error({
         message: "Error",
-        description: "Failed to load resources. Please try again later.",
+        description: "Failed to create resource. Please try again.",
       });
+    },
+  });
+
+  const updateResourceMutation = useMutation(
+    ({ id, formData }: { id: string; formData: FormData }) =>
+      resourceService.updateResource(id, formData),
+    {
+      onSuccess: () => {
+        notification.success({
+          message: "Success",
+          description: "Resource updated successfully.",
+        });
+        setIsEditModalVisible(false);
+        setSelectedResource(null);
+        resourcesQuery.refetch();
+      },
+      onError: () => {
+        notification.error({
+          message: "Error",
+          description: "Failed to update resource. Please try again.",
+        });
+      },
     }
-  }, [coursesQuery.isError, notification]);
+  );
+
+  const deleteResourceMutation = useMutation(resourceService.deleteResource, {
+    onSuccess: () => {
+      notification.success({
+        message: "Success",
+        description: "Resource deleted successfully.",
+      });
+      resourcesQuery.refetch();
+    },
+    onError: (error: any) => {
+      console.error("Delete mutation error:", error);
+      notification.error({
+        message: "Error",
+        description: "Failed to delete resource. Please try again.",
+      });
+    },
+  });
+
+  // Extract data
+  const responseData = resourcesQuery.data?.data as any;
+  const resources = responseData?.items || [];
+  const pagination = responseData?.pagination || {
+    total: 0,
+    page: 1,
+    limit: 12,
+    hasMore: false,
+  };
 
   // Handlers
   const handlePageChange = (page: number, pageSize?: number) => {
@@ -131,34 +141,53 @@ const TeacherResources: React.FC = () => {
     setCurrentPage(1);
   };
 
-  const showModal = () => {
-    setIsModalVisible(true);
+  const showCreateModal = () => {
+    setIsCreateModalVisible(true);
   };
 
-  const handleCancel = () => {
-    setIsModalVisible(false);
+  const handleCreateCancel = () => {
+    setIsCreateModalVisible(false);
   };
 
-  const handleCreateResource = async (values: ResourceCreateData) => {
+  const handleViewCancel = () => {
+    setIsViewModalVisible(false);
+    setSelectedResource(null);
+  };
+
+  const handleEditCancel = () => {
+    setIsEditModalVisible(false);
+    setSelectedResource(null);
+  };
+
+  const handleCreateResource = async (formData: FormData) => {
     try {
-      await createResourceMutation.mutateAsync(values);
-      notification.success({
-        message: "Success",
-        description: "Resource created successfully.",
-      });
-      setIsModalVisible(false);
-      // Refetch courses to get updated resources
-      coursesQuery.refetch();
+      await createResourceMutation.mutateAsync(formData);
     } catch (error) {
-      notification.error({
-        message: "Error",
-        description: "Failed to create resource. Please try again.",
-      });
+      console.error("Create resource error:", error);
+    }
+  };
+
+  const handleViewResource = (resource: Resource) => {
+    setSelectedResource(resource);
+    setIsViewModalVisible(true);
+  };
+
+  const handleEditResource = (resource: Resource) => {
+    setSelectedResource(resource);
+    setIsEditModalVisible(true);
+  };
+
+  const handleUpdateResource = async (id: string, formData: FormData) => {
+    try {
+      await updateResourceMutation.mutateAsync({ id, formData });
+    } catch (error) {
+      console.error("Update resource error:", error);
     }
   };
 
   const handleDeleteResource = (id: string) => {
-    confirm({
+    console.log("Delete resource called with ID:", id);
+    modal.confirm({
       title: "Are you sure you want to delete this resource?",
       icon: <ExclamationCircleOutlined />,
       content: "This action cannot be undone.",
@@ -166,19 +195,12 @@ const TeacherResources: React.FC = () => {
       okType: "danger",
       cancelText: "Cancel",
       onOk: async () => {
+        console.log("Delete confirmed for ID:", id);
         try {
           await deleteResourceMutation.mutateAsync(id);
-          notification.success({
-            message: "Success",
-            description: "Resource deleted successfully.",
-          });
-          // Refetch courses to get updated resources
-          coursesQuery.refetch();
+          console.log("Delete successful for ID:", id);
         } catch (error) {
-          notification.error({
-            message: "Error",
-            description: "Failed to delete resource. Please try again.",
-          });
+          console.error("Delete resource error:", error);
         }
       },
     });
@@ -188,7 +210,11 @@ const TeacherResources: React.FC = () => {
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
         <Title level={2}>My Resources</Title>
-        <Button type="primary" icon={<PlusOutlined />} onClick={showModal}>
+        <Button
+          type="primary"
+          icon={<PlusOutlined />}
+          onClick={showCreateModal}
+        >
           Create Resource
         </Button>
       </div>
@@ -197,16 +223,18 @@ const TeacherResources: React.FC = () => {
 
       <ResourceList
         resources={resources}
-        loading={coursesQuery.isLoading}
+        loading={resourcesQuery.loading}
+        onView={handleViewResource}
+        onEdit={handleEditResource}
         onDelete={handleDeleteResource}
       />
 
-      {totalResources > 0 && (
+      {pagination.total > 0 && (
         <div className="flex justify-center mt-6">
           <Pagination
             current={currentPage}
             pageSize={pageSize}
-            total={totalResources}
+            total={pagination.total}
             onChange={handlePageChange}
             showSizeChanger
             showQuickJumper
@@ -216,10 +244,25 @@ const TeacherResources: React.FC = () => {
       )}
 
       <CreateResourceModal
-        visible={isModalVisible}
-        onCancel={handleCancel}
+        visible={isCreateModalVisible}
+        onCancel={handleCreateCancel}
         onSubmit={handleCreateResource}
-        isSubmitting={createResourceMutation.isPending}
+        isSubmitting={createResourceMutation.loading}
+      />
+
+      <ViewResourceModal
+        visible={isViewModalVisible}
+        resource={selectedResource}
+        loading={false}
+        onCancel={handleViewCancel}
+      />
+
+      <EditResourceModal
+        visible={isEditModalVisible}
+        resource={selectedResource}
+        onCancel={handleEditCancel}
+        onSubmit={handleUpdateResource}
+        isSubmitting={updateResourceMutation.loading}
       />
     </div>
   );

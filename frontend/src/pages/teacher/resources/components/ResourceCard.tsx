@@ -1,38 +1,43 @@
-import React from 'react';
-import { Card, Typography, Tag, Space, Button, Tooltip, Badge } from 'antd';
-import { 
-  FileOutlined, 
-  VideoCameraOutlined, 
-  LinkOutlined, 
+import React from "react";
+import { Card, Typography, Tag, Space, Button, Tooltip, Badge } from "antd";
+import {
+  FileOutlined,
+  VideoCameraOutlined,
+  LinkOutlined,
   CommentOutlined,
   EyeOutlined,
   EditOutlined,
   DeleteOutlined,
-  BookOutlined
-} from '@ant-design/icons';
-import { Link } from 'react-router-dom';
-import { Resource } from '@/common/types';
-import { ROUTES } from '@/common/constants';
-import dayjs from 'dayjs';
+  BookOutlined,
+} from "@ant-design/icons";
+import { Resource } from "@/common/types";
+import dayjs from "dayjs";
 
 const { Title, Text, Paragraph } = Typography;
 
 interface ResourceCardProps {
   resource: Resource;
+  onView: (resource: Resource) => void;
+  onEdit: (resource: Resource) => void;
   onDelete: (id: string) => void;
 }
 
 /**
  * Card component to display resource information
  */
-const ResourceCard: React.FC<ResourceCardProps> = ({ resource, onDelete }) => {
+const ResourceCard: React.FC<ResourceCardProps> = ({
+  resource,
+  onView,
+  onEdit,
+  onDelete,
+}) => {
   const getResourceIcon = () => {
     switch (resource.type) {
-      case 'DOCUMENT':
+      case "DOCUMENT":
         return <FileOutlined className="text-blue-500" />;
-      case 'VIDEO':
+      case "VIDEO":
         return <VideoCameraOutlined className="text-green-500" />;
-      case 'LINK':
+      case "LINK":
         return <LinkOutlined className="text-purple-500" />;
       default:
         return <FileOutlined className="text-blue-500" />;
@@ -41,40 +46,48 @@ const ResourceCard: React.FC<ResourceCardProps> = ({ resource, onDelete }) => {
 
   const getResourceTypeText = () => {
     switch (resource.type) {
-      case 'DOCUMENT':
-        return 'Document';
-      case 'VIDEO':
-        return 'Video';
-      case 'LINK':
-        return 'Link';
+      case "DOCUMENT":
+        return "Document";
+      case "VIDEO":
+        return "Video";
+      case "LINK":
+        return "Link";
       default:
-        return 'Resource';
+        return "Resource";
     }
   };
 
   return (
-    <Badge.Ribbon 
-      text={resource.isPublic ? 'Public' : 'Private'} 
-      color={resource.isPublic ? 'green' : 'blue'}
+    <Badge.Ribbon
+      text={resource.isPublic ? "Public" : "Private"}
+      color={resource.isPublic ? "green" : "blue"}
     >
-      <Card 
+      <Card
         hoverable
         className="h-full shadow-sm hover:shadow-md transition-shadow"
         actions={[
           <Tooltip title="View Resource">
-            <Link to={ROUTES.TEACHER.RESOURCE_DETAILS(resource.id)}>
-              <Button type="text" icon={<EyeOutlined />}>View</Button>
-            </Link>
+            <Button
+              type="text"
+              icon={<EyeOutlined />}
+              onClick={() => onView(resource)}
+            >
+              View
+            </Button>
           </Tooltip>,
           <Tooltip title="Edit Resource">
-            <Link to={ROUTES.TEACHER.RESOURCE_DETAILS(resource.id)}>
-              <Button type="text" icon={<EditOutlined />}>Edit</Button>
-            </Link>
+            <Button
+              type="text"
+              icon={<EditOutlined />}
+              onClick={() => onEdit(resource)}
+            >
+              Edit
+            </Button>
           </Tooltip>,
           <Tooltip title="Delete Resource">
-            <Button 
-              type="text" 
-              danger 
+            <Button
+              type="text"
+              danger
               icon={<DeleteOutlined />}
               onClick={() => onDelete(resource.id)}
             >
@@ -90,24 +103,24 @@ const ResourceCard: React.FC<ResourceCardProps> = ({ resource, onDelete }) => {
               {resource.title}
             </Title>
           </div>
-          
-          <Paragraph 
-            type="secondary" 
-            ellipsis={{ rows: 2 }}
-            className="mb-4"
-          >
-            {resource.description || 'No description provided.'}
+
+          <Paragraph type="secondary" ellipsis={{ rows: 2 }} className="mb-4">
+            {resource.description || "No description provided."}
           </Paragraph>
-          
+
           <div className="flex flex-wrap gap-2 mb-4">
-            <Tag color={
-              resource.type === 'DOCUMENT' ? 'blue' : 
-              resource.type === 'VIDEO' ? 'green' : 
-              'purple'
-            }>
+            <Tag
+              color={
+                resource.type === "DOCUMENT"
+                  ? "blue"
+                  : resource.type === "VIDEO"
+                  ? "green"
+                  : "purple"
+              }
+            >
               {getResourceTypeText()}
             </Tag>
-            
+
             {resource.course && (
               <Tag color="orange">
                 <BookOutlined className="mr-1" />
@@ -115,7 +128,7 @@ const ResourceCard: React.FC<ResourceCardProps> = ({ resource, onDelete }) => {
               </Tag>
             )}
           </div>
-          
+
           <Space direction="vertical" className="mt-auto">
             <div className="flex items-center">
               <CommentOutlined className="mr-2 text-gray-500" />
@@ -123,10 +136,10 @@ const ResourceCard: React.FC<ResourceCardProps> = ({ resource, onDelete }) => {
                 {resource._count?.comments || 0} Comments
               </Text>
             </div>
-            
+
             <div className="flex items-center">
               <Text type="secondary">
-                Created: {dayjs(resource.createdAt).format('MMM D, YYYY')}
+                Created: {dayjs(resource.createdAt).format("MMM D, YYYY")}
               </Text>
             </div>
           </Space>

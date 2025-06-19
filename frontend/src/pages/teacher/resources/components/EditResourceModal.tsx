@@ -1,70 +1,60 @@
 import React, { useEffect } from "react";
-import {
-  Modal,
-  Form,
-  Input,
-  Select,
-  Switch,
-  Upload,
-  Button,
-  message,
-} from "antd";
-import { InboxOutlined } from "@ant-design/icons";
-import { useApi } from "@/hooks";
-import { teacherService } from "@/services";
+import { Modal, Form, Input, Switch, Upload, message, Space } from "antd";
+import { EditOutlined, InboxOutlined } from "@ant-design/icons";
+import { Resource } from "@/common/types";
 
-const { Option } = Select;
 const { TextArea } = Input;
 
-interface CreateResourceModalProps {
+interface EditResourceModalProps {
   visible: boolean;
+  resource: Resource | null;
   onCancel: () => void;
-  onSubmit: (values: FormData) => void;
+  onSubmit: (id: string, formData: FormData) => void;
   isSubmitting: boolean;
 }
 
 /**
- * Modal component for creating a new resource
+ * Modal component for editing a resource
  */
-const CreateResourceModal: React.FC<CreateResourceModalProps> = ({
+const EditResourceModal: React.FC<EditResourceModalProps> = ({
   visible,
+  resource,
   onCancel,
   onSubmit,
   isSubmitting,
 }) => {
   const [form] = Form.useForm();
 
-  // API call for courses
-  const coursesQuery = useApi(
-    () => teacherService.getMyCourses({ limit: 100 }),
-    { immediate: true }
-  );
-
-  const responseData = coursesQuery.data?.data as any;
-  const courses = responseData?.items || [];
-
-  // Reset form when modal is opened/closed
+  // Reset form when modal is opened/closed or resource changes
   useEffect(() => {
-    if (visible) {
+    if (visible && resource) {
+      console.log("Setting form values for resource:", resource);
+      form.setFieldsValue({
+        title: resource.title,
+        description: resource.description,
+        isPublic: resource.isPublic,
+      });
+    } else if (!visible) {
       form.resetFields();
     }
-  }, [visible, form]);
+  }, [visible, resource, form]);
 
   const handleSubmit = (values: any) => {
+    if (!resource) return;
+
     const formData = new FormData();
 
     // Add form fields
     formData.append("title", values.title);
     formData.append("description", values.description || "");
-    formData.append("courseId", values.courseId);
     formData.append("isPublic", values.isPublic ? "true" : "false");
 
-    // Add file
+    // Add file if uploaded
     if (values.document && values.document[0]) {
       formData.append("document", values.document[0].originFileObj);
     }
 
-    onSubmit(formData);
+    onSubmit(resource.id, formData);
   };
 
   const normFile = (e: any) => {
@@ -96,19 +86,23 @@ const CreateResourceModal: React.FC<CreateResourceModalProps> = ({
 
   return (
     <Modal
-      title="Create New Resource"
+      title={
+        <Space>
+          <EditOutlined />
+          <span>Edit Resource</span>
+        </Space>
+      }
       open={visible}
       onCancel={onCancel}
-      footer={null}
-      width={700}
+      onOk={() => form.submit()}
+      confirmLoading={isSubmitting}
+      width={600}
     >
       <Form
         form={form}
         layout="vertical"
         onFinish={handleSubmit}
-        initialValues={{
-          isPublic: false,
-        }}
+        preserve={true}
       >
         <Form.Item
           name="title"
@@ -129,25 +123,11 @@ const CreateResourceModal: React.FC<CreateResourceModalProps> = ({
         </Form.Item>
 
         <Form.Item
-          name="courseId"
-          label="Course"
-          rules={[{ required: true, message: "Please select a course" }]}
-        >
-          <Select placeholder="Select course" loading={coursesQuery.loading}>
-            {courses.map((course: any) => (
-              <Option key={course.id} value={course.id}>
-                {course.name}
-              </Option>
-            ))}
-          </Select>
-        </Form.Item>
-
-        <Form.Item
           name="document"
-          label="Upload File"
+          label="Replace File (Optional)"
           valuePropName="fileList"
           getValueFromEvent={normFile}
-          rules={[{ required: true, message: "Please upload a file" }]}
+          extra="Leave empty to keep the current file"
         >
           <Upload.Dragger
             name="document"
@@ -159,7 +139,7 @@ const CreateResourceModal: React.FC<CreateResourceModalProps> = ({
               <InboxOutlined />
             </p>
             <p className="ant-upload-text">
-              Click or drag file to this area to upload
+              Click or drag file to this area to replace current file
             </p>
             <p className="ant-upload-hint">
               Support for images, videos, documents (PDF, Word, Excel,
@@ -178,18 +158,9 @@ const CreateResourceModal: React.FC<CreateResourceModalProps> = ({
         >
           <Switch />
         </Form.Item>
-
-        <Form.Item className="mb-0 flex justify-end">
-          <Button onClick={onCancel} className="mr-2">
-            Cancel
-          </Button>
-          <Button type="primary" htmlType="submit" loading={isSubmitting}>
-            Create Resource
-          </Button>
-        </Form.Item>
       </Form>
     </Modal>
   );
 };
 
-export default CreateResourceModal;
+export default EditResourceModal;
