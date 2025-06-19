@@ -1,46 +1,97 @@
-import React, { useState, useEffect } from "react";
-import { Typography, Button, App, Pagination } from "antd";
+import React, { useState } from "react";
+import { Typography, Button, App } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
-import { useTeacherQuery } from "@/hooks";
-import { Course, QueryParams } from "@/common/types";
-import { CourseList, CourseFilter, CreateCourseModal } from "./components";
+import { useApi, useMutation } from "@/hooks";
+import { teacherService, courseService } from "@/services";
+import { Course, QueryParams, CourseUpdateData } from "@/common/types";
+import {
+  CourseTable,
+  CourseFilter,
+  CreateCourseModal,
+  ViewCourseModal,
+  EditCourseModal,
+} from "./components";
 
 const { Title } = Typography;
 
 const TeacherCourses: React.FC = () => {
   const { notification } = App.useApp();
-  const { getMyCoursesQuery, createCourseMutation } = useTeacherQuery();
 
   // State
-  const [courses, setCourses] = useState<Course[]>([]);
-  const [totalCourses, setTotalCourses] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(12);
+  const [pageSize, setPageSize] = useState(10);
   const [filterParams, setFilterParams] = useState<QueryParams>({});
-  const [isModalVisible, setIsModalVisible] = useState(false);
+  const [isCreateModalVisible, setIsCreateModalVisible] = useState(false);
+  const [isViewModalVisible, setIsViewModalVisible] = useState(false);
+  const [isEditModalVisible, setIsEditModalVisible] = useState(false);
+  const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
 
-  // Fetch courses with pagination and filters
-  const coursesQuery = getMyCoursesQuery({
-    page: currentPage,
-    limit: pageSize,
-    ...filterParams,
-  });
-
-  useEffect(() => {
-    if (coursesQuery.data?.data?.data) {
-      setCourses(coursesQuery.data.data.data);
-      setTotalCourses(coursesQuery.data.data.meta?.total || 0);
+  // API calls
+  const coursesQuery = useApi(
+    () =>
+      teacherService.getMyCourses({
+        page: currentPage,
+        limit: pageSize,
+        ...filterParams,
+      }),
+    {
+      immediate: true,
+      dependencies: [currentPage, pageSize, filterParams],
     }
-  }, [coursesQuery.data]);
+  );
 
-  useEffect(() => {
-    if (coursesQuery.isError) {
+  // Get single course for view modal
+  const [viewCourseData, setViewCourseData] = useState<Course | null>(null);
+  const [isLoadingViewCourse, setIsLoadingViewCourse] = useState(false);
+
+  const createCourseMutation = useMutation(courseService.createCourse, {
+    onSuccess: () => {
+      notification.success({
+        message: "Success",
+        description: "Course created successfully.",
+      });
+      setIsCreateModalVisible(false);
+      coursesQuery.refetch();
+    },
+    onError: () => {
       notification.error({
         message: "Error",
-        description: "Failed to load courses. Please try again later.",
+        description: "Failed to create course. Please try again.",
       });
+    },
+  });
+
+  const updateCourseMutation = useMutation(
+    ({ id, data }: { id: string; data: CourseUpdateData }) =>
+      courseService.updateCourse(id, data),
+    {
+      onSuccess: () => {
+        notification.success({
+          message: "Success",
+          description: "Course updated successfully.",
+        });
+        setIsEditModalVisible(false);
+        setSelectedCourse(null);
+        coursesQuery.refetch();
+      },
+      onError: () => {
+        notification.error({
+          message: "Error",
+          description: "Failed to update course. Please try again.",
+        });
+      },
     }
-  }, [coursesQuery.isError, notification]);
+  );
+
+  // Extract data
+  const responseData = coursesQuery.data?.data as any;
+  const courses = responseData?.items || [];
+  const pagination = responseData?.pagination || {
+    total: 0,
+    page: 1,
+    limit: 10,
+    hasMore: false,
+  };
 
   // Handlers
   const handlePageChange = (page: number, pageSize?: number) => {
@@ -68,29 +119,66 @@ const TeacherCourses: React.FC = () => {
     setCurrentPage(1);
   };
 
-  const showModal = () => {
-    setIsModalVisible(true);
+  const showCreateModal = () => {
+    setIsCreateModalVisible(true);
   };
 
-  const handleCancel = () => {
-    setIsModalVisible(false);
+  const handleCreateCancel = () => {
+    setIsCreateModalVisible(false);
   };
 
   const handleCreateCourse = async (values: any) => {
     try {
       await createCourseMutation.mutateAsync(values);
-      notification.success({
-        message: "Success",
-        description: "Course created successfully.",
-      });
-      setIsModalVisible(false);
-      // Refetch courses
-      coursesQuery.refetch();
+    } catch (error) {
+      console.error("Create course error:", error);
+    }
+  };
+
+  const handleViewCourse = async (course: Course) => {
+    setSelectedCourse(course);
+    setIsViewModalVisible(true);
+    setIsLoadingViewCourse(true);
+
+    try {
+      const response = await courseService.getCourse(course.id);
+      setViewCourseData(response.data);
     } catch (error) {
       notification.error({
         message: "Error",
-        description: "Failed to create course. Please try again.",
+        description: "Failed to load course details",
       });
+    } finally {
+      setIsLoadingViewCourse(false);
+    }
+  };
+
+  const handleViewCancel = () => {
+    setIsViewModalVisible(false);
+    setSelectedCourse(null);
+    setViewCourseData(null);
+  };
+
+  const handleEditCourse = (course: Course) => {
+    setSelectedCourse(course);
+    setIsEditModalVisible(true);
+  };
+
+  const handleEditCancel = () => {
+    setIsEditModalVisible(false);
+    setSelectedCourse(null);
+  };
+
+  const handleUpdateCourse = async (values: CourseUpdateData) => {
+    if (!selectedCourse) return;
+
+    try {
+      await updateCourseMutation.mutateAsync({
+        id: selectedCourse.id,
+        data: values,
+      });
+    } catch (error) {
+      console.error("Update course error:", error);
     }
   };
 
@@ -98,34 +186,50 @@ const TeacherCourses: React.FC = () => {
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
         <Title level={2}>My Courses</Title>
-        <Button type="primary" icon={<PlusOutlined />} onClick={showModal}>
+        <Button
+          type="primary"
+          icon={<PlusOutlined />}
+          onClick={showCreateModal}
+        >
           Create Course
         </Button>
       </div>
 
       <CourseFilter onSearch={handleFilter} onReset={handleResetFilter} />
 
-      <CourseList courses={courses} loading={coursesQuery.isLoading} />
-
-      {totalCourses > 0 && (
-        <div className="flex justify-center mt-6">
-          <Pagination
-            current={currentPage}
-            pageSize={pageSize}
-            total={totalCourses}
-            onChange={handlePageChange}
-            showSizeChanger
-            showQuickJumper
-            showTotal={(total) => `Total ${total} courses`}
-          />
-        </div>
-      )}
+      <CourseTable
+        courses={courses}
+        loading={coursesQuery.loading}
+        pagination={{
+          current: currentPage,
+          pageSize: pageSize,
+          total: pagination?.total || 0,
+          onChange: handlePageChange,
+        }}
+        onView={handleViewCourse}
+        onEdit={handleEditCourse}
+      />
 
       <CreateCourseModal
-        visible={isModalVisible}
-        onCancel={handleCancel}
+        visible={isCreateModalVisible}
+        onCancel={handleCreateCancel}
         onSubmit={handleCreateCourse}
-        isSubmitting={createCourseMutation.isPending}
+        isSubmitting={createCourseMutation.loading}
+      />
+
+      <ViewCourseModal
+        visible={isViewModalVisible}
+        course={viewCourseData || selectedCourse}
+        loading={isLoadingViewCourse}
+        onCancel={handleViewCancel}
+      />
+
+      <EditCourseModal
+        visible={isEditModalVisible}
+        course={selectedCourse}
+        onCancel={handleEditCancel}
+        onSubmit={handleUpdateCourse}
+        isSubmitting={updateCourseMutation.loading}
       />
     </div>
   );

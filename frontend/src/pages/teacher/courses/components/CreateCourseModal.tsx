@@ -1,7 +1,16 @@
-import React, { useEffect } from 'react';
-import { Modal, Form, Input, Select, DatePicker, InputNumber, Button } from 'antd';
-import { useDepartmentQuery } from '@/hooks';
-import { CourseCreateData } from '@/common/types';
+import React, { useEffect } from "react";
+import {
+  Modal,
+  Form,
+  Input,
+  Select,
+  DatePicker,
+  InputNumber,
+  Button,
+} from "antd";
+import { useApi } from "@/hooks";
+import { departmentService } from "@/services";
+import { CourseCreateData } from "@/common/types";
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -24,9 +33,14 @@ const CreateCourseModal: React.FC<CreateCourseModalProps> = ({
   isSubmitting,
 }) => {
   const [form] = Form.useForm();
-  const { getAllDepartmentsQuery } = useDepartmentQuery();
-  const departmentsQuery = getAllDepartmentsQuery();
-  const departments = departmentsQuery.data?.data?.data || [];
+
+  // API call for departments
+  const departmentsQuery = useApi(
+    () => departmentService.getDepartmentsForSelect(),
+    { immediate: true }
+  );
+
+  const departments = departmentsQuery.data?.data || [];
 
   // Reset form when modal is opened/closed
   useEffect(() => {
@@ -37,13 +51,13 @@ const CreateCourseModal: React.FC<CreateCourseModalProps> = ({
 
   const handleSubmit = (values: any) => {
     const { dateRange, ...rest } = values;
-    
+
     const formattedValues: CourseCreateData = {
       ...rest,
       startDate: dateRange?.[0]?.toISOString(),
       endDate: dateRange?.[1]?.toISOString(),
     };
-    
+
     onSubmit(formattedValues);
   };
 
@@ -67,8 +81,8 @@ const CreateCourseModal: React.FC<CreateCourseModalProps> = ({
           name="name"
           label="Course Name"
           rules={[
-            { required: true, message: 'Please enter course name' },
-            { min: 3, message: 'Course name must be at least 3 characters' },
+            { required: true, message: "Please enter course name" },
+            { min: 3, message: "Course name must be at least 3 characters" },
           ]}
         >
           <Input placeholder="Enter course name" />
@@ -78,17 +92,18 @@ const CreateCourseModal: React.FC<CreateCourseModalProps> = ({
           name="code"
           label="Course Code"
           rules={[
-            { required: true, message: 'Please enter course code' },
-            { pattern: /^[A-Z0-9-]+$/, message: 'Course code must contain only uppercase letters, numbers, and hyphens' },
+            { required: true, message: "Please enter course code" },
+            {
+              pattern: /^[A-Z0-9-]+$/,
+              message:
+                "Course code must contain only uppercase letters, numbers, and hyphens",
+            },
           ]}
         >
           <Input placeholder="e.g. CS-101" />
         </Form.Item>
 
-        <Form.Item
-          name="description"
-          label="Description"
-        >
+        <Form.Item name="description" label="Description">
           <TextArea
             placeholder="Enter course description"
             autoSize={{ minRows: 3, maxRows: 6 }}
@@ -98,15 +113,15 @@ const CreateCourseModal: React.FC<CreateCourseModalProps> = ({
         <Form.Item
           name="departmentId"
           label="Department"
-          rules={[{ required: true, message: 'Please select a department' }]}
+          rules={[{ required: true, message: "Please select a department" }]}
         >
           <Select
             placeholder="Select department"
-            loading={departmentsQuery.isLoading}
+            loading={departmentsQuery.loading}
           >
             {departments.map((dept) => (
-              <Option key={dept.id} value={dept.id}>
-                {dept.name}
+              <Option key={dept.value} value={dept.value}>
+                {dept.label}
               </Option>
             ))}
           </Select>
@@ -115,7 +130,7 @@ const CreateCourseModal: React.FC<CreateCourseModalProps> = ({
         <Form.Item
           name="duration"
           label="Duration"
-          rules={[{ required: true, message: 'Please enter course duration' }]}
+          rules={[{ required: true, message: "Please enter course duration" }]}
         >
           <Input placeholder="e.g. 3 months, 1 semester" />
         </Form.Item>
@@ -123,24 +138,19 @@ const CreateCourseModal: React.FC<CreateCourseModalProps> = ({
         <Form.Item
           name="capacity"
           label="Capacity"
-          rules={[{ required: true, message: 'Please enter course capacity' }]}
+          rules={[{ required: true, message: "Please enter course capacity" }]}
         >
-          <InputNumber min={1} max={500} style={{ width: '100%' }} />
+          <InputNumber min={1} max={500} style={{ width: "100%" }} />
         </Form.Item>
 
-        <Form.Item
-          name="dateRange"
-          label="Course Period"
-        >
-          <RangePicker style={{ width: '100%' }} />
+        <Form.Item name="dateRange" label="Course Period">
+          <RangePicker style={{ width: "100%" }} />
         </Form.Item>
 
-        <Form.Item
-          name="syllabus"
-          label="Syllabus URL"
-        >
+        {/* Commented out syllabus field as requested */}
+        {/* <Form.Item name="syllabus" label="Syllabus URL">
           <Input placeholder="Enter syllabus URL" />
-        </Form.Item>
+        </Form.Item> */}
 
         <Form.Item className="mb-0 flex justify-end">
           <Button onClick={onCancel} className="mr-2">
