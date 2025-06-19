@@ -83,8 +83,39 @@ export const updateProfile = asyncHandler(async (req: Request, res: Response) =>
 export const getMyCourses = asyncHandler(async (req: Request, res: Response) => {
   const teacherId = req.teacher!.id;
 
+  // Extract query parameters
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 10;
+  const search = req.query.search as string;
+  const departmentId = req.query.departmentId as string;
+
+  // Calculate skip value for pagination
+  const skip = (page - 1) * limit;
+
+  // Build where clause
+  const where: any = { teacherId };
+
+  if (search) {
+    where.OR = [
+      { name: { contains: search, mode: 'insensitive' } },
+      { code: { contains: search, mode: 'insensitive' } },
+      { description: { contains: search, mode: 'insensitive' } },
+    ];
+  }
+
+  if (departmentId) {
+    where.departmentId = departmentId;
+  }
+
+  // Get total count for pagination
+  const total = await prisma.course.count({ where });
+
+  // Get courses with pagination
   const courses = await prisma.course.findMany({
-    where: { teacherId },
+    where,
+    skip,
+    take: limit,
+    orderBy: { createdAt: 'desc' },
     include: {
       department: {
         select: {
@@ -101,10 +132,23 @@ export const getMyCourses = asyncHandler(async (req: Request, res: Response) => 
     },
   });
 
+  // Calculate pagination info
+  const totalPages = Math.ceil(total / limit);
+  const hasMore = page < totalPages;
+
   res.status(200).json({
     success: true,
     message: "Courses retrieved successfully",
-    data: courses,
+    data: {
+      items: courses,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasMore,
+      },
+    },
   });
 });
 
@@ -326,313 +370,90 @@ export const getCourseResources = asyncHandler(async (req: Request, res: Respons
   });
 });
 
-// @desc    Create resource
-// @route   POST /api/teacher/resources
+// @desc    Get teacher's resources with pagination
+// @route   GET /api/teacher/resources
 // @access  Private (Teacher)
-export const createResource = asyncHandler(async (req: Request, res: Response) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    throw parseValidationErrors(errors);
-  }
-
+export const getMyResources = asyncHandler(async (req: Request, res: Response) => {
   const teacherId = req.teacher!.id;
-  const { title, description, type, url, courseId, isPublic = false } = req.body;
 
-  // Using transaction to ensure data consistency
-  const resource = await prisma.$transaction(async (tx) => {
-    const course = await tx.course.findUnique({
-      where: { id: courseId },
-    });
+  // Extract query parameters
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 10;
+  const search = req.query.search as string;
+  const courseId = req.query.courseId as string;
+  const type = req.query.type as string;
+  const isPublic = req.query.isPublic as string;
 
-    if (!course) {
-      throw new NotFoundError("Course not found");
-    }
+  // Calculate skip value for pagination
+  const skip = (page - 1) * limit;
 
-    if (course.teacherId !== teacherId) {
-      throw new ForbiddenError("You can only create resources for your own courses");
-    }
+  // Build where clause
+  const where: any = { teacherId };
 
-    return await tx.resource.create({
-      data: {
-        title,
-        description,
-        type,
-        url,
-        courseId,
-        teacherId,
-        isPublic,
-      },
-    });
-  });
-
-  res.status(201).json({
-    success: true,
-    message: "Resource created successfully",
-    data: resource,
-  });
-});
-
-// @desc    Update resource
-// @route   PUT /api/teacher/resources/:id
-// @access  Private (Teacher)
-export const updateResource = asyncHandler(async (req: Request, res: Response) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    throw parseValidationErrors(errors);
+  if (search) {
+    where.OR = [
+      { title: { contains: search, mode: 'insensitive' } },
+      { description: { contains: search, mode: 'insensitive' } },
+    ];
   }
 
-  const teacherId = req.teacher!.id;
-  const resourceId = req.params.id;
-  const { title, description, type, url, isPublic } = req.body;
-
-  const resource = await prisma.resource.findUnique({
-    where: { id: resourceId },
-  });
-
-  if (!resource) {
-    throw new NotFoundError("Resource not found");
+  if (courseId) {
+    where.courseId = courseId;
   }
 
-  if (resource.teacherId !== teacherId) {
-    throw new ForbiddenError("You can only update your own resources");
+  if (type) {
+    where.type = type;
   }
 
-  const updatedResource = await prisma.resource.update({
-    where: { id: resourceId },
-    data: {
-      title,
-      description,
-      type,
-      url,
-      isPublic,
-    },
-  });
-
-  res.status(200).json({
-    success: true,
-    message: "Resource updated successfully",
-    data: updatedResource,
-  });
-});
-
-// @desc    Delete resource
-// @route   DELETE /api/teacher/resources/:id
-// @access  Private (Teacher)
-export const deleteResource = asyncHandler(async (req: Request, res: Response) => {
-  const teacherId = req.teacher!.id;
-  const resourceId = req.params.id;
-
-  const resource = await prisma.resource.findUnique({
-    where: { id: resourceId },
-  });
-
-  if (!resource) {
-    throw new NotFoundError("Resource not found");
+  if (isPublic !== undefined) {
+    where.isPublic = isPublic === 'true';
   }
 
-  if (resource.teacherId !== teacherId) {
-    throw new ForbiddenError("You can only delete your own resources");
-  }
+  // Get total count for pagination
+  const total = await prisma.resource.count({ where });
 
-  await prisma.resource.delete({
-    where: { id: resourceId },
-  });
-
-  res.status(200).json({
-    success: true,
-    message: "Resource deleted successfully",
-    data: null,
-  });
-});
-
-// @desc    Get resource comments
-// @route   GET /api/teacher/resources/:id/comments
-// @access  Private (Teacher)
-export const getResourceComments = asyncHandler(async (req: Request, res: Response) => {
-  const teacherId = req.teacher!.id;
-  const resourceId = req.params.id;
-
-  const resource = await prisma.resource.findUnique({
-    where: { id: resourceId },
+  // Get resources with pagination
+  const resources = await prisma.resource.findMany({
+    where,
+    skip,
+    take: limit,
+    orderBy: { createdAt: 'desc' },
     include: {
-      comments: {
-        include: {
-          teacher: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-          student: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-          replies: {
-            include: {
-              teacher: {
-                select: {
-                  id: true,
-                  name: true,
-                },
-              },
-              student: {
-                select: {
-                  id: true,
-                  name: true,
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-  });
-
-  if (!resource) {
-    throw new NotFoundError("Resource not found");
-  }
-
-  if (resource.teacherId !== teacherId) {
-    throw new ForbiddenError("You can only view comments of your own resources");
-  }
-
-  res.status(200).json({
-    success: true,
-    message: "Resource comments retrieved successfully",
-    data: resource.comments,
-  });
-});
-
-// @desc    Create resource comment
-// @route   POST /api/teacher/resources/:id/comments
-// @access  Private (Teacher)
-export const createResourceComment = asyncHandler(async (req: Request, res: Response) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    throw parseValidationErrors(errors);
-  }
-
-  const teacherId = req.teacher!.id;
-  const resourceId = req.params.id;
-  const { content, parentId } = req.body;
-
-  const comment = await prisma.$transaction(async (tx) => {
-    const resource = await tx.resource.findUnique({
-      where: { id: resourceId },
-    });
-
-    if (!resource) {
-      throw new NotFoundError("Resource not found");
-    }
-
-    if (parentId) {
-      const parentComment = await tx.resourceComment.findUnique({
-        where: { id: parentId },
-      });
-
-      if (!parentComment) {
-        throw new NotFoundError("Parent comment not found");
-      }
-    }
-
-    return await tx.resourceComment.create({
-      data: {
-        content,
-        resourceId,
-        teacherId,
-        parentId,
-      },
-      include: {
-        teacher: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-      },
-    });
-  });
-
-  res.status(201).json({
-    success: true,
-    message: "Comment created successfully",
-    data: comment,
-  });
-});
-
-// @desc    Update resource comment
-// @route   PUT /api/teacher/resources/comments/:commentId
-// @access  Private (Teacher)
-export const updateResourceComment = asyncHandler(async (req: Request, res: Response) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    throw parseValidationErrors(errors);
-  }
-
-  const teacherId = req.teacher!.id;
-  const commentId = req.params.commentId;
-  const { content } = req.body;
-
-  const comment = await prisma.resourceComment.findUnique({
-    where: { id: commentId },
-  });
-
-  if (!comment) {
-    throw new NotFoundError("Comment not found");
-  }
-
-  if (comment.teacherId !== teacherId) {
-    throw new ForbiddenError("You can only update your own comments");
-  }
-
-  const updatedComment = await prisma.resourceComment.update({
-    where: { id: commentId },
-    data: { content },
-    include: {
-      teacher: {
+      course: {
         select: {
           id: true,
           name: true,
+          code: true,
+        },
+      },
+      _count: {
+        select: {
+          comments: true,
         },
       },
     },
   });
 
-  res.status(200).json({
-    success: true,
-    message: "Comment updated successfully",
-    data: updatedComment,
-  });
-});
-
-// @desc    Delete resource comment
-// @route   DELETE /api/teacher/resources/comments/:commentId
-// @access  Private (Teacher)
-export const deleteResourceComment = asyncHandler(async (req: Request, res: Response) => {
-  const teacherId = req.teacher!.id;
-  const commentId = req.params.commentId;
-
-  const comment = await prisma.resourceComment.findUnique({
-    where: { id: commentId },
-  });
-
-  if (!comment) {
-    throw new NotFoundError("Comment not found");
-  }
-
-  if (comment.teacherId !== teacherId) {
-    throw new ForbiddenError("You can only delete your own comments");
-  }
-
-  await prisma.resourceComment.delete({
-    where: { id: commentId },
-  });
+  // Calculate pagination info
+  const totalPages = Math.ceil(total / limit);
+  const hasMore = page < totalPages;
 
   res.status(200).json({
     success: true,
-    message: "Comment deleted successfully",
-    data: null,
+    message: "Resources retrieved successfully",
+    data: {
+      items: resources,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasMore,
+      },
+    },
   });
 });
+
+
+
+
