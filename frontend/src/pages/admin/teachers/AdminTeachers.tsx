@@ -1,47 +1,85 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useCallback } from "react";
 import { Typography, Button, App } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
-import { useAdminQuery } from "@/hooks";
-import { Teacher, QueryParams } from "@/common/types";
+import { useApi, useMutation } from "@/hooks";
+import { Teacher } from "@/common/types/models.types";
+import { adminService, AdminQueryParams } from "@/services";
+import { TeacherCreateData } from "@/common/types";
 import { TeacherTable, TeacherFilter, CreateTeacherModal } from "./components";
 
 const { Title } = Typography;
 
 const AdminTeachers: React.FC = () => {
   const { notification } = App.useApp();
-  const {
-    getTeachersQuery,
-    createTeacherMutation,
-    deleteTeacherMutation,
-    toggleTeacherBanMutation,
-  } = useAdminQuery();
 
   // State
-  const [teachers, setTeachers] = useState<Teacher[]>([]);
-  const [filterParams, setFilterParams] = useState<QueryParams>({});
+  const [filterParams, setFilterParams] = useState<AdminQueryParams>({
+    page: 1,
+    limit: 10,
+  });
   const [isModalVisible, setIsModalVisible] = useState(false);
 
-  // Fetch teachers with filters
-  const teachersQuery = getTeachersQuery(filterParams);
+  // API calls
+  const teachersQuery = useApi(() => adminService.getTeachers(filterParams), {
+    dependencies: [filterParams],
+    immediate: true,
+  });
 
-  useEffect(() => {
-    if (teachersQuery.data?.data?.data) {
-      setTeachers(teachersQuery.data.data.data);
+  const createTeacherMutation = useMutation(
+    (data: TeacherCreateData) => adminService.createTeacher(data),
+    {
+      onSuccess: () => {
+        notification.success({
+          message: "Success",
+          description: "Teacher created successfully.",
+        });
+        setIsModalVisible(false);
+        teachersQuery.refetch();
+      },
     }
-  }, [teachersQuery.data]);
+  );
 
-  useEffect(() => {
-    if (teachersQuery.isError) {
-      notification.error({
-        message: "Error",
-        description: "Failed to load teachers. Please try again later.",
-      });
+  const deleteTeacherMutation = useMutation(
+    (id: string) => adminService.deleteTeacher(id),
+    {
+      onSuccess: () => {
+        notification.success({
+          message: "Success",
+          description: "Teacher deleted successfully.",
+        });
+        teachersQuery.refetch();
+      },
     }
-  }, [teachersQuery.isError, notification]);
+  );
+
+  const toggleTeacherBanMutation = useMutation(
+    (id: string) => adminService.toggleTeacherBan(id),
+    {
+      onSuccess: () => {
+        notification.success({
+          message: "Success",
+          description: "Teacher ban status updated successfully.",
+        });
+        teachersQuery.refetch();
+      },
+    }
+  );
+
+  // Extract data from API response
+  const teachers = teachersQuery.data?.data?.items || [];
+  const pagination = {
+    current: teachersQuery.data?.data?.page || 1,
+    total: teachersQuery.data?.data?.total || 0,
+    pageSize: teachersQuery.data?.data?.limit || 10,
+    hasMore: teachersQuery.data?.data?.hasMore || false,
+  };
 
   // Handlers
   const handleFilter = (values: any) => {
-    const params: QueryParams = {};
+    const params: AdminQueryParams = {
+      page: 1, // Reset to first page when filtering
+      limit: filterParams.limit || 10,
+    };
 
     if (values.search) {
       params.search = values.search;
@@ -51,7 +89,7 @@ const AdminTeachers: React.FC = () => {
       params.departmentId = values.departmentId;
     }
 
-    if (values.isBanned) {
+    if (values.isBanned !== undefined) {
       params.isBanned = values.isBanned;
     }
 
@@ -59,7 +97,18 @@ const AdminTeachers: React.FC = () => {
   };
 
   const handleResetFilter = () => {
-    setFilterParams({});
+    setFilterParams({
+      page: 1,
+      limit: filterParams.limit || 10,
+    });
+  };
+
+  const handlePageChange = (page: number, pageSize?: number) => {
+    setFilterParams({
+      ...filterParams,
+      page,
+      limit: pageSize || filterParams.limit || 10,
+    });
   };
 
   const showModal = () => {
@@ -70,60 +119,16 @@ const AdminTeachers: React.FC = () => {
     setIsModalVisible(false);
   };
 
-  const handleCreateTeacher = async (values: any) => {
-    try {
-      await createTeacherMutation.mutateAsync(values);
-      notification.success({
-        message: "Success",
-        description: "Teacher created successfully.",
-      });
-      setIsModalVisible(false);
-      // Refetch teachers
-      teachersQuery.refetch();
-    } catch (error) {
-      notification.error({
-        message: "Error",
-        description: "Failed to create teacher. Please try again.",
-      });
-    }
+  const handleCreateTeacher = async (values: TeacherCreateData) => {
+    await createTeacherMutation.mutateAsync(values);
   };
 
   const handleDeleteTeacher = async (id: string) => {
-    try {
-      await deleteTeacherMutation.mutateAsync(id);
-      notification.success({
-        message: "Success",
-        description: "Teacher deleted successfully.",
-      });
-      // Refetch teachers
-      teachersQuery.refetch();
-    } catch (error) {
-      notification.error({
-        message: "Error",
-        description: "Failed to delete teacher. Please try again.",
-      });
-    }
+    await deleteTeacherMutation.mutateAsync(id);
   };
 
   const handleToggleBan = async (id: string, isBanned: boolean) => {
-    try {
-      await toggleTeacherBanMutation.mutateAsync({ id, isBanned });
-      notification.success({
-        message: "Success",
-        description: `Teacher ${
-          isBanned ? "banned" : "unbanned"
-        } successfully.`,
-      });
-      // Refetch teachers
-      teachersQuery.refetch();
-    } catch (error) {
-      notification.error({
-        message: "Error",
-        description: `Failed to ${
-          isBanned ? "ban" : "unban"
-        } teacher. Please try again.`,
-      });
-    }
+    await toggleTeacherBanMutation.mutateAsync(id);
   };
 
   return (
@@ -138,17 +143,27 @@ const AdminTeachers: React.FC = () => {
       <TeacherFilter onSearch={handleFilter} onReset={handleResetFilter} />
 
       <TeacherTable
-        teachers={teachers}
-        loading={teachersQuery.isLoading}
+        teachers={teachers as any}
+        loading={teachersQuery.loading}
         onDelete={handleDeleteTeacher}
         onToggleBan={handleToggleBan}
+        pagination={{
+          current: pagination.current,
+          total: pagination.total,
+          pageSize: pagination.pageSize,
+          showSizeChanger: true,
+          showTotal: (total, range) =>
+            `${range[0]}-${range[1]} of ${total} teachers`,
+          onChange: handlePageChange,
+          onShowSizeChange: handlePageChange,
+        }}
       />
 
       <CreateTeacherModal
         visible={isModalVisible}
         onCancel={handleCancel}
         onSubmit={handleCreateTeacher}
-        isSubmitting={createTeacherMutation?.isPending}
+        isSubmitting={createTeacherMutation.loading}
       />
     </div>
   );

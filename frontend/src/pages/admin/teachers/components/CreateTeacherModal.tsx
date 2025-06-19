@@ -1,7 +1,7 @@
-import React, { useEffect } from 'react';
-import { Modal, Form, Input, Select, Button } from 'antd';
-import { useDepartmentQuery } from '@/hooks';
-import { TeacherCreateData } from '@/common/types';
+import React, { useEffect } from "react";
+import { Modal, Form, Input, Select, Button } from "antd";
+import { useDepartmentContext } from "@/context/DepartmentContext";
+import { TeacherCreateData } from "@/common/types";
 
 const { Option } = Select;
 
@@ -22,9 +22,7 @@ const CreateTeacherModal: React.FC<CreateTeacherModalProps> = ({
   isSubmitting,
 }) => {
   const [form] = Form.useForm();
-  const { getAllDepartmentsQuery } = useDepartmentQuery();
-  const departmentsQuery = getAllDepartmentsQuery();
-  const departments = departmentsQuery.data?.data?.data || [];
+  const { departments, loading: departmentsLoading } = useDepartmentContext();
 
   // Reset form when modal is opened/closed
   useEffect(() => {
@@ -45,17 +43,13 @@ const CreateTeacherModal: React.FC<CreateTeacherModalProps> = ({
       footer={null}
       width={600}
     >
-      <Form
-        form={form}
-        layout="vertical"
-        onFinish={handleSubmit}
-      >
+      <Form form={form} layout="vertical" onFinish={handleSubmit}>
         <Form.Item
           name="name"
           label="Full Name"
           rules={[
-            { required: true, message: 'Please enter teacher name' },
-            { min: 3, message: 'Name must be at least 3 characters' },
+            { required: true, message: "Please enter teacher name" },
+            { min: 3, message: "Name must be at least 3 characters" },
           ]}
         >
           <Input placeholder="Enter teacher's full name" />
@@ -65,8 +59,8 @@ const CreateTeacherModal: React.FC<CreateTeacherModalProps> = ({
           name="email"
           label="Email"
           rules={[
-            { required: true, message: 'Please enter email' },
-            { type: 'email', message: 'Please enter a valid email' },
+            { required: true, message: "Please enter email" },
+            { type: "email", message: "Please enter a valid email" },
           ]}
         >
           <Input placeholder="Enter email address" />
@@ -76,8 +70,8 @@ const CreateTeacherModal: React.FC<CreateTeacherModalProps> = ({
           name="password"
           label="Password"
           rules={[
-            { required: true, message: 'Please enter password' },
-            { min: 6, message: 'Password must be at least 6 characters' },
+            { required: true, message: "Please enter password" },
+            { min: 6, message: "Password must be at least 6 characters" },
           ]}
         >
           <Input.Password placeholder="Enter password" />
@@ -87,20 +81,20 @@ const CreateTeacherModal: React.FC<CreateTeacherModalProps> = ({
           name="phoneNumber"
           label="Phone Number"
           rules={[
-            { pattern: /^\+?[1-9]\d{1,14}$/, message: 'Please enter a valid phone number' },
+            {
+              pattern: /^\+?[1-9]\d{1,14}$/,
+              message: "Please enter a valid phone number",
+            },
           ]}
         >
           <Input placeholder="Enter phone number" />
         </Form.Item>
 
-        <Form.Item
-          name="departmentId"
-          label="Department"
-        >
+        <Form.Item name="departmentId" label="Department">
           <Select
             placeholder="Select department"
             allowClear
-            loading={departmentsQuery.isLoading}
+            loading={departmentsLoading}
           >
             {departments.map((dept) => (
               <Option key={dept.id} value={dept.id}>
@@ -113,17 +107,12 @@ const CreateTeacherModal: React.FC<CreateTeacherModalProps> = ({
         <Form.Item
           name="qualification"
           label="Qualification"
-          rules={[
-            { required: true, message: 'Please enter qualification' },
-          ]}
+          rules={[{ required: true, message: "Please enter qualification" }]}
         >
           <Input placeholder="Enter qualification" />
         </Form.Item>
 
-        <Form.Item
-          name="specialization"
-          label="Specialization"
-        >
+        <Form.Item name="specialization" label="Specialization">
           <Input placeholder="Enter specialization" />
         </Form.Item>
 
