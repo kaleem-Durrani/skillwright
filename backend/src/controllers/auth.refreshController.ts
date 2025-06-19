@@ -40,6 +40,56 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response) => 
   // Store the new refresh token
   await storeRefreshToken(newRefreshToken, userId, userType);
 
+  // Get user data based on userType
+  let userData;
+  if (userType === 'admin') {
+    userData = await prisma.admin.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        isActive: true
+      }
+    });
+  } else if (userType === 'teacher') {
+    userData = await prisma.teacher.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        isVerified: true,
+        department: {
+          select: {
+            id: true,
+            name: true
+          }
+        }
+      }
+    });
+  } else if (userType === 'student') {
+    userData = await prisma.student.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        isVerified: true,
+        department: {
+          select: {
+            id: true,
+            name: true
+          }
+        }
+      }
+    });
+  }
+
+  if (!userData) {
+    throw new AuthenticationError('User not found');
+  }
+
   // Set the new tokens in cookies
   setTokens(res, newAccessToken, newRefreshToken);
 
@@ -47,6 +97,7 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response) => 
     success: true,
     message: 'Token refreshed successfully',
     data: {
+      ...userData,
       userType
     }
   });
