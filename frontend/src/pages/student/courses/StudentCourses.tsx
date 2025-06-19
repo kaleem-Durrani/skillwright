@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Typography, Button, Tabs, Modal, message } from "antd";
 import { ExclamationCircleOutlined } from "@ant-design/icons";
-import { useStudentQuery, useCourseQuery } from "@/hooks";
+import { useApi, useMutation } from "@/hooks";
+import { studentService, courseService } from "@/services";
 import { ROUTES } from "@/common/constants";
 import { CourseWithEnrollment } from "@/common/types";
 import { CourseList, CourseSearch } from "./components";
@@ -23,44 +24,62 @@ const StudentCourses = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 6;
 
-  // Get enrolled courses for the student
-  const {
-    getEnrolledCoursesQuery,
-    withdrawFromCourseMutation,
-    requestEnrollmentMutation,
-  } = useStudentQuery();
-  const { getAllCoursesQuery } = useCourseQuery();
+  // API calls for courses
+  const enrolledCoursesQuery = useApi(
+    () =>
+      studentService.getEnrolledCourses({
+        page: currentPage,
+        limit: pageSize,
+        search: searchText,
+      }),
+    {
+      immediate: true,
+      dependencies: [currentPage, pageSize, searchText],
+    }
+  );
 
-  const {
-    data: enrolledCoursesData,
-    isLoading: isLoadingEnrolled,
-    refetch: refetchEnrolled,
-  } = getEnrolledCoursesQuery({
-    page: currentPage,
-    limit: pageSize,
-    search: searchText,
-  });
+  const allCoursesQuery = useApi(
+    () =>
+      courseService.getCourses({
+        page: currentPage,
+        limit: pageSize,
+        search: searchText,
+      }),
+    {
+      immediate: true,
+      dependencies: [currentPage, pageSize, searchText],
+    }
+  );
 
-  const {
-    data: allCoursesData,
-    isLoading: isLoadingAll,
-    refetch: refetchAll,
-  } = getAllCoursesQuery({
-    page: currentPage,
-    limit: pageSize,
-    search: searchText,
+  // Mutation hooks
+  const withdrawFromCourseMutation = useMutation(
+    studentService.withdrawFromCourse,
+    {
+      onSuccess: () => {
+        message.success("Successfully withdrawn from course");
+        enrolledCoursesQuery.refetch();
+        allCoursesQuery.refetch();
+      },
+    }
+  );
+
+  const requestEnrollmentMutation = useMutation(studentService.enrollInCourse, {
+    onSuccess: () => {
+      message.success("Enrollment request sent successfully");
+      enrolledCoursesQuery.refetch();
+      allCoursesQuery.refetch();
+    },
   });
 
   // Extract courses from the API response
-  // Using type assertion since we know the structure from the API
-  const enrolledCoursesResponse = enrolledCoursesData?.data?.data as any;
+  const enrolledCoursesResponse = enrolledCoursesQuery.data?.data;
   const enrolledCourses = enrolledCoursesResponse?.items || [];
   const pendingCourses = filterCoursesByStatus(enrolledCourses, "PENDING");
   const approvedCourses = filterCoursesByStatus(enrolledCourses, "APPROVED");
 
   // All available courses (excluding already enrolled ones)
   const enrolledCourseIds = getCourseIds(enrolledCourses);
-  const allCoursesResponse = allCoursesData?.data?.data as any;
+  const allCoursesResponse = allCoursesQuery.data?.data;
   const availableCourses = filterAvailableCourses(
     allCoursesResponse?.items || [],
     enrolledCourseIds
@@ -73,19 +92,14 @@ const StudentCourses = () => {
       icon: <ExclamationCircleOutlined />,
       content:
         "Your enrollment request will be sent to the teacher for approval.",
-      onOk() {
-        requestEnrollmentMutation.mutate(courseId, {
-          onSuccess: () => {
-            message.success("Enrollment request sent successfully");
-            refetchEnrolled();
-            refetchAll();
-          },
-          onError: (error: any) => {
-            message.error(
-              error.response?.data?.message || "Failed to enroll in course"
-            );
-          },
-        });
+      async onOk() {
+        try {
+          await requestEnrollmentMutation.mutateAsync(courseId);
+        } catch (error: any) {
+          message.error(
+            error.response?.data?.message || "Failed to enroll in course"
+          );
+        }
       },
     });
   };
@@ -97,19 +111,14 @@ const StudentCourses = () => {
       icon: <ExclamationCircleOutlined />,
       content:
         "You will need to re-enroll if you want to access this course again.",
-      onOk() {
-        withdrawFromCourseMutation.mutate(courseId, {
-          onSuccess: () => {
-            message.success("Successfully withdrawn from course");
-            refetchEnrolled();
-            refetchAll();
-          },
-          onError: (error: any) => {
-            message.error(
-              error.response?.data?.message || "Failed to withdraw from course"
-            );
-          },
-        });
+      async onOk() {
+        try {
+          await withdrawFromCourseMutation.mutateAsync(courseId);
+        } catch (error: any) {
+          message.error(
+            error.response?.data?.message || "Failed to withdraw from course"
+          );
+        }
       },
     });
   };
@@ -156,7 +165,7 @@ const StudentCourses = () => {
         <TabPane tab="Enrolled Courses" key="enrolled">
           <CourseList
             courses={approvedCourses}
-            isLoading={isLoadingEnrolled}
+            isLoading={enrolledCoursesQuery.loading}
             isEnrolled={true}
             currentPage={currentPage}
             pageSize={pageSize}
@@ -178,7 +187,7 @@ const StudentCourses = () => {
         <TabPane tab="Pending Requests" key="pending">
           <CourseList
             courses={pendingCourses}
-            isLoading={isLoadingEnrolled}
+            isLoading={enrolledCoursesQuery.loading}
             isEnrolled={true}
             currentPage={currentPage}
             pageSize={pageSize}
@@ -195,7 +204,7 @@ const StudentCourses = () => {
         <TabPane tab="Available Courses" key="available">
           <CourseList
             courses={availableCourses}
-            isLoading={isLoadingAll}
+            isLoading={allCoursesQuery.loading}
             isEnrolled={false}
             currentPage={currentPage}
             pageSize={pageSize}
