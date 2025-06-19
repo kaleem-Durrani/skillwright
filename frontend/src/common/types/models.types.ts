@@ -1,4 +1,46 @@
 // Response types (what we receive from the backend)
+export interface Teacher {
+  id: string;
+  name: string;
+  email: string;
+  phoneNumber?: string;
+  qualification: string;
+  specialization?: string;
+  departmentId: string;
+  department?: {
+    id: string;
+    name: string;
+  };
+  isBanned: boolean;
+  isVerified: boolean;
+  createdAt: string;
+  updatedAt: string;
+  _count?: {
+    courses: number;
+    resources: number;
+  };
+}
+
+export interface Student {
+  id: string;
+  name: string;
+  email: string;
+  phoneNumber?: string;
+  enrollmentNo: string;
+  departmentId: string;
+  department?: {
+    id: string;
+    name: string;
+  };
+  isBanned: boolean;
+  isVerified: boolean;
+  createdAt: string;
+  updatedAt: string;
+  _count?: {
+    enrollments: number;
+  };
+}
+
 export interface Department {
   id: string;
   name: string;
@@ -26,6 +68,16 @@ export interface Course {
   endDate?: string;
   createdAt: string;
   updatedAt: string;
+  department?: {
+    id: string;
+    name: string;
+  };
+  teacher?: {
+    id: string;
+    name: string;
+    qualification?: string;
+    specialization?: string;
+  };
   _count?: {
     enrollments: number;
     resources: number;
@@ -41,8 +93,18 @@ export interface Resource {
   courseId: string;
   teacherId: string;
   isPublic: boolean;
+  mimeType?: string;
   createdAt: string;
   updatedAt: string;
+  course?: {
+    id: string;
+    name: string;
+    code: string;
+  };
+  teacher?: {
+    id: string;
+    name: string;
+  };
   _count?: {
     comments: number;
   };
@@ -85,6 +147,14 @@ export interface NewsEventComment {
   userType: 'teacher' | 'student';
   createdAt: string;
   updatedAt: string;
+}
+
+export interface NewsEventCommentCreateData {
+  content: string;
+}
+
+export interface NewsEventCommentUpdateData {
+  content: string;
 }
 
 export interface Enrollment {
@@ -183,6 +253,16 @@ export interface ResourceUpdateData {
   url?: string;
   courseId?: string;
   isPublic?: boolean;
+}
+
+export interface TeacherCreateData {
+  name: string;
+  email: string;
+  password: string;
+  phoneNumber?: string;
+  qualification: string;
+  specialization?: string;
+  departmentId?: string;
 }
 
 export interface NewsEventCreateData {
