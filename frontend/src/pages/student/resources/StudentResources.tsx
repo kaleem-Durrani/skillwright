@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Typography, Card } from "antd";
-import { useStudentQuery } from "@/hooks";
+import { useApi } from "@/hooks";
+import { studentService } from "@/services";
 import { ResourceWithDetails, CourseWithEnrollment } from "@/common/types";
 import { ResourceList, ResourceFilter } from "./components";
 
@@ -15,24 +16,37 @@ const StudentResources = () => {
   const [selectedCourseId, setSelectedCourseId] = useState<string>("");
   const pageSize = 10;
 
-  // Get student's enrolled courses
-  const { getEnrolledCoursesQuery, getCourseResourcesQuery } =
-    useStudentQuery();
-
-  const { data: enrolledCoursesData, isLoading: isLoadingCourses } =
-    getEnrolledCoursesQuery();
+  // API calls for enrolled courses
+  const enrolledCoursesQuery = useApi(
+    () => studentService.getEnrolledCourses(),
+    { immediate: true }
+  );
 
   // Get resources for the selected course
-  const { data: resourcesData, isLoading: isLoadingResources } =
-    getCourseResourcesQuery(selectedCourseId, {
-      page: currentPage,
-      limit: pageSize,
-      search: searchText,
-      type: resourceType || undefined,
-    });
+  const resourcesQuery = useApi(
+    () =>
+      selectedCourseId
+        ? studentService.getCourseResources(selectedCourseId, {
+            page: currentPage,
+            limit: pageSize,
+            search: searchText,
+            type: resourceType || undefined,
+          })
+        : Promise.resolve({ success: true, data: { items: [], total: 0 } }),
+    {
+      immediate: !!selectedCourseId,
+      dependencies: [
+        selectedCourseId,
+        currentPage,
+        pageSize,
+        searchText,
+        resourceType,
+      ],
+    }
+  );
 
   // Extract courses from the API response
-  const enrolledCoursesResponse = enrolledCoursesData?.data?.data as any;
+  const enrolledCoursesResponse = enrolledCoursesQuery.data?.data;
   const enrolledCourses = enrolledCoursesResponse?.items || [];
 
   // Filter enrolled courses to get only approved ones
@@ -42,7 +56,7 @@ const StudentResources = () => {
   );
 
   // Extract resources from the API response
-  const resourcesResponse = resourcesData?.data?.data as any;
+  const resourcesResponse = resourcesQuery.data?.data;
   const resources = resourcesResponse?.items || [];
 
   // Reset pagination when filters change
@@ -105,7 +119,7 @@ const StudentResources = () => {
         selectedCourseId={selectedCourseId}
         onCourseChange={handleCourseChange}
         courses={approvedCourses}
-        isLoadingCourses={isLoadingCourses}
+        isLoadingCourses={enrolledCoursesQuery.loading}
       />
 
       {/* Resources List */}
@@ -117,7 +131,7 @@ const StudentResources = () => {
         ) : (
           <ResourceList
             resources={resources}
-            isLoading={isLoadingResources}
+            isLoading={resourcesQuery.loading}
             currentPage={currentPage}
             pageSize={pageSize}
             total={resourcesResponse?.total || 0}
