@@ -1,47 +1,64 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { Typography, Button, App } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
-import { useAdminQuery } from "@/hooks";
-import { Student, QueryParams } from "@/common/types";
+import { useApi, useMutation } from "@/hooks";
+import { Student } from "@/common/types";
+import { adminService, AdminQueryParams } from "@/services";
 import { StudentTable, StudentFilter, CreateStudentModal } from "./components";
 
 const { Title } = Typography;
 
 const AdminStudents: React.FC = () => {
   const { notification } = App.useApp();
-  const {
-    getStudentsQuery,
-    createStudentMutation,
-    deleteStudentMutation,
-    toggleStudentBanMutation,
-  } = useAdminQuery();
 
   // State
-  const [students, setStudents] = useState<Student[]>([]);
-  const [filterParams, setFilterParams] = useState<QueryParams>({});
+  const [filterParams, setFilterParams] = useState<AdminQueryParams>({
+    page: 1,
+    limit: 10,
+  });
   const [isModalVisible, setIsModalVisible] = useState(false);
 
-  // Fetch students with filters
-  const studentsQuery = getStudentsQuery(filterParams);
+  // API calls
+  const studentsQuery = useApi(() => adminService.getStudents(filterParams), {
+    dependencies: [filterParams],
+    immediate: true,
+  });
 
-  useEffect(() => {
-    if (studentsQuery.data?.data?.data) {
-      setStudents(studentsQuery.data.data.data);
+  const deleteStudentMutation = useMutation(
+    (id: string) => adminService.deleteStudent(id),
+    {
+      onSuccess: () => {
+        notification.success({
+          message: "Success",
+          description: "Student deleted successfully.",
+        });
+        studentsQuery.refetch();
+      },
     }
-  }, [studentsQuery.data]);
+  );
 
-  useEffect(() => {
-    if (studentsQuery.isError) {
-      notification.error({
-        message: "Error",
-        description: "Failed to load students. Please try again later.",
-      });
+  const toggleStudentBanMutation = useMutation(
+    (id: string) => adminService.toggleStudentBan(id),
+    {
+      onSuccess: () => {
+        notification.success({
+          message: "Success",
+          description: "Student ban status updated successfully.",
+        });
+        studentsQuery.refetch();
+      },
     }
-  }, [studentsQuery.isError, notification]);
+  );
+
+  // Extract data from API response
+  const students = studentsQuery.data?.data?.items || [];
 
   // Handlers
   const handleFilter = (values: any) => {
-    const params: QueryParams = {};
+    const params: AdminQueryParams = {
+      page: 1, // Reset to first page when filtering
+      limit: filterParams.limit || 10,
+    };
 
     if (values.search) {
       params.search = values.search;
@@ -51,7 +68,7 @@ const AdminStudents: React.FC = () => {
       params.departmentId = values.departmentId;
     }
 
-    if (values.isBanned) {
+    if (values.isBanned !== undefined) {
       params.isBanned = values.isBanned;
     }
 
@@ -59,7 +76,10 @@ const AdminStudents: React.FC = () => {
   };
 
   const handleResetFilter = () => {
-    setFilterParams({});
+    setFilterParams({
+      page: 1,
+      limit: filterParams.limit || 10,
+    });
   };
 
   const showModal = () => {
@@ -70,22 +90,13 @@ const AdminStudents: React.FC = () => {
     setIsModalVisible(false);
   };
 
-  const handleCreateStudent = async (values: any) => {
-    try {
-      await createStudentMutation.mutateAsync(values);
-      notification.success({
-        message: "Success",
-        description: "Student created successfully.",
-      });
-      setIsModalVisible(false);
-      // Refetch students
-      studentsQuery.refetch();
-    } catch (error) {
-      notification.error({
-        message: "Error",
-        description: "Failed to create student. Please try again.",
-      });
-    }
+  // Note: Student creation is not implemented in backend yet
+  const handleCreateStudent = async (_values: any) => {
+    notification.info({
+      message: "Feature Not Available",
+      description: "Student creation feature is not implemented yet.",
+    });
+    setIsModalVisible(false);
   };
 
   const handleDeleteStudent = async (id: string) => {
@@ -105,25 +116,8 @@ const AdminStudents: React.FC = () => {
     }
   };
 
-  const handleToggleBan = async (id: string, isBanned: boolean) => {
-    try {
-      await toggleStudentBanMutation.mutateAsync({ id, isBanned });
-      notification.success({
-        message: "Success",
-        description: `Student ${
-          isBanned ? "banned" : "unbanned"
-        } successfully.`,
-      });
-      // Refetch students
-      studentsQuery.refetch();
-    } catch (error) {
-      notification.error({
-        message: "Error",
-        description: `Failed to ${
-          isBanned ? "ban" : "unban"
-        } student. Please try again.`,
-      });
-    }
+  const handleToggleBan = async (id: string, _isBanned: boolean) => {
+    await toggleStudentBanMutation.mutateAsync(id);
   };
 
   return (
@@ -138,8 +132,8 @@ const AdminStudents: React.FC = () => {
       <StudentFilter onSearch={handleFilter} onReset={handleResetFilter} />
 
       <StudentTable
-        students={students}
-        loading={studentsQuery.isLoading}
+        students={students as any}
+        loading={studentsQuery.loading}
         onDelete={handleDeleteStudent}
         onToggleBan={handleToggleBan}
       />
@@ -148,7 +142,7 @@ const AdminStudents: React.FC = () => {
         visible={isModalVisible}
         onCancel={handleCancel}
         onSubmit={handleCreateStudent}
-        isSubmitting={createStudentMutation?.isPending}
+        isSubmitting={false}
       />
     </div>
   );

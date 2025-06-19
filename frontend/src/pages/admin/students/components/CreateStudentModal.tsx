@@ -1,7 +1,8 @@
-import React, { useEffect } from 'react';
-import { Modal, Form, Input, Select, Button } from 'antd';
-import { useDepartmentQuery } from '@/hooks';
-import { StudentCreateData } from '@/common/types';
+import React, { useEffect } from "react";
+import { Modal, Form, Input, Select, Button } from "antd";
+import { useApi } from "@/hooks";
+import { departmentService } from "@/services";
+import { StudentCreateData } from "@/common/types";
 
 const { Option } = Select;
 
@@ -22,9 +23,14 @@ const CreateStudentModal: React.FC<CreateStudentModalProps> = ({
   isSubmitting,
 }) => {
   const [form] = Form.useForm();
-  const { getAllDepartmentsQuery } = useDepartmentQuery();
-  const departmentsQuery = getAllDepartmentsQuery();
-  const departments = departmentsQuery.data?.data?.data || [];
+
+  // API call for departments
+  const departmentsQuery = useApi(
+    () => departmentService.getDepartmentsForSelect(),
+    { immediate: true }
+  );
+
+  const departments = departmentsQuery.data?.data || [];
 
   // Reset form when modal is opened/closed
   useEffect(() => {
@@ -45,17 +51,13 @@ const CreateStudentModal: React.FC<CreateStudentModalProps> = ({
       footer={null}
       width={600}
     >
-      <Form
-        form={form}
-        layout="vertical"
-        onFinish={handleSubmit}
-      >
+      <Form form={form} layout="vertical" onFinish={handleSubmit}>
         <Form.Item
           name="name"
           label="Full Name"
           rules={[
-            { required: true, message: 'Please enter student name' },
-            { min: 3, message: 'Name must be at least 3 characters' },
+            { required: true, message: "Please enter student name" },
+            { min: 3, message: "Name must be at least 3 characters" },
           ]}
         >
           <Input placeholder="Enter student's full name" />
@@ -65,8 +67,8 @@ const CreateStudentModal: React.FC<CreateStudentModalProps> = ({
           name="email"
           label="Email"
           rules={[
-            { required: true, message: 'Please enter email' },
-            { type: 'email', message: 'Please enter a valid email' },
+            { required: true, message: "Please enter email" },
+            { type: "email", message: "Please enter a valid email" },
           ]}
         >
           <Input placeholder="Enter email address" />
@@ -76,8 +78,8 @@ const CreateStudentModal: React.FC<CreateStudentModalProps> = ({
           name="password"
           label="Password"
           rules={[
-            { required: true, message: 'Please enter password' },
-            { min: 6, message: 'Password must be at least 6 characters' },
+            { required: true, message: "Please enter password" },
+            { min: 6, message: "Password must be at least 6 characters" },
           ]}
         >
           <Input.Password placeholder="Enter password" />
@@ -87,7 +89,7 @@ const CreateStudentModal: React.FC<CreateStudentModalProps> = ({
           name="enrollmentNo"
           label="Enrollment Number"
           rules={[
-            { required: true, message: 'Please enter enrollment number' },
+            { required: true, message: "Please enter enrollment number" },
           ]}
         >
           <Input placeholder="Enter enrollment number" />
@@ -97,33 +99,30 @@ const CreateStudentModal: React.FC<CreateStudentModalProps> = ({
           name="phoneNumber"
           label="Phone Number"
           rules={[
-            { pattern: /^\+?[1-9]\d{1,14}$/, message: 'Please enter a valid phone number' },
+            {
+              pattern: /^\+?[1-9]\d{1,14}$/,
+              message: "Please enter a valid phone number",
+            },
           ]}
         >
           <Input placeholder="Enter phone number" />
         </Form.Item>
 
-        <Form.Item
-          name="departmentId"
-          label="Department"
-        >
+        <Form.Item name="departmentId" label="Department">
           <Select
             placeholder="Select department"
             allowClear
-            loading={departmentsQuery.isLoading}
+            loading={departmentsQuery.loading}
           >
             {departments.map((dept) => (
-              <Option key={dept.id} value={dept.id}>
-                {dept.name}
+              <Option key={dept.value} value={dept.value}>
+                {dept.label}
               </Option>
             ))}
           </Select>
         </Form.Item>
 
-        <Form.Item
-          name="semester"
-          label="Semester"
-        >
+        <Form.Item name="semester" label="Semester">
           <Input placeholder="Enter semester" />
         </Form.Item>
 
