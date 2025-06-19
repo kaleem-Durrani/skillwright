@@ -165,7 +165,7 @@ export const updateCourse = asyncHandler(async (req: Request, res: Response) => 
   }
 
   const { id } = req.params;
-  const { name, code, description, duration, capacity, syllabus, startDate, endDate } = req.body;
+  const { name, code, description, duration, capacity, syllabus, startDate, endDate, departmentId } = req.body;
 
   // Using transaction to ensure data consistency
   const course = await prisma.$transaction(async (tx) => {
@@ -205,6 +205,7 @@ export const updateCourse = asyncHandler(async (req: Request, res: Response) => 
         syllabus,
         startDate: startDate ? new Date(startDate) : undefined,
         endDate: endDate ? new Date(endDate) : undefined,
+        departmentId,
       },
     });
   });
