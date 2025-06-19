@@ -1,9 +1,0 @@
-export { api } from './apiClient';
-export { authApi } from './auth.api';
-export { adminApi } from './admin.api';
-export { teacherApi } from './teacher.api';
-export { studentApi } from './student.api';
-export { departmentApi } from './department.api';
-export { courseApi } from './course.api';
-export { conversationApi } from './conversation.api';
-export { newsApi } from './news.api'; 
