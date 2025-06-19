@@ -1,9 +1,12 @@
 import { Request, Response } from "express";
 import { validationResult } from "express-validator";
+import bcrypt from "bcryptjs";
 import prisma from "../db/prisma.js";
 import { ValidationError, NotFoundError } from "../utils/customErrors.js";
 import { parseValidationErrors } from "../utils/validationErrorParser.js";
 import asyncHandler from "../middleware/asyncHandler.js";
+import { generateOTP } from "../utils/generateOTP.js";
+import { sendVerificationEmail } from "../utils/sendEmail.js";
 
 // @desc    Get admin profile
 // @route   GET /api/admin/profile
@@ -57,27 +60,159 @@ export const updateProfile = asyncHandler(async (req: Request, res: Response) =>
 // @route   GET /api/admin/teachers
 // @access  Private (Admin)
 export const getAllTeachers = asyncHandler(async (req: Request, res: Response) => {
-  const teachers = await prisma.teacher.findMany({
-    include: {
-      department: {
-        select: {
-          id: true,
-          name: true,
+  const { search, departmentId, isBanned, page = '1', limit = '10' } = req.query;
+
+  // Pagination
+  const pageNum = parseInt(page as string) || 1;
+  const limitNum = parseInt(limit as string) || 10;
+  const skip = (pageNum - 1) * limitNum;
+
+  // Build where clause for filtering
+  const where: any = {};
+
+  // Search filter (name or email)
+  if (search) {
+    where.OR = [
+      { name: { contains: search as string, mode: 'insensitive' } },
+      { email: { contains: search as string, mode: 'insensitive' } },
+    ];
+  }
+
+  // Department filter
+  if (departmentId) {
+    where.departmentId = departmentId as string;
+  }
+
+  // Ban status filter
+  if (isBanned !== undefined) {
+    where.isBanned = isBanned === 'true';
+  }
+
+  // Get teachers and total count in parallel
+  const [teachers, total] = await Promise.all([
+    prisma.teacher.findMany({
+      where,
+      include: {
+        department: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        _count: {
+          select: {
+            courses: true,
+            resources: true,
+          },
         },
       },
-      _count: {
-        select: {
-          courses: true,
-          resources: true,
-        },
+      orderBy: {
+        createdAt: 'desc',
       },
-    },
-  });
+      skip,
+      take: limitNum,
+    }),
+    prisma.teacher.count({ where }),
+  ]);
+
+  const hasMore = skip + teachers.length < total;
 
   res.status(200).json({
     success: true,
     message: "Teachers retrieved successfully",
-    data: teachers,
+    data: {
+      items: teachers,
+      total,
+      page: pageNum,
+      limit: limitNum,
+      hasMore,
+    },
+  });
+});
+
+// @desc    Create teacher
+// @route   POST /api/admin/teachers
+// @access  Private (Admin)
+export const createTeacher = asyncHandler(async (req: Request, res: Response) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    throw parseValidationErrors(errors);
+  }
+
+  const { name, email, password, phoneNumber, qualification, specialization, departmentId } = req.body;
+
+  // Using transaction to ensure data consistency
+  const result = await prisma.$transaction(async (tx) => {
+    // Check if teacher with email already exists
+    const existingTeacher = await tx.teacher.findUnique({
+      where: { email },
+    });
+
+    if (existingTeacher) {
+      throw new ValidationError({
+        email: ["Teacher with this email already exists"],
+      });
+    }
+
+    // Check if department exists
+    if (departmentId) {
+      const department = await tx.department.findUnique({
+        where: { id: departmentId },
+      });
+
+      if (!department) {
+        throw new ValidationError({
+          departmentId: ["Department not found"],
+        });
+      }
+    }
+
+    // Generate OTP for email verification
+    const otp = generateOTP();
+    const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+    // Hash password
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    // Create teacher
+    const newTeacher = await tx.teacher.create({
+      data: {
+        email,
+        password: hashedPassword,
+        name,
+        qualification,
+        departmentId,
+        specialization,
+        phoneNumber,
+        otp,
+        otpExpiry,
+      },
+      include: {
+        department: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+    });
+
+    // Send OTP email
+    try {
+      await sendVerificationEmail(email, otp, name);
+    } catch (emailError) {
+      console.error("Failed to send verification email:", emailError);
+      // Don't throw error here, teacher is created successfully
+    }
+
+    return newTeacher;
+  });
+
+  res.status(201).json({
+    success: true,
+    message: "Teacher created successfully. Verification email sent.",
+    data: result,
   });
 });
 
@@ -210,26 +345,72 @@ export const deleteTeacher = asyncHandler(async (req: Request, res: Response) =>
 // @route   GET /api/admin/students
 // @access  Private (Admin)
 export const getAllStudents = asyncHandler(async (req: Request, res: Response) => {
-  const students = await prisma.student.findMany({
-    include: {
-      department: {
-        select: {
-          id: true,
-          name: true,
+  const { search, departmentId, isBanned, page = '1', limit = '10' } = req.query;
+
+  // Pagination
+  const pageNum = parseInt(page as string) || 1;
+  const limitNum = parseInt(limit as string) || 10;
+  const skip = (pageNum - 1) * limitNum;
+
+  // Build where clause for filtering
+  const where: any = {};
+
+  // Search filter (name or email)
+  if (search) {
+    where.OR = [
+      { name: { contains: search as string, mode: 'insensitive' } },
+      { email: { contains: search as string, mode: 'insensitive' } },
+    ];
+  }
+
+  // Department filter
+  if (departmentId) {
+    where.departmentId = departmentId as string;
+  }
+
+  // Ban status filter
+  if (isBanned !== undefined) {
+    where.isBanned = isBanned === 'true';
+  }
+
+  // Get students and total count in parallel
+  const [students, total] = await Promise.all([
+    prisma.student.findMany({
+      where,
+      include: {
+        department: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        _count: {
+          select: {
+            enrollments: true,
+          },
         },
       },
-      _count: {
-        select: {
-          enrollments: true,
-        },
+      orderBy: {
+        createdAt: 'desc',
       },
-    },
-  });
+      skip,
+      take: limitNum,
+    }),
+    prisma.student.count({ where }),
+  ]);
+
+  const hasMore = skip + students.length < total;
 
   res.status(200).json({
     success: true,
     message: "Students retrieved successfully",
-    data: students,
+    data: {
+      items: students,
+      total,
+      page: pageNum,
+      limit: limitNum,
+      hasMore,
+    },
   });
 });
 
@@ -352,20 +533,66 @@ export const deleteStudent = asyncHandler(async (req: Request, res: Response) =>
 // @route   GET /api/admin/news
 // @access  Private (Admin)
 export const getAllNewsEvents = asyncHandler(async (req: Request, res: Response) => {
-  const newsEvents = await prisma.newsEvent.findMany({
-    include: {
-      _count: {
-        select: {
-          comments: true,
+  const { search, type, isPublished, page = '1', limit = '10' } = req.query;
+
+  // Pagination
+  const pageNum = parseInt(page as string) || 1;
+  const limitNum = parseInt(limit as string) || 10;
+  const skip = (pageNum - 1) * limitNum;
+
+  // Build where clause for filtering
+  const where: any = {};
+
+  // Search filter (title or content)
+  if (search) {
+    where.OR = [
+      { title: { contains: search as string, mode: 'insensitive' } },
+      { content: { contains: search as string, mode: 'insensitive' } },
+    ];
+  }
+
+  // Type filter
+  if (type) {
+    where.type = type as string;
+  }
+
+  // Published status filter
+  if (isPublished !== undefined) {
+    where.isPublished = isPublished === 'true';
+  }
+
+  // Get news/events and total count in parallel
+  const [newsEvents, total] = await Promise.all([
+    prisma.newsEvent.findMany({
+      where,
+      include: {
+        _count: {
+          select: {
+            comments: true,
+          },
         },
       },
-    },
-  });
+      orderBy: {
+        createdAt: 'desc',
+      },
+      skip,
+      take: limitNum,
+    }),
+    prisma.newsEvent.count({ where }),
+  ]);
+
+  const hasMore = skip + newsEvents.length < total;
 
   res.status(200).json({
     success: true,
     message: "News/events retrieved successfully",
-    data: newsEvents,
+    data: {
+      items: newsEvents,
+      total,
+      page: pageNum,
+      limit: limitNum,
+      hasMore,
+    },
   });
 });
 

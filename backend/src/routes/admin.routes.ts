@@ -3,6 +3,7 @@ import {
   getProfile,
   updateProfile,
   getAllTeachers,
+  createTeacher,
   getTeacherById,
   toggleTeacherBan,
   deleteTeacher,
@@ -19,6 +20,7 @@ import {
 } from "../controllers/admin.controller.js";
 import {
   updateProfileValidation,
+  createTeacherValidation,
   createNewsEventValidation,
   updateNewsEventValidation,
 } from "../routesValidation/admin.validation.js";
@@ -45,6 +47,7 @@ router.put("/profile", adminProtect, updateProfileValidation, updateProfile);
 
 // Teacher Management
 router.get("/teachers", adminProtect, getAllTeachers);
+router.post("/teachers", adminProtect, createTeacherValidation, createTeacher);
 router.get("/teachers/:id", adminProtect, getTeacherById);
 router.put("/teachers/:id/ban", adminProtect, toggleTeacherBan);
 router.delete("/teachers/:id", adminProtect, deleteTeacher);

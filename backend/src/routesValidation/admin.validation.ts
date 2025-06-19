@@ -18,6 +18,48 @@ const updateProfileValidation = [
     .withMessage("Designation is required"),
 ];
 
+const createTeacherValidation = [
+  body("name")
+    .trim()
+    .notEmpty()
+    .withMessage("Name is required")
+    .isLength({ min: 2, max: 100 })
+    .withMessage("Name must be between 2 and 100 characters"),
+  body("email")
+    .trim()
+    .notEmpty()
+    .withMessage("Email is required")
+    .isEmail()
+    .withMessage("Please enter a valid email address"),
+  body("password")
+    .trim()
+    .notEmpty()
+    .withMessage("Password is required")
+    .isLength({ min: 6 })
+    .withMessage("Password must be at least 6 characters long"),
+  body("qualification")
+    .trim()
+    .notEmpty()
+    .withMessage("Qualification is required")
+    .isLength({ min: 2, max: 200 })
+    .withMessage("Qualification must be between 2 and 200 characters"),
+  body("specialization")
+    .optional()
+    .trim()
+    .isLength({ max: 200 })
+    .withMessage("Specialization cannot exceed 200 characters"),
+  body("departmentId")
+    .optional()
+    .trim()
+    .notEmpty()
+    .withMessage("Department ID cannot be empty if provided"),
+  body("phoneNumber")
+    .optional()
+    .trim()
+    .matches(/^\+?[1-9]\d{1,14}$/)
+    .withMessage("Please enter a valid phone number"),
+];
+
 const createNewsEventValidation = [
   body("title")
     .trim()
@@ -78,6 +120,7 @@ const updateNewsEventValidation = [
 
 export {
   updateProfileValidation,
+  createTeacherValidation,
   createNewsEventValidation,
   updateNewsEventValidation,
-}; 
+};
