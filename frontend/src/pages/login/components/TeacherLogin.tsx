@@ -1,10 +1,10 @@
 import React from "react";
-import { Form, Input, Button, Typography, Checkbox, Divider, App } from "antd";
+import { Form, Input, Button, Typography, Checkbox, Divider } from "antd";
 import { UserOutlined, LockOutlined } from "@ant-design/icons";
 import { Link, useNavigate } from "react-router-dom";
 import { ROUTES } from "@/common/constants";
 import LoginTypeSelector, { LoginType } from "./LoginTypeSelector";
-import { useAuthQuery } from "@/hooks";
+import { useAuth } from "@/context/AuthContext";
 import { LoginCredentials } from "@/common/types";
 
 const { Title, Text } = Typography;
@@ -19,67 +19,22 @@ const TeacherLogin: React.FC<TeacherLoginProps> = ({
   onTypeChange,
 }) => {
   const navigate = useNavigate();
-  const { teacherLoginMutation } = useAuthQuery();
+  const { login, isLoading, user } = useAuth();
   const [form] = Form.useForm();
-  const { notification } = App.useApp();
 
   const onFinish = async (values: LoginCredentials) => {
     try {
-      const response = await teacherLoginMutation.mutateAsync(values);
+      await login(values, "teacher");
 
-      // Check if the response was successful
-      if (response?.data?.success) {
-        // Store user data in localStorage
-        const userData = response.data.data;
-        if (!userData) {
-          throw new Error("No user data received");
-        }
-
-        localStorage.setItem("user", JSON.stringify(userData));
-
-        // Show success notification
-        notification.success({
-          message: "Login Successful",
-          description: "Welcome back to the platform!",
-        });
-
-        // Redirect based on verification status
-        // Use type assertion to help TypeScript understand the structure
-        const user = userData as unknown as {
-          isVerified?: boolean;
-        };
-
-        if (user.isVerified) {
-          navigate(ROUTES.TEACHER.DASHBOARD);
-        } else {
-          navigate(ROUTES.VERIFY_EMAIL);
-        }
+      // Check if teacher is verified after login
+      if (user && "isVerified" in user && user.isVerified) {
+        navigate(ROUTES.TEACHER.DASHBOARD);
       } else {
-        // Handle unsuccessful response
-        notification.error({
-          message: "Login Failed",
-          description: response?.data?.message || "Login was unsuccessful",
-        });
+        navigate(ROUTES.VERIFY_EMAIL);
       }
-    } catch (error: any) {
-      // Handle error
-      console.error("Login error:", error);
-
-      // Extract the error message from the response
-      let errorMessage = "Please check your credentials and try again";
-
-      if (error?.response?.data?.message) {
-        // Use the error message from the API response
-        errorMessage = error.response.data.message;
-      } else if (error?.message) {
-        // Use the error message from the Error object
-        errorMessage = error.message;
-      }
-
-      notification.error({
-        message: "Login Failed",
-        description: errorMessage,
-      });
+    } catch (error) {
+      // Error handling is done in the AuthContext
+      console.error("Login failed:", error);
     }
   };
 
@@ -144,10 +99,10 @@ const TeacherLogin: React.FC<TeacherLoginProps> = ({
           <Button
             type="primary"
             htmlType="submit"
-            loading={teacherLoginMutation.isPending}
+            loading={isLoading}
             className="w-full rounded-lg h-12 text-lg bg-green-600 hover:bg-green-700 border-green-600"
           >
-            {teacherLoginMutation.isPending ? "Logging in..." : "Log in"}
+            {isLoading ? "Logging in..." : "Log in"}
           </Button>
         </Form.Item>
 

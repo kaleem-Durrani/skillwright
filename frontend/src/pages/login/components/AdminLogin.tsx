@@ -1,10 +1,10 @@
 import React from "react";
-import { Form, Input, Button, Typography, Checkbox, notification } from "antd";
+import { Form, Input, Button, Typography, Checkbox } from "antd";
 import { UserOutlined, LockOutlined, SafetyOutlined } from "@ant-design/icons";
 import { Link, useNavigate } from "react-router-dom";
 import { ROUTES } from "@/common/constants";
 import LoginTypeSelector, { LoginType } from "./LoginTypeSelector";
-import { useAuthQuery } from "@/hooks";
+import { useAuth } from "@/context/AuthContext";
 import { LoginCredentials } from "@/common/types";
 
 const { Title, Text } = Typography;
@@ -19,43 +19,17 @@ const AdminLogin: React.FC<AdminLoginProps> = ({
   onTypeChange,
 }) => {
   const navigate = useNavigate();
-  const { adminLoginMutation } = useAuthQuery();
+  const { login, isLoading } = useAuth();
   const [form] = Form.useForm();
 
   const onFinish = async (values: LoginCredentials) => {
     try {
-      const response = await adminLoginMutation.mutateAsync(values);
-
-      if (response?.data?.success) {
-        // Store user data in localStorage
-        const userData = response.data.data;
-
-        // Explicitly set isVerified to true for admin users
-        // This ensures admins are never redirected to the verification page
-        const adminData = {
-          ...userData,
-          isVerified: true,
-        };
-
-        localStorage.setItem("user", JSON.stringify(adminData));
-
-        // Show success notification
-        notification.success({
-          message: "Login Successful",
-          description: "Welcome back, Administrator!",
-        });
-
-        // Admins don't need verification, so redirect directly to dashboard
-        navigate(ROUTES.ADMIN.DASHBOARD);
-      }
-    } catch (error: any) {
-      // Handle error
-      notification.error({
-        message: "Login Failed",
-        description:
-          error?.response?.data?.message ||
-          "Please check your credentials and try again",
-      });
+      await login(values, "admin");
+      // Admins don't need verification, so redirect directly to dashboard
+      navigate(ROUTES.ADMIN.DASHBOARD);
+    } catch (error) {
+      // Error handling is done in the AuthContext
+      console.error("Login failed:", error);
     }
   };
 
@@ -129,10 +103,10 @@ const AdminLogin: React.FC<AdminLoginProps> = ({
           <Button
             type="primary"
             htmlType="submit"
-            loading={adminLoginMutation.isPending}
+            loading={isLoading}
             className="w-full rounded-lg h-12 text-lg bg-indigo-600 hover:bg-indigo-700 border-indigo-600"
           >
-            {adminLoginMutation.isPending ? "Logging in..." : "Log in"}
+            {isLoading ? "Logging in..." : "Log in"}
           </Button>
         </Form.Item>
       </Form>
