@@ -1,8 +1,13 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { Typography, Button, App } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
-import { useDepartmentQuery } from "@/hooks";
-import { Department, QueryParams } from "@/common/types";
+import { useApi, useMutation } from "@/hooks";
+import {
+  Department,
+  DepartmentCreateData,
+  DepartmentUpdateData,
+} from "@/common/types";
+import { departmentService, DepartmentQueryParams } from "@/services";
 import {
   DepartmentTable,
   DepartmentFilter,
@@ -13,42 +18,79 @@ const { Title } = Typography;
 
 const AdminDepartments: React.FC = () => {
   const { notification } = App.useApp();
-  const {
-    getAllDepartmentsQuery,
-    createDepartmentMutation,
-    updateDepartmentMutation,
-    deleteDepartmentMutation,
-  } = useDepartmentQuery();
 
   // State
-  const [departments, setDepartments] = useState<Department[]>([]);
-  const [filterParams, setFilterParams] = useState<QueryParams>({});
+  const [filterParams, setFilterParams] = useState<DepartmentQueryParams>({
+    page: 1,
+    limit: 10,
+  });
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [editingDepartment, setEditingDepartment] = useState<Department | null>(
     null
   );
 
-  // Fetch departments with filters
-  const departmentsQuery = getAllDepartmentsQuery(filterParams);
-
-  useEffect(() => {
-    if (departmentsQuery.data?.data?.data) {
-      setDepartments(departmentsQuery.data.data.data);
+  // API calls
+  const departmentsQuery = useApi(
+    () => departmentService.getDepartments(filterParams),
+    {
+      dependencies: [filterParams],
+      immediate: true,
     }
-  }, [departmentsQuery.data]);
+  );
 
-  useEffect(() => {
-    if (departmentsQuery.isError) {
-      notification.error({
-        message: "Error",
-        description: "Failed to load departments. Please try again later.",
-      });
+  const createDepartmentMutation = useMutation(
+    (data: DepartmentCreateData) => departmentService.createDepartment(data),
+    {
+      onSuccess: () => {
+        notification.success({
+          message: "Success",
+          description: "Department created successfully.",
+        });
+        setIsModalVisible(false);
+        setEditingDepartment(null);
+        departmentsQuery.refetch();
+      },
     }
-  }, [departmentsQuery.isError, notification]);
+  );
+
+  const updateDepartmentMutation = useMutation(
+    ({ id, data }: { id: string; data: DepartmentUpdateData }) =>
+      departmentService.updateDepartment(id, data),
+    {
+      onSuccess: () => {
+        notification.success({
+          message: "Success",
+          description: "Department updated successfully.",
+        });
+        setIsModalVisible(false);
+        setEditingDepartment(null);
+        departmentsQuery.refetch();
+      },
+    }
+  );
+
+  const deleteDepartmentMutation = useMutation(
+    (id: string) => departmentService.deleteDepartment(id),
+    {
+      onSuccess: () => {
+        notification.success({
+          message: "Success",
+          description: "Department deleted successfully.",
+        });
+        departmentsQuery.refetch();
+      },
+    }
+  );
+
+  // Extract data from API response
+  const departments = departmentsQuery.data?.data?.items || [];
 
   // Handlers
   const handleFilter = (values: any) => {
-    const params: QueryParams = {};
+    const params: DepartmentQueryParams = {
+      page: 1, // Reset to first page when filtering
+      limit: filterParams.limit || 10,
+    };
 
     if (values.search) {
       params.search = values.search;
@@ -58,7 +100,10 @@ const AdminDepartments: React.FC = () => {
   };
 
   const handleResetFilter = () => {
-    setFilterParams({});
+    setFilterParams({
+      page: 1,
+      limit: filterParams.limit || 10,
+    });
   };
 
   const showModal = () => {
@@ -76,52 +121,23 @@ const AdminDepartments: React.FC = () => {
     setIsModalVisible(true);
   };
 
-  const handleSubmit = async (values: any) => {
-    try {
-      if (editingDepartment) {
-        // Update existing department
-        await updateDepartmentMutation.mutateAsync(values);
-        notification.success({
-          message: "Success",
-          description: "Department updated successfully.",
-        });
-      } else {
-        // Create new department
-        await createDepartmentMutation.mutateAsync(values);
-        notification.success({
-          message: "Success",
-          description: "Department created successfully.",
-        });
-      }
-      setIsModalVisible(false);
-      setEditingDepartment(null);
-      // Refetch departments
-      departmentsQuery.refetch();
-    } catch (error) {
-      notification.error({
-        message: "Error",
-        description: `Failed to ${
-          editingDepartment ? "update" : "create"
-        } department. Please try again.`,
+  const handleSubmit = async (
+    values: DepartmentCreateData | DepartmentUpdateData
+  ) => {
+    if (editingDepartment) {
+      await updateDepartmentMutation.mutateAsync({
+        id: editingDepartment.id,
+        data: values as DepartmentUpdateData,
       });
+    } else {
+      await createDepartmentMutation.mutateAsync(
+        values as DepartmentCreateData
+      );
     }
   };
 
   const handleDelete = async (id: string) => {
-    try {
-      await deleteDepartmentMutation.mutateAsync(id);
-      notification.success({
-        message: "Success",
-        description: "Department deleted successfully.",
-      });
-      // Refetch departments
-      departmentsQuery.refetch();
-    } catch (error) {
-      notification.error({
-        message: "Error",
-        description: "Failed to delete department. Please try again.",
-      });
-    }
+    await deleteDepartmentMutation.mutateAsync(id);
   };
 
   return (
@@ -136,8 +152,8 @@ const AdminDepartments: React.FC = () => {
       <DepartmentFilter onSearch={handleFilter} onReset={handleResetFilter} />
 
       <DepartmentTable
-        departments={departments}
-        loading={departmentsQuery.isLoading}
+        departments={departments as any}
+        loading={departmentsQuery.loading}
         onDelete={handleDelete}
         onEdit={handleEdit}
       />
@@ -147,8 +163,7 @@ const AdminDepartments: React.FC = () => {
         onCancel={handleCancel}
         onSubmit={handleSubmit}
         isSubmitting={
-          createDepartmentMutation.isPending ||
-          updateDepartmentMutation.isPending
+          createDepartmentMutation.loading || updateDepartmentMutation.loading
         }
         editingDepartment={editingDepartment}
       />
