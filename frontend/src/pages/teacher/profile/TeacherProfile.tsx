@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Typography, Row, Col, App } from "antd";
-import { useTeacherQuery } from "@/hooks";
+import { useApi, useMutation } from "@/hooks";
+import { teacherService } from "@/services";
 import { ProfileInfo, ProfileStats, ProfileForm } from "./components";
 import { Teacher } from "@/common/types";
 
@@ -8,24 +9,32 @@ const { Title } = Typography;
 
 const TeacherProfile: React.FC = () => {
   const { notification } = App.useApp();
-  const { getProfileQuery, updateProfileMutation } = useTeacherQuery();
   const [isEditing, setIsEditing] = useState(false);
-  const [teacher, setTeacher] = useState<Teacher | null>(null);
 
-  useEffect(() => {
-    if (getProfileQuery.data?.data?.data) {
-      setTeacher(getProfileQuery.data.data.data);
-    }
-  }, [getProfileQuery.data]);
+  // API calls
+  const profileQuery = useApi(() => teacherService.getProfile(), {
+    immediate: true,
+  });
 
-  useEffect(() => {
-    if (getProfileQuery.isError) {
+  const updateProfileMutation = useMutation(teacherService.updateProfile, {
+    onSuccess: () => {
+      notification.success({
+        message: "Success",
+        description: "Profile updated successfully.",
+      });
+      setIsEditing(false);
+      profileQuery.refetch();
+    },
+    onError: () => {
       notification.error({
         message: "Error",
-        description: "Failed to load profile. Please try again later.",
+        description: "Failed to update profile. Please try again.",
       });
-    }
-  }, [getProfileQuery.isError, notification]);
+    },
+  });
+
+  // Extract data
+  const teacher = profileQuery.data?.data;
 
   const handleEdit = () => {
     setIsEditing(true);
@@ -38,16 +47,9 @@ const TeacherProfile: React.FC = () => {
   const handleSubmit = async (values: any) => {
     try {
       await updateProfileMutation.mutateAsync(values);
-      notification.success({
-        message: "Success",
-        description: "Profile updated successfully.",
-      });
-      setIsEditing(false);
     } catch (error) {
-      notification.error({
-        message: "Error",
-        description: "Failed to update profile. Please try again.",
-      });
+      // Error handling is done in the mutation onError callback
+      console.error("Update profile error:", error);
     }
   };
 
@@ -62,15 +64,15 @@ const TeacherProfile: React.FC = () => {
           {isEditing ? (
             <ProfileForm
               teacher={teacher as Teacher}
-              loading={getProfileQuery.isLoading}
+              loading={profileQuery.loading}
               onSubmit={handleSubmit}
               onCancel={handleCancel}
-              isSubmitting={updateProfileMutation.isPending}
+              isSubmitting={updateProfileMutation.loading}
             />
           ) : (
             <ProfileInfo
               teacher={teacher as Teacher}
-              loading={getProfileQuery.isLoading}
+              loading={profileQuery.loading}
               onEdit={handleEdit}
             />
           )}
@@ -80,7 +82,7 @@ const TeacherProfile: React.FC = () => {
           <Col xs={24} lg={6}>
             <ProfileStats
               teacher={teacher as Teacher}
-              loading={getProfileQuery.isLoading}
+              loading={profileQuery.loading}
             />
           </Col>
         )}
