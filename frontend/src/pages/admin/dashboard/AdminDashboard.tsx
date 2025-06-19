@@ -1,13 +1,13 @@
-import React, { useEffect } from "react";
-import { Row, Col, Typography, App } from "antd";
+import React from "react";
+import { Row, Col, Typography } from "antd";
 import {
   TeamOutlined,
   SolutionOutlined,
   BankOutlined,
   NotificationOutlined,
 } from "@ant-design/icons";
-import { useAdminQuery, useDepartmentQuery } from "@/hooks";
-import { NewsEvent } from "@/common/types";
+import { useApi } from "@/hooks";
+import { adminService, departmentService } from "@/services";
 import {
   StatisticsCard,
   TeachersList,
@@ -19,39 +19,38 @@ import {
 const { Title } = Typography;
 
 const AdminDashboard: React.FC = () => {
-  const { notification } = App.useApp();
-  const { getTeachersQuery, getStudentsQuery } = useAdminQuery();
-  const { getAllDepartmentsQuery } = useDepartmentQuery();
+  // API calls for dashboard data
+  const teachersQuery = useApi(
+    () => adminService.getTeachers({ page: 1, limit: 5 }),
+    { immediate: true }
+  );
 
-  // Fetch data
-  const teachersQuery = getTeachersQuery();
-  const studentsQuery = getStudentsQuery();
-  const departmentsQuery = getAllDepartmentsQuery();
+  const studentsQuery = useApi(
+    () => adminService.getStudents({ page: 1, limit: 5 }),
+    { immediate: true }
+  );
 
-  // Handle errors
-  useEffect(() => {
-    if (
-      teachersQuery.isError ||
-      studentsQuery.isError ||
-      departmentsQuery.isError
-    ) {
-      notification.error({
-        message: "Error",
-        description: "Failed to load dashboard data. Please try again later.",
-      });
-    }
-  }, [
-    teachersQuery.isError,
-    studentsQuery.isError,
-    departmentsQuery.isError,
-    notification,
-  ]);
+  const departmentsQuery = useApi(
+    () => departmentService.getDepartments({ page: 1, limit: 5 }),
+    { immediate: true }
+  );
+
+  const newsEventsQuery = useApi(
+    () => adminService.getNewsEvents({ page: 1, limit: 5 }),
+    { immediate: true }
+  );
 
   // Get the data for display
-  const teachers = teachersQuery.data?.data?.data || [];
-  const students = studentsQuery.data?.data?.data || [];
-  const departments = departmentsQuery.data?.data?.data || [];
-  const newsEvents: NewsEvent[] = [];
+  const teachers = teachersQuery.data?.data?.items || [];
+  const students = studentsQuery.data?.data?.items || [];
+  const departments = departmentsQuery.data?.data?.items || [];
+  const newsEvents = newsEventsQuery.data?.data?.items || [];
+
+  // Calculate totals
+  const totalTeachers = teachersQuery.data?.data?.total || 0;
+  const totalStudents = studentsQuery.data?.data?.total || 0;
+  const totalDepartments = departmentsQuery.data?.data?.total || 0;
+  const totalNewsEvents = newsEventsQuery.data?.data?.total || 0;
 
   return (
     <div className="p-6">
@@ -64,36 +63,36 @@ const AdminDashboard: React.FC = () => {
         <Col xs={24} sm={12} md={6}>
           <StatisticsCard
             title="Total Teachers"
-            value={Array.isArray(teachers) ? teachers.length : 0}
+            value={totalTeachers}
             prefix={<SolutionOutlined className="mr-2 text-blue-500" />}
-            loading={teachersQuery.isLoading}
+            loading={teachersQuery.loading}
             valueStyle={{ color: "#1890ff" }}
           />
         </Col>
         <Col xs={24} sm={12} md={6}>
           <StatisticsCard
             title="Total Students"
-            value={Array.isArray(students) ? students.length : 0}
+            value={totalStudents}
             prefix={<TeamOutlined className="mr-2 text-green-500" />}
-            loading={studentsQuery.isLoading}
+            loading={studentsQuery.loading}
             valueStyle={{ color: "#52c41a" }}
           />
         </Col>
         <Col xs={24} sm={12} md={6}>
           <StatisticsCard
             title="Departments"
-            value={Array.isArray(departments) ? departments.length : 0}
+            value={totalDepartments}
             prefix={<BankOutlined className="mr-2 text-purple-500" />}
-            loading={departmentsQuery.isLoading}
+            loading={departmentsQuery.loading}
             valueStyle={{ color: "#722ed1" }}
           />
         </Col>
         <Col xs={24} sm={12} md={6}>
           <StatisticsCard
             title="News & Events"
-            value={newsEvents.length}
+            value={totalNewsEvents}
             prefix={<NotificationOutlined className="mr-2 text-orange-500" />}
-            loading={false}
+            loading={newsEventsQuery.loading}
             valueStyle={{ color: "#fa8c16" }}
           />
         </Col>
@@ -105,14 +104,14 @@ const AdminDashboard: React.FC = () => {
           <Row gutter={[16, 16]}>
             <Col xs={24}>
               <TeachersList
-                teachers={teachers}
-                loading={teachersQuery.isLoading}
+                teachers={teachers as any}
+                loading={teachersQuery.loading}
               />
             </Col>
             <Col xs={24} className="mt-4">
               <StudentsList
-                students={students}
-                loading={studentsQuery.isLoading}
+                students={students as any}
+                loading={studentsQuery.loading}
               />
             </Col>
           </Row>
@@ -121,12 +120,15 @@ const AdminDashboard: React.FC = () => {
           <Row gutter={[16, 16]}>
             <Col xs={24}>
               <DepartmentsList
-                departments={departments}
-                loading={departmentsQuery.isLoading}
+                departments={departments as any}
+                loading={departmentsQuery.loading}
               />
             </Col>
             <Col xs={24} className="mt-4">
-              <RecentNewsEvents newsEvents={newsEvents} loading={false} />
+              <RecentNewsEvents
+                newsEvents={newsEvents as any}
+                loading={newsEventsQuery.loading}
+              />
             </Col>
           </Row>
         </Col>
