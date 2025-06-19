@@ -44,7 +44,8 @@ export const storeRefreshToken = async (
 
 // Delete a specific refresh token
 export const deleteRefreshToken = async (token: string): Promise<void> => {
-  await prisma.refreshToken.delete({
+  // Use deleteMany instead of delete to avoid errors when token doesn't exist
+  await prisma.refreshToken.deleteMany({
     where: { token },
   });
 };
