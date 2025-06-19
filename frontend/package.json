@@ -11,8 +11,6 @@
   },
   "dependencies": {
     "@hookform/resolvers": "^5.0.1",
-    "@tanstack/react-query": "^5.74.11",
-    "@tanstack/react-query-devtools": "^5.75.0",
     "antd": "^5.24.2",
     "axios": "^1.8.1",
     "date-fns": "^4.1.0",
