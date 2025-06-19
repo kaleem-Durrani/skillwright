@@ -35,7 +35,16 @@ const AppLayout = () => {
   // Get user data from localStorage
   const getUserData = () => {
     const userData = localStorage.getItem("user");
-    return userData ? JSON.parse(userData) : null;
+    if (!userData || userData === "undefined" || userData === "null") {
+      return null;
+    }
+    try {
+      return JSON.parse(userData);
+    } catch (error) {
+      console.warn("Failed to parse user data from localStorage:", error);
+      localStorage.removeItem("user");
+      return null;
+    }
   };
 
   const user = getUserData();
