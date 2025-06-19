@@ -56,6 +56,8 @@ router.post(
 router.put(
   "/:id",
   teacherProtect,
+  uploadDocument.single("document"),
+  handleUploadError,
   validateResource,
   updateResource
 );

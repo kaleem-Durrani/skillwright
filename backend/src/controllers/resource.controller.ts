@@ -32,7 +32,7 @@ export const createResource = async (req: Request, res: Response, next: NextFunc
         mimeType: cloudinaryResult.mimeType,
         courseId,
         teacherId: req.teacher!.id,
-        isPublic: Boolean(isPublic)
+        isPublic: isPublic === 'true' || isPublic === true
       }
     });
 
@@ -73,21 +73,59 @@ export const updateResource = async (req: Request, res: Response, next: NextFunc
       throw new ValidationError({ auth: ["You can only update your own resources"] });
     }
 
+    let updateData: any = {
+      title,
+      description,
+      isPublic: isPublic !== undefined ? (isPublic === 'true' || isPublic === true) : undefined
+    };
+
+    // If a new file is uploaded, replace the old one
+    if (req.file) {
+      // Delete old file from Cloudinary
+      const oldPublicId = extractPublicId(resource.url);
+      await deleteFile(oldPublicId);
+
+      // Upload new file to Cloudinary
+      const cloudinaryResult = await uploadFile(req.file);
+
+      updateData.url = cloudinaryResult.url;
+      updateData.type = determineResourceType(req.file.mimetype);
+      updateData.mimeType = cloudinaryResult.mimeType;
+
+      // Clean up temporary file
+      cleanupUpload(req.file.path);
+    }
+
     const updatedResource = await prisma.resource.update({
       where: { id },
-      data: {
-        title,
-        description,
-        isPublic: isPublic !== undefined ? Boolean(isPublic) : undefined
-      }
+      data: updateData,
+      include: {
+        course: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+          },
+        },
+        _count: {
+          select: {
+            comments: true,
+          },
+        },
+      },
     });
 
     res.json({
       success: true,
+      message: "Resource updated successfully",
       data: updatedResource
     });
 
   } catch (error) {
+    // Clean up temporary file if it exists
+    if (req.file) {
+      cleanupUpload(req.file.path);
+    }
     next(error);
   }
 };
@@ -218,14 +256,42 @@ const extractPublicId = (url: string): string => {
   return filename.split('.')[0];
 };
 
-// @desc    Get all public resources
-// @route   GET /api/resources
+// @desc    Get all public resources with pagination
+// @route   GET /api/resource/public
 // @access  Public
 export const getAllPublicResources = asyncHandler(async (req: Request, res: Response) => {
+  // Extract query parameters
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 10;
+  const search = req.query.search as string;
+  const type = req.query.type as string;
+
+  // Calculate skip value for pagination
+  const skip = (page - 1) * limit;
+
+  // Build where clause
+  const where: any = { isPublic: true };
+
+  if (search) {
+    where.OR = [
+      { title: { contains: search, mode: 'insensitive' } },
+      { description: { contains: search, mode: 'insensitive' } },
+    ];
+  }
+
+  if (type) {
+    where.type = type;
+  }
+
+  // Get total count for pagination
+  const total = await prisma.resource.count({ where });
+
+  // Get resources with pagination
   const resources = await prisma.resource.findMany({
-    where: {
-      isPublic: true,
-    },
+    where,
+    skip,
+    take: limit,
+    orderBy: { createdAt: 'desc' },
     include: {
       course: {
         select: {
@@ -248,10 +314,23 @@ export const getAllPublicResources = asyncHandler(async (req: Request, res: Resp
     },
   });
 
+  // Calculate pagination info
+  const totalPages = Math.ceil(total / limit);
+  const hasMore = page < totalPages;
+
   res.status(200).json({
     success: true,
     message: "Public resources retrieved successfully",
-    data: resources,
+    data: {
+      items: resources,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasMore,
+      },
+    },
   });
 });
 
