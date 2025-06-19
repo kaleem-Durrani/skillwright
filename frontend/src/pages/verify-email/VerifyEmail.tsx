@@ -18,7 +18,8 @@ import {
 } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import { ROUTES } from "@/common/constants";
-import { useAuthQuery } from "@/hooks";
+import { useMutation } from "@/hooks";
+import { authService } from "@/services";
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -31,13 +32,44 @@ const VerifyEmail = () => {
   const [userType, setUserType] = useState<"student" | "teacher" | null>(null);
   const navigate = useNavigate();
 
-  // Get mutations from hooks
-  const {
-    studentVerifyOtpMutation,
-    teacherVerifyOtpMutation,
-    studentResendOtpMutation,
-    teacherResendOtpMutation,
-  } = useAuthQuery();
+  // Create mutation hooks for OTP verification and resend
+  const studentVerifyOtpMutation = useMutation(authService.studentVerifyOtp, {
+    onSuccess: () => {
+      setVerified(true);
+      notification.success({
+        message: "Email Verified Successfully",
+        description: "Your email has been verified. You can now login.",
+      });
+    },
+  });
+
+  const teacherVerifyOtpMutation = useMutation(authService.teacherVerifyOtp, {
+    onSuccess: () => {
+      setVerified(true);
+      notification.success({
+        message: "Email Verified Successfully",
+        description: "Your email has been verified. You can now login.",
+      });
+    },
+  });
+
+  const studentResendOtpMutation = useMutation(authService.studentResendOtp, {
+    onSuccess: () => {
+      notification.success({
+        message: "OTP Sent",
+        description: "A new OTP has been sent to your email.",
+      });
+    },
+  });
+
+  const teacherResendOtpMutation = useMutation(authService.teacherResendOtp, {
+    onSuccess: () => {
+      notification.success({
+        message: "OTP Sent",
+        description: "A new OTP has been sent to your email.",
+      });
+    },
+  });
 
   // Get user data from localStorage
   useEffect(() => {
@@ -88,7 +120,7 @@ const VerifyEmail = () => {
           : teacherVerifyOtpMutation;
       const response = await mutation.mutateAsync(values);
 
-      if (response?.data?.success) {
+      if (response?.success) {
         // Update user data in localStorage to mark as verified
         const userData = JSON.parse(localStorage.getItem("user") || "{}");
         userData.isVerified = true;
@@ -140,7 +172,7 @@ const VerifyEmail = () => {
           : teacherResendOtpMutation;
       const response = await mutation.mutateAsync(userEmail);
 
-      if (response?.data?.success) {
+      if (response?.success) {
         notification.success({
           message: "OTP Resent",
           description: "A new verification code has been sent to your email.",
