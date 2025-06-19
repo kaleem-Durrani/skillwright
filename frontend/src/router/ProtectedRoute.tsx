@@ -1,5 +1,6 @@
 import { ReactNode, useEffect } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
+import { useAuth } from "@/context/AuthContext";
 import { ROUTES } from "../common/constants/routes";
 import { UserType } from "../common/types/auth.types";
 
@@ -12,37 +13,21 @@ interface ProtectedRouteProps {
 // command for checking the mock authentication
 // localStorage.setItem('user', JSON.stringify({ id: '1', name: 'Test User', userType: 'admin' }));
 
-// Authentication hook
-export const useAuth = () => {
-  // Get user data from localStorage
-  const user = localStorage.getItem("user")
-    ? JSON.parse(localStorage.getItem("user") || "{}")
-    : null;
-
-  // For admin users, always consider them verified
-  const isVerified =
-    user?.userType === "admin"
-      ? true
-      : (user?.isVerified as boolean | undefined);
-
-  return {
-    user,
-    isAuthenticated: !!user,
-    userType: user?.userType as UserType | undefined,
-    isVerified,
-  };
-};
-
 const ProtectedRoute = ({
   children,
   userType,
   requiresVerification = false,
 }: ProtectedRouteProps) => {
-  const { isAuthenticated, user, isVerified } = useAuth();
+  const { isAuthenticated, user, isVerified, isLoading } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
 
   useEffect(() => {
+    // Don't do anything while loading
+    if (isLoading) {
+      return;
+    }
+
     // If not authenticated, redirect to login
     if (!isAuthenticated) {
       navigate(ROUTES.LOGIN, { replace: true, state: { from: location } });
@@ -76,6 +61,7 @@ const ProtectedRoute = ({
       }
     }
   }, [
+    isLoading,
     isAuthenticated,
     isVerified,
     user,
@@ -85,10 +71,15 @@ const ProtectedRoute = ({
     navigate,
   ]);
 
+  // Show loading state while authentication is being checked
+  if (isLoading) {
+    return null; // or a loading spinner
+  }
+
   // If not authenticated or not meeting verification requirements, render nothing while redirect happens
   if (
     !isAuthenticated ||
-    (requiresVerification && isVerified) ||
+    (requiresVerification && !isVerified) ||
     (!requiresVerification && !isVerified && user?.userType !== "admin") ||
     (userType && user?.userType !== userType)
   ) {
