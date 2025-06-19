@@ -9,25 +9,88 @@ import asyncHandler from "../middleware/asyncHandler.js";
 // @route   GET /api/department
 // @access  Public
 export const getAllDepartments = asyncHandler(async (req: Request, res: Response) => {
-  const departments = await prisma.department.findMany({
-    select: {
-      id: true,
-      name: true,
-      description: true,
-      // _count: {
-      //   select: {
-      //     teachers: true,
-      //     students: true,
-      //     courses: true,
-      //   },
-      // },
-    },
-  });
+  const { search, page = '1', limit = '10' } = req.query;
+
+  // Pagination
+  const pageNum = parseInt(page as string) || 1;
+  const limitNum = parseInt(limit as string) || 10;
+  const skip = (pageNum - 1) * limitNum;
+
+  // Build where clause for filtering
+  const where: any = {};
+
+  // Search filter (name or description)
+  if (search) {
+    where.OR = [
+      { name: { contains: search as string, mode: 'insensitive' } },
+      { description: { contains: search as string, mode: 'insensitive' } },
+    ];
+  }
+
+  // Get departments and total count in parallel
+  const [departments, total] = await Promise.all([
+    prisma.department.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        _count: {
+          select: {
+            teachers: true,
+            students: true,
+            courses: true,
+          },
+        },
+      },
+      orderBy: {
+        name: 'asc',
+      },
+      skip,
+      take: limitNum,
+    }),
+    prisma.department.count({ where }),
+  ]);
+
+  const hasMore = skip + departments.length < total;
 
   res.status(200).json({
     success: true,
     message: "Departments retrieved successfully",
-    data: departments,
+    data: {
+      items: departments,
+      total,
+      page: pageNum,
+      limit: limitNum,
+      hasMore,
+    },
+  });
+});
+
+// @desc    Get departments for select components (id and name only)
+// @route   GET /api/departments/select
+// @access  Public
+export const getDepartmentsForSelect = asyncHandler(async (req: Request, res: Response) => {
+  const departments = await prisma.department.findMany({
+    select: {
+      id: true,
+      name: true,
+    },
+    orderBy: {
+      name: 'asc',
+    },
+  });
+
+  // Transform to value/label format for select components
+  const selectOptions = departments.map(dept => ({
+    value: dept.id,
+    label: dept.name,
+  }));
+
+  res.status(200).json({
+    success: true,
+    message: "Departments for select retrieved successfully",
+    data: selectOptions,
   });
 });
 
