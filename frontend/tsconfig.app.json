@@ -31,7 +31,7 @@
       "@hooks/*": ["src/hooks/*"],
       "@context/*": ["src/context/*"],
       "@utils/*": ["src/utils/*"],
-      "@api/*": ["src/api/*"],
+
       "@assets/*": ["src/assets/*"],
       "@types/*": ["src/common/types/*"],
       "@constants/*": ["src/common/constants/*"]
