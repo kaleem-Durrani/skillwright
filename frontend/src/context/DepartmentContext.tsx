@@ -8,7 +8,7 @@ import React, {
 import { notification } from "antd";
 import { debounce } from "lodash";
 import { z } from "zod";
-import { departmentApi } from "@/api";
+import { departmentService } from "../services/departmentService";
 
 // Define the Department schema using Zod
 const DepartmentSchema = z.object({
@@ -58,28 +58,28 @@ export const DepartmentProvider: React.FC<DepartmentProviderProps> = ({
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Function to fetch departments
+  // Function to fetch departments for select components
   const fetchDepartments = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      const response = await departmentApi.getAllDepartments();
+      const response = await departmentService.getDepartmentsForSelect();
 
-      if (response?.data?.success && response.data.data) {
-        // Validate the response data using Zod
-        const validatedData = DepartmentsSchema.parse(response.data.data);
+      if (response?.success && response.data) {
+        // Set department options directly from API response
+        setDepartmentOptions(response.data);
 
-        // Set the departments
-        setDepartments(validatedData);
-
-        // Create options for select components
-        const options = validatedData.map((dept) => ({
-          label: dept.name,
-          value: dept.id,
+        // Also set departments for other uses (convert from select format)
+        const departmentsData = response.data.map((option) => ({
+          id: option.value,
+          name: option.label,
+          description: null,
         }));
 
-        setDepartmentOptions(options);
+        // Validate the departments data using Zod
+        const validatedData = DepartmentsSchema.parse(departmentsData);
+        setDepartments(validatedData);
       } else {
         throw new Error("Failed to fetch departments");
       }
