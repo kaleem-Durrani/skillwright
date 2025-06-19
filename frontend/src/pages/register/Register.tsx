@@ -2,7 +2,8 @@ import { useState } from "react";
 import { Form, Typography, Card, Steps, Row, Col, Divider, App } from "antd";
 import { Link, useNavigate } from "react-router-dom";
 import { ROUTES } from "@/common/constants";
-import { useAuthQuery } from "@/hooks";
+import { useMutation } from "@/hooks";
+import { authService } from "@/services";
 import { useDepartmentContext } from "@/context/DepartmentContext";
 import {
   UserType,
@@ -29,8 +30,24 @@ const Register = () => {
 
   const { notification } = App.useApp();
 
-  // Get mutations from hooks
-  const { studentSignupMutation, teacherSignupMutation } = useAuthQuery();
+  // Create mutation hooks for signup
+  const studentSignupMutation = useMutation(authService.studentSignup, {
+    onSuccess: () => {
+      notification.success({
+        message: "Registration Successful",
+        description: "Please check your email to verify your account.",
+      });
+    },
+  });
+
+  const teacherSignupMutation = useMutation(authService.teacherSignup, {
+    onSuccess: () => {
+      notification.success({
+        message: "Registration Successful",
+        description: "Please check your email to verify your account.",
+      });
+    },
+  });
 
   // Get departments from context
   const {

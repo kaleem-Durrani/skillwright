@@ -1,5 +1,5 @@
-import React from 'react';
-import { Button } from 'antd';
+import React from "react";
+import { Button } from "antd";
 
 interface FormNavigationProps {
   currentStep: number;
@@ -47,8 +47,8 @@ const FormNavigation: React.FC<FormNavigationProps> = ({
           size="large"
           loading={
             loading ||
-            studentSignupMutation.isPending ||
-            teacherSignupMutation.isPending
+            studentSignupMutation.loading ||
+            teacherSignupMutation.loading
           }
           className="ml-auto"
         >
