@@ -5,6 +5,7 @@ import {
   deleteDepartment,
   getDepartment,
   getAllDepartments,
+  getDepartmentsForSelect,
 } from "../controllers/department.controller.js";
 import {
   createDepartmentValidation,
@@ -26,6 +27,7 @@ const router = express.Router();
 
 // Public routes
 router.get("/", getAllDepartments);
+router.get("/select", getDepartmentsForSelect);
 router.get("/:id", getDepartment);
 
 // Protected routes (Admin only)
