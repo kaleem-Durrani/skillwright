@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Typography, Tabs, Form, Spin, Divider, message } from "antd";
-import { useStudentQuery } from "@/hooks";
+import { useApi, useMutation } from "@/hooks";
+import { studentService } from "@/services";
 import { ROUTES } from "@/common/constants";
 import { CourseWithEnrollment, StudentWithDetails } from "@/common/types";
 import { ProfileInfo, EnrolledCoursesList } from "./components";
@@ -15,24 +16,30 @@ const StudentProfile = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [activeTab, setActiveTab] = useState("profile");
 
-  // Get student profile data
-  const { getProfileQuery, updateProfileMutation, getEnrolledCoursesQuery } =
-    useStudentQuery();
+  // API calls for student profile and courses
+  const profileQuery = useApi(() => studentService.getProfile(), {
+    immediate: true,
+  });
 
-  const {
-    data: profileData,
-    isLoading: isLoadingProfile,
-    refetch: refetchProfile,
-  } = getProfileQuery;
+  const enrolledCoursesQuery = useApi(
+    () => studentService.getEnrolledCourses(),
+    { immediate: true }
+  );
 
-  const { data: enrolledCoursesData, isLoading: isLoadingCourses } =
-    getEnrolledCoursesQuery();
+  // Mutation for updating profile
+  const updateProfileMutation = useMutation(studentService.updateProfile, {
+    onSuccess: () => {
+      message.success("Profile updated successfully");
+      setIsEditing(false);
+      profileQuery.refetch();
+    },
+  });
 
   // Cast student data to StudentWithDetails
-  const student = profileData?.data?.data as StudentWithDetails;
+  const student = profileQuery.data?.data as StudentWithDetails;
 
   // Extract courses from the API response
-  const enrolledCoursesResponse = enrolledCoursesData?.data?.data as any;
+  const enrolledCoursesResponse = enrolledCoursesQuery.data?.data;
   const enrolledCourses = enrolledCoursesResponse?.items || [];
 
   // Filter enrolled courses by status
@@ -73,26 +80,19 @@ const StudentProfile = () => {
   };
 
   // Handle save profile
-  const handleSaveProfile = () => {
-    form
-      .validateFields()
-      .then((values) => {
-        updateProfileMutation.mutate(values, {
-          onSuccess: () => {
-            message.success("Profile updated successfully");
-            setIsEditing(false);
-            refetchProfile();
-          },
-          onError: (error: any) => {
-            message.error(
-              error.response?.data?.message || "Failed to update profile"
-            );
-          },
-        });
-      })
-      .catch((error) => {
+  const handleSaveProfile = async () => {
+    try {
+      const values = await form.validateFields();
+      await updateProfileMutation.mutateAsync(values);
+    } catch (error: any) {
+      if (error.response?.data?.message) {
+        message.error(error.response.data.message);
+      } else if (error.message) {
         console.error("Validation failed:", error);
-      });
+      } else {
+        message.error("Failed to update profile");
+      }
+    }
   };
 
   // Handle view course
@@ -100,7 +100,7 @@ const StudentProfile = () => {
     navigate(ROUTES.STUDENT.COURSE_DETAILS(courseId));
   };
 
-  if (isLoadingProfile) {
+  if (profileQuery.loading) {
     return (
       <div className="flex justify-center items-center h-full">
         <Spin size="large" />
@@ -122,7 +122,7 @@ const StudentProfile = () => {
           <ProfileInfo
             student={student}
             isEditing={isEditing}
-            isLoading={updateProfileMutation.isPending}
+            isLoading={updateProfileMutation.loading}
             form={form}
             onEdit={handleEditProfile}
             onCancel={handleCancelEdit}
@@ -137,7 +137,7 @@ const StudentProfile = () => {
             </Title>
             <EnrolledCoursesList
               courses={approvedCourses}
-              isLoading={isLoadingCourses}
+              isLoading={enrolledCoursesQuery.loading}
               onViewCourse={handleViewCourse}
               emptyText="You are not enrolled in any approved courses"
             />
@@ -150,7 +150,7 @@ const StudentProfile = () => {
                 </Title>
                 <EnrolledCoursesList
                   courses={pendingCourses}
-                  isLoading={isLoadingCourses}
+                  isLoading={enrolledCoursesQuery.loading}
                   onViewCourse={handleViewCourse}
                   emptyText="You don't have any pending enrollment requests"
                 />
