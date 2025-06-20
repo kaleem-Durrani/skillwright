@@ -1,223 +1,239 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { Typography, Button, Tabs, Modal, message } from "antd";
-import { ExclamationCircleOutlined } from "@ant-design/icons";
-import { useApi, useMutation } from "@/hooks";
-import { studentService, courseService } from "@/services";
-import { ROUTES } from "@/common/constants";
-import { CourseWithEnrollment } from "@/common/types";
-import { CourseList, CourseSearch } from "./components";
+import React, { useState } from "react";
+import { Tabs, Typography, Input, Space, App } from "antd";
 import {
-  filterCoursesByStatus,
-  getCourseIds,
-  filterAvailableCourses,
-} from "./utils";
+  BookOutlined,
+  ClockCircleOutlined,
+  SearchOutlined,
+  PlusOutlined,
+} from "@ant-design/icons";
+import { useApi, useMutation } from "@/hooks";
+import { studentService } from "@/services";
+import { QueryParams } from "@/common/types";
+import { ROUTES } from "@/common/constants";
+import { useNavigate } from "react-router-dom";
+import {
+  EnrolledCoursesTab,
+  PendingRequestsTab,
+  AvailableCoursesTab,
+} from "./components";
 
-const { Title, Text } = Typography;
-const { TabPane } = Tabs;
-const { confirm } = Modal;
+const { Title } = Typography;
+const { Search } = Input;
 
-const StudentCourses = () => {
+const StudentCourses: React.FC = () => {
+  const { notification, modal } = App.useApp();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("enrolled");
-  const [searchText, setSearchText] = useState("");
-  const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 6;
+  const [searchTerm, setSearchTerm] = useState("");
 
-  // API calls for courses
-  const enrolledCoursesQuery = useApi(
-    () =>
-      studentService.getEnrolledCourses({
-        page: currentPage,
-        limit: pageSize,
-        search: searchText,
-      }),
-    {
-      immediate: true,
-      dependencies: [currentPage, pageSize, searchText],
-    }
-  );
-
-  const allCoursesQuery = useApi(
-    () =>
-      courseService.getCourses({
-        page: currentPage,
-        limit: pageSize,
-        search: searchText,
-      }),
-    {
-      immediate: true,
-      dependencies: [currentPage, pageSize, searchText],
-    }
-  );
-
-  // Mutation hooks
-  const withdrawFromCourseMutation = useMutation(
-    studentService.withdrawFromCourse,
-    {
-      onSuccess: () => {
-        message.success("Successfully withdrawn from course");
-        enrolledCoursesQuery.refetch();
-        allCoursesQuery.refetch();
-      },
-    }
-  );
-
-  const requestEnrollmentMutation = useMutation(studentService.enrollInCourse, {
+  // Mutations
+  const enrollMutation = useMutation(studentService.requestEnrollment, {
     onSuccess: () => {
-      message.success("Enrollment request sent successfully");
-      enrolledCoursesQuery.refetch();
-      allCoursesQuery.refetch();
+      notification.success({
+        message: "Success",
+        description: "Enrollment request submitted successfully.",
+      });
+      // Refresh all tabs
+      enrolledQuery.refetch();
+      pendingQuery.refetch();
+      availableQuery.refetch();
+    },
+    onError: (error: any) => {
+      notification.error({
+        message: "Error",
+        description:
+          error.response?.data?.message ||
+          "Failed to submit enrollment request.",
+      });
     },
   });
 
-  // Extract courses from the API response
-  const enrolledCoursesResponse = enrolledCoursesQuery.data?.data;
-  const enrolledCourses = enrolledCoursesResponse?.items || [];
-  const pendingCourses = filterCoursesByStatus(enrolledCourses, "PENDING");
-  const approvedCourses = filterCoursesByStatus(enrolledCourses, "APPROVED");
+  const cancelMutation = useMutation(studentService.cancelEnrollmentRequest, {
+    onSuccess: () => {
+      notification.success({
+        message: "Success",
+        description: "Enrollment request cancelled successfully.",
+      });
+      pendingQuery.refetch();
+      availableQuery.refetch();
+    },
+    onError: (error: any) => {
+      notification.error({
+        message: "Error",
+        description:
+          error.response?.data?.message ||
+          "Failed to cancel enrollment request.",
+      });
+    },
+  });
 
-  // All available courses (excluding already enrolled ones)
-  const enrolledCourseIds = getCourseIds(enrolledCourses);
-  const allCoursesResponse = allCoursesQuery.data?.data;
-  const availableCourses = filterAvailableCourses(
-    allCoursesResponse?.items || [],
-    enrolledCourseIds
+  const withdrawMutation = useMutation(studentService.withdrawFromCourse, {
+    onSuccess: () => {
+      notification.success({
+        message: "Success",
+        description: "Successfully withdrawn from course.",
+      });
+      enrolledQuery.refetch();
+      availableQuery.refetch();
+    },
+    onError: (error: any) => {
+      notification.error({
+        message: "Error",
+        description:
+          error.response?.data?.message || "Failed to withdraw from course.",
+      });
+    },
+  });
+
+  // Query parameters
+  const getQueryParams = (): QueryParams => ({
+    search: searchTerm || undefined,
+    page: 1,
+    limit: 10,
+  });
+
+  // API queries
+  const enrolledQuery = useApi(
+    () => studentService.getEnrolledCourses(getQueryParams()),
+    {
+      immediate: true,
+      dependencies: [searchTerm],
+    }
   );
 
-  // Handle course enrollment
+  const pendingQuery = useApi(
+    () => studentService.getPendingRequests(getQueryParams()),
+    {
+      immediate: activeTab === "pending",
+      dependencies: [searchTerm, activeTab],
+    }
+  );
+
+  const availableQuery = useApi(
+    () => studentService.getAvailableCourses(getQueryParams()),
+    {
+      immediate: activeTab === "available",
+      dependencies: [searchTerm, activeTab],
+    }
+  );
+
+  // Handlers
+  const handleSearch = (value: string) => {
+    setSearchTerm(value);
+  };
+
   const handleEnroll = (courseId: string) => {
-    confirm({
-      title: "Are you sure you want to enroll in this course?",
-      icon: <ExclamationCircleOutlined />,
-      content:
-        "Your enrollment request will be sent to the teacher for approval.",
-      async onOk() {
-        try {
-          await requestEnrollmentMutation.mutateAsync(courseId);
-        } catch (error: any) {
-          message.error(
-            error.response?.data?.message || "Failed to enroll in course"
-          );
-        }
-      },
+    modal.confirm({
+      title: "Confirm Enrollment",
+      content: "Are you sure you want to request enrollment in this course?",
+      onOk: () => enrollMutation.mutateAsync(courseId),
     });
   };
 
-  // Handle course withdrawal
+  const handleCancel = (enrollmentId: string) => {
+    modal.confirm({
+      title: "Cancel Request",
+      content: "Are you sure you want to cancel this enrollment request?",
+      onOk: () => cancelMutation.mutateAsync(enrollmentId),
+    });
+  };
+
   const handleWithdraw = (courseId: string) => {
-    confirm({
-      title: "Are you sure you want to withdraw from this course?",
-      icon: <ExclamationCircleOutlined />,
+    modal.confirm({
+      title: "Withdraw from Course",
       content:
-        "You will need to re-enroll if you want to access this course again.",
-      async onOk() {
-        try {
-          await withdrawFromCourseMutation.mutateAsync(courseId);
-        } catch (error: any) {
-          message.error(
-            error.response?.data?.message || "Failed to withdraw from course"
-          );
-        }
-      },
+        "Are you sure you want to withdraw from this course? This action cannot be undone.",
+      onOk: () => withdrawMutation.mutateAsync(courseId),
     });
   };
 
-  // Handle view course details
-  const handleViewCourse = (courseId: string) => {
+  const handleView = (courseId: string) => {
     navigate(ROUTES.STUDENT.COURSE_DETAILS(courseId));
   };
 
-  // Handle view course resources
-  const handleViewResources = (courseId: string) => {
-    navigate(ROUTES.STUDENT.COURSE_DETAILS(courseId) + "/resources");
+  const handleTabChange = (key: string) => {
+    setActiveTab(key);
+    // Trigger queries for the active tab
+    if (key === "pending" && !pendingQuery.data) {
+      pendingQuery.refetch();
+    } else if (key === "available" && !availableQuery.data) {
+      availableQuery.refetch();
+    }
   };
 
-  // Handle search
-  const handleSearch = (value: string) => {
-    setSearchText(value);
-    setCurrentPage(1);
-  };
-
-  // Handle pagination
-  const handlePageChange = (page: number) => {
-    setCurrentPage(page);
-  };
+  const tabItems = [
+    {
+      key: "enrolled",
+      label: (
+        <Space>
+          <BookOutlined />
+          <span>Enrolled Courses</span>
+        </Space>
+      ),
+      children: (
+        <EnrolledCoursesTab
+          query={enrolledQuery}
+          onWithdraw={handleWithdraw}
+          onView={handleView}
+          isWithdrawing={withdrawMutation.loading}
+        />
+      ),
+    },
+    {
+      key: "pending",
+      label: (
+        <Space>
+          <ClockCircleOutlined />
+          <span>Pending Requests</span>
+        </Space>
+      ),
+      children: (
+        <PendingRequestsTab
+          query={pendingQuery}
+          onCancel={handleCancel}
+          isCancelling={cancelMutation.loading}
+        />
+      ),
+    },
+    {
+      key: "available",
+      label: (
+        <Space>
+          <PlusOutlined />
+          <span>Available Courses</span>
+        </Space>
+      ),
+      children: (
+        <AvailableCoursesTab
+          query={availableQuery}
+          onEnroll={handleEnroll}
+          isEnrolling={enrollMutation.loading}
+        />
+      ),
+    },
+  ];
 
   return (
     <div className="p-6">
-      <div className="mb-6">
+      <div className="flex justify-between items-center mb-6">
         <Title level={2}>My Courses</Title>
-        <Text className="text-gray-600">
-          View your enrolled courses and discover new ones
-        </Text>
-      </div>
-
-      <div className="mb-4">
-        <CourseSearch value={searchText} onChange={handleSearch} />
+        <Search
+          placeholder="Search courses..."
+          allowClear
+          enterButton={<SearchOutlined />}
+          size="large"
+          style={{ width: 300 }}
+          onSearch={handleSearch}
+          onChange={(e) => !e.target.value && setSearchTerm("")}
+        />
       </div>
 
       <Tabs
         activeKey={activeTab}
-        onChange={setActiveTab}
-        className="course-tabs"
-      >
-        <TabPane tab="Enrolled Courses" key="enrolled">
-          <CourseList
-            courses={approvedCourses}
-            isLoading={enrolledCoursesQuery.loading}
-            isEnrolled={true}
-            currentPage={currentPage}
-            pageSize={pageSize}
-            total={enrolledCoursesResponse?.total || 0}
-            onPageChange={handlePageChange}
-            onEnroll={handleEnroll}
-            onWithdraw={handleWithdraw}
-            onViewDetails={handleViewCourse}
-            onViewResources={handleViewResources}
-            emptyText="You are not enrolled in any courses yet"
-            emptyAction={
-              <Button type="primary" onClick={() => setActiveTab("available")}>
-                Browse Available Courses
-              </Button>
-            }
-          />
-        </TabPane>
-
-        <TabPane tab="Pending Requests" key="pending">
-          <CourseList
-            courses={pendingCourses}
-            isLoading={enrolledCoursesQuery.loading}
-            isEnrolled={true}
-            currentPage={currentPage}
-            pageSize={pageSize}
-            total={pendingCourses.length}
-            onPageChange={handlePageChange}
-            onEnroll={handleEnroll}
-            onWithdraw={handleWithdraw}
-            onViewDetails={handleViewCourse}
-            onViewResources={handleViewResources}
-            emptyText="You don't have any pending enrollment requests"
-          />
-        </TabPane>
-
-        <TabPane tab="Available Courses" key="available">
-          <CourseList
-            courses={availableCourses}
-            isLoading={allCoursesQuery.loading}
-            isEnrolled={false}
-            currentPage={currentPage}
-            pageSize={pageSize}
-            total={allCoursesResponse?.total || 0}
-            onPageChange={handlePageChange}
-            onEnroll={handleEnroll}
-            onWithdraw={handleWithdraw}
-            onViewDetails={handleViewCourse}
-            onViewResources={handleViewResources}
-            emptyText="No available courses found"
-          />
-        </TabPane>
-      </Tabs>
+        onChange={handleTabChange}
+        items={tabItems}
+        size="large"
+      />
     </div>
   );
 };
