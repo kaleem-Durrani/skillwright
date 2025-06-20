@@ -9,6 +9,7 @@ interface ResourceListProps {
   onView: (resource: Resource) => void;
   onEdit: (resource: Resource) => void;
   onDelete: (id: string) => void;
+  onCardClick?: (resource: Resource) => void;
 }
 
 /**
@@ -20,6 +21,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
   onView,
   onEdit,
   onDelete,
+  onCardClick,
 }) => {
   if (loading) {
     return (
@@ -42,6 +44,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
             onView={onView}
             onEdit={onEdit}
             onDelete={onDelete}
+            onCardClick={onCardClick}
           />
         </Col>
       ))}

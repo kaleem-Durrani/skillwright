@@ -20,6 +20,7 @@ interface ResourceCardProps {
   onView: (resource: Resource) => void;
   onEdit: (resource: Resource) => void;
   onDelete: (id: string) => void;
+  onCardClick?: (resource: Resource) => void;
 }
 
 /**
@@ -30,6 +31,7 @@ const ResourceCard: React.FC<ResourceCardProps> = ({
   onView,
   onEdit,
   onDelete,
+  onCardClick,
 }) => {
   const getResourceIcon = () => {
     switch (resource.type) {
@@ -64,7 +66,14 @@ const ResourceCard: React.FC<ResourceCardProps> = ({
     >
       <Card
         hoverable
-        className="h-full shadow-sm hover:shadow-md transition-shadow"
+        className="h-full shadow-sm hover:shadow-md transition-shadow cursor-pointer"
+        onClick={(e) => {
+          // Prevent card click when clicking on action buttons
+          if ((e.target as HTMLElement).closest(".ant-card-actions")) {
+            return;
+          }
+          onCardClick?.(resource);
+        }}
         actions={[
           <Tooltip title="View Resource">
             <Button

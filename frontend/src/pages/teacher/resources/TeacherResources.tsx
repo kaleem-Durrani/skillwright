@@ -1,9 +1,11 @@
 import React, { useState } from "react";
 import { Typography, Button, App, Pagination } from "antd";
 import { PlusOutlined, ExclamationCircleOutlined } from "@ant-design/icons";
+import { useNavigate } from "react-router-dom";
 import { useApi, useMutation } from "@/hooks";
 import { teacherService, resourceService } from "@/services";
 import { Resource, QueryParams } from "@/common/types";
+import { ROUTES } from "@/common/constants";
 import {
   ResourceList,
   ResourceFilter,
@@ -16,6 +18,7 @@ const { Title } = Typography;
 
 const TeacherResources: React.FC = () => {
   const { notification, modal } = App.useApp();
+  const navigate = useNavigate();
   // State
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(12);
@@ -206,6 +209,10 @@ const TeacherResources: React.FC = () => {
     });
   };
 
+  const handleResourceCardClick = (resource: Resource) => {
+    navigate(ROUTES.TEACHER.RESOURCE_COMMENTS(resource.id));
+  };
+
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
@@ -227,6 +234,7 @@ const TeacherResources: React.FC = () => {
         onView={handleViewResource}
         onEdit={handleEditResource}
         onDelete={handleDeleteResource}
+        onCardClick={handleResourceCardClick}
       />
 
       {pagination.total > 0 && (
