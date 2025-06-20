@@ -22,13 +22,16 @@ const AdminConversations = lazy(() => import('../pages').then((module) => ({ def
 const TeacherDashboard = lazy(() => import('../pages').then((module) => ({ default: module.TeacherDashboard })));
 const TeacherCourses = lazy(() => import('../pages').then((module) => ({ default: module.TeacherCourses })));
 const TeacherResources = lazy(() => import('../pages').then((module) => ({ default: module.TeacherResources })));
+const TeacherResourceComments = lazy(() => import('../pages').then((module) => ({ default: module.TeacherResourceComments })));
 const TeacherProfile = lazy(() => import('../pages').then((module) => ({ default: module.TeacherProfile })));
 const TeacherConversations = lazy(() => import('../pages').then((module) => ({ default: module.TeacherConversations })));
 
 // Student pages
 const StudentDashboard = lazy(() => import('../pages').then((module) => ({ default: module.StudentDashboard })));
 const StudentCourses = lazy(() => import('../pages').then((module) => ({ default: module.StudentCourses })));
+const StudentCourseDetails = lazy(() => import('../pages').then((module) => ({ default: module.StudentCourseDetails })));
 const StudentResources = lazy(() => import('../pages').then((module) => ({ default: module.StudentResources })));
+const StudentResourceComments = lazy(() => import('../pages').then((module) => ({ default: module.StudentResourceComments })));
 const StudentProfile = lazy(() => import('../pages').then((module) => ({ default: module.StudentProfile })));
 const StudentConversations = lazy(() => import('../pages').then((module) => ({ default: module.StudentConversations })));
 
@@ -81,6 +84,7 @@ export const teacherRoutes: RouteType[] = [
   { path: ROUTES.TEACHER.DASHBOARD, component: TeacherDashboard, protected: true, userType: 'teacher', requiresVerification: false },
   { path: ROUTES.TEACHER.COURSES, component: TeacherCourses, protected: true, userType: 'teacher', requiresVerification: false },
   { path: ROUTES.TEACHER.RESOURCES, component: TeacherResources, protected: true, userType: 'teacher', requiresVerification: false },
+  { path: ROUTES.TEACHER.RESOURCE_COMMENTS(':resourceId'), component: TeacherResourceComments, protected: true, userType: 'teacher', requiresVerification: false },
   { path: ROUTES.TEACHER.PROFILE, component: TeacherProfile, protected: true, userType: 'teacher', requiresVerification: false },
   { path: ROUTES.TEACHER.CONVERSATIONS, component: TeacherConversations, protected: true, userType: 'teacher', requiresVerification: false },
 ];
@@ -89,7 +93,9 @@ export const teacherRoutes: RouteType[] = [
 export const studentRoutes: RouteType[] = [
   { path: ROUTES.STUDENT.DASHBOARD, component: StudentDashboard, protected: true, userType: 'student', requiresVerification: false },
   { path: ROUTES.STUDENT.COURSES, component: StudentCourses, protected: true, userType: 'student', requiresVerification: false },
+  { path: '/student/courses/:courseId', component: StudentCourseDetails, protected: true, userType: 'student', requiresVerification: false },
   { path: ROUTES.STUDENT.RESOURCES, component: StudentResources, protected: true, userType: 'student', requiresVerification: false },
+  { path: '/student/resources/:resourceId/comments', component: StudentResourceComments, protected: true, userType: 'student', requiresVerification: false },
   { path: ROUTES.STUDENT.PROFILE, component: StudentProfile, protected: true, userType: 'student', requiresVerification: false },
   { path: ROUTES.STUDENT.CONVERSATIONS, component: StudentConversations, protected: true, userType: 'student', requiresVerification: false },
 ];
