@@ -7,10 +7,13 @@ export interface ApiResponse<T = any> {
 
 export interface PaginatedResponse<T> extends ApiResponse<{
   items: T[];
-  total: number;
-  page: number;
-  limit: number;
-  hasMore: boolean;
+  pagination: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+    hasMore: boolean;
+  };
 }> {}
 
 export interface ValidationError {

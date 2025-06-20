@@ -78,6 +78,11 @@ export interface Course {
     qualification?: string;
     specialization?: string;
   };
+  enrollmentId?: string;
+  enrolledAt?: string;
+  requestedAt?: string;
+  enrollmentStatus?: EnrollmentStatus | null;
+  canEnroll?: boolean;
   _count?: {
     enrollments: number;
     resources: number;
@@ -291,4 +296,18 @@ export interface ConversationCreateData {
 
 export interface MessageCreateData {
   content: string;
-} 
+}
+
+// Dashboard types
+export interface DashboardStats {
+  enrolledCourses: number;
+  pendingRequests: number;
+  totalResources: number;
+}
+
+export interface StudentDashboardData {
+  stats: DashboardStats;
+  recentCourses: Course[];
+  recentResources: Resource[];
+  recentNews: NewsEvent[];
+}
