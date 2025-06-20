@@ -7,7 +7,8 @@ import {
   Enrollment,
   ApiResponse,
   QueryParams,
-  PaginatedResponse
+  PaginatedResponse,
+  ResourceComment
 } from '../common/types';
 
 export const teacherService = {
@@ -37,4 +38,20 @@ export const teacherService = {
 
   getMyResources: (params?: QueryParams): Promise<ApiResponse<PaginatedResponse<Resource>>> =>
     api.get('/teacher/resources', { params }),
+
+  // Resource Comments
+  getResourceDetails: (resourceId: string): Promise<ApiResponse<Resource>> =>
+    api.get(`/teacher/resources/${resourceId}`),
+
+  getResourceComments: (resourceId: string, params?: QueryParams): Promise<ApiResponse<PaginatedResponse<ResourceComment>>> =>
+    api.get(`/teacher/resources/${resourceId}/comments`, { params }),
+
+  createResourceComment: (resourceId: string, data: { content: string }): Promise<ApiResponse<ResourceComment>> =>
+    api.post(`/teacher/resources/${resourceId}/comments`, data),
+
+  updateResourceComment: (commentId: string, data: { content: string }): Promise<ApiResponse<ResourceComment>> =>
+    api.put(`/teacher/resources/comments/${commentId}`, data),
+
+  deleteResourceComment: (commentId: string): Promise<ApiResponse<null>> =>
+    api.delete(`/teacher/resources/comments/${commentId}`),
 };

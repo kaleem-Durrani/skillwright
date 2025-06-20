@@ -10,9 +10,20 @@ import {
   getMyResources,
 } from "../controllers/teacher.controller.js";
 import {
+  getResourceById,
+  getResourceComments,
+  createResourceComment,
+  updateResourceComment,
+  deleteResourceComment,
+} from "../controllers/resource.controller.js";
+import {
   updateProfileValidation,
   updateEnrollmentStatusValidation,
 } from "../routesValidation/teacher.validation.js";
+import {
+  resourceCommentValidation,
+  updateCommentValidation,
+} from "../routesValidation/student.validation.js";
 import { teacherProtect } from "../middleware/authMiddleware.js";
 
 /**
@@ -47,6 +58,27 @@ router.put(
 // Resource Management
 router.get("/courses/:id/resources", teacherProtect, getCourseResources);
 router.get("/resources", teacherProtect, getMyResources);
+
+// Resource Comments
+router.get("/resources/:id", teacherProtect, getResourceById);
+router.get("/resources/:id/comments", teacherProtect, getResourceComments);
+router.post(
+  "/resources/:id/comments",
+  teacherProtect,
+  resourceCommentValidation,
+  createResourceComment
+);
+router.put(
+  "/resources/comments/:commentId",
+  teacherProtect,
+  updateCommentValidation,
+  updateResourceComment
+);
+router.delete(
+  "/resources/comments/:commentId",
+  teacherProtect,
+  deleteResourceComment
+);
 
 // Note: Nested comment functionality is currently disabled
 // Future implementation will support replies to comments
