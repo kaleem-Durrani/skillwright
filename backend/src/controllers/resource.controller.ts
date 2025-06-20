@@ -201,16 +201,30 @@ export const getResource = async (req: Request, res: Response, next: NextFunctio
   }
 };
 
-// @desc    Get resource comments
+// @desc    Get resource comments with pagination
 // @route   GET /api/resource/:id/comments
 // @access  Private (Course Access)
 export const getResourceComments = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
 
+    // Extract query parameters for pagination
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 10;
+    const skip = (page - 1) * limit;
+
+    // Get total count for pagination
+    const total = await prisma.resourceComment.count({
+      where: {
+        resourceId: id,
+        parentId: null, // Only count top-level comments
+      }
+    });
+
     const comments = await prisma.resourceComment.findMany({
       where: {
-        resourceId: id
+        resourceId: id,
+        parentId: null, // Only get top-level comments
       },
       include: {
         teacher: {
@@ -228,12 +242,28 @@ export const getResourceComments = async (req: Request, res: Response, next: Nex
       },
       orderBy: {
         createdAt: 'desc'
-      }
+      },
+      skip,
+      take: limit,
     });
+
+    // Calculate pagination info
+    const totalPages = Math.ceil(total / limit);
+    const hasMore = page < totalPages;
 
     res.json({
       success: true,
-      data: comments
+      message: "Comments retrieved successfully",
+      data: {
+        items: comments,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages,
+          hasMore,
+        },
+      }
     });
 
   } catch (error) {
@@ -356,39 +386,9 @@ export const getResourceById = asyncHandler(async (req: Request, res: Response) 
           name: true,
         },
       },
-      comments: {
-        where: {
-          parentId: null,
-        },
-        include: {
-          teacher: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-          student: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-          replies: {
-            include: {
-              teacher: {
-                select: {
-                  id: true,
-                  name: true,
-                },
-              },
-              student: {
-                select: {
-                  id: true,
-                  name: true,
-                },
-              },
-            },
-          },
+      _count: {
+        select: {
+          comments: true,
         },
       },
     },
