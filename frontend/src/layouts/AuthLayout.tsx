@@ -56,8 +56,6 @@ const AuthLayout = () => {
   const menuItems = AUTH_MENU.map((item) => ({
     key: item.path,
     label: item.label,
-    className: "!inline-block", // Force items to be inline-block
-    style: { display: "inline-block" }, // Additional inline style
     onClick: () => handleNavClick(item.path),
   }));
 
@@ -88,90 +86,123 @@ const AuthLayout = () => {
   }, []);
 
   return (
-    <Layout className="min-h-screen ">
-      {/* Background Image */}
-      <div className="fixed inset-0 z-0">
-        <div className="absolute inset-0 bg-gradient-to-br from-blue-600 to-purple-700"></div>
-        <div
-          className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?q=80&w=2070')] bg-cover bg-center opacity-30"
-          style={{ filter: "blur(1px)" }}
-        ></div>
-      </div>
+    <>
+      <style>{`
+        /* Target menu items specifically with high specificity */
+        .ant-menu.ant-menu-horizontal .ant-menu-item,
+        .ant-menu.ant-menu-vertical .ant-menu-item {
+          color: #000 !important; /* Gold/yellow color */
+          text-shadow: 2px 2px 4px rgba(255, 255, 255, 0.8) !important;
+          font-weight: 900 !important;
+          font-size: 1.2rem !important;
+        }
 
-      {/* Header with Glassmorphism */}
-      <Header
-        className={`site-header flex items-center justify-between px-4 z-50 transition-all duration-300 ${
-          scrolled ? "bg-blue-600/90" : "bg-blue-600/50"
-        } backdrop-blur-md border-b border-white/20`}
-      >
-        <div className="flex items-center">
-          <Title
-            level={3}
-            className="!m-0 text-white cursor-pointer"
-            onClick={() => handleNavClick("/")}
-          >
-            Millat Vocational
-          </Title>
+        .ant-menu.ant-menu-horizontal .ant-menu-item:hover,
+        .ant-menu.ant-menu-vertical .ant-menu-item:hover {
+          color: #000 !important; /* Lighter yellow on hover */
+          // text-shadow: 3px 3px 6px rgba(0, 0, 0, 0.9) !important;
+        }
+
+        .ant-menu.ant-menu-horizontal .ant-menu-item-selected,
+        .ant-menu.ant-menu-vertical .ant-menu-item-selected {
+          color: #000 !important; /* White for selected */
+          // text-shadow: 2px 2px 4px rgba(0, 0, 0, 1) !important;
+          background-color: rgba(255, 255, 255, 0.1) !important;
+        }
+
+        /* Target the text inside menu items */
+        .ant-menu.ant-menu-horizontal .ant-menu-item span,
+        .ant-menu.ant-menu-vertical .ant-menu-item span {
+          color: inherit !important;
+          text-shadow: inherit !important;
+        }
+      `}</style>
+
+      <Layout className=" ">
+        {/* Background Image */}
+        <div className="fixed inset-0 z-0">
+          <div className="absolute inset-0 bg-gradient-to-br from-blue-600 to-purple-700"></div>
+          <div
+            className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?q=80&w=2070')] bg-cover bg-center opacity-30"
+            style={{ filter: "blur(1px)" }}
+          ></div>
         </div>
 
-        {/* Desktop Menu */}
-        <Menu
-          mode="horizontal"
-          selectedKeys={[
-            location.pathname === "/"
-              ? location.hash || "/"
-              : location.pathname,
-          ]}
-          className="hidden sm:flex bg-transparent border-0"
-          items={menuItems}
-          style={{
-            backgroundColor: "transparent",
-            minWidth: "auto",
-          }}
-          theme="dark"
-          disabledOverflow={true}
-        />
+        {/* Header with Glassmorphism */}
+        <Header
+          className={`site-header flex items-center justify-between px-4 z-50 transition-all duration-300 ${
+            scrolled ? "bg-blue-600/90" : "bg-blue-600/50"
+          } backdrop-blur-md border-b border-white/20`}
+        >
+          <div className="flex items-center">
+            <Title
+              level={3}
+              className="!m-0 text-white cursor-pointer"
+              onClick={() => handleNavClick("/")}
+            >
+              Millat Vocational
+            </Title>
+          </div>
 
-        {/* Mobile Menu Toggle */}
-        <Button
-          type="text"
-          icon={<MenuOutlined />}
-          onClick={() => setIsMenuOpen(!isMenuOpen)}
-          className="sm:hidden text-white"
-        />
-      </Header>
+          {/* Desktop Menu */}
+          <Menu
+            mode="horizontal"
+            selectedKeys={[
+              location.pathname === "/"
+                ? location.hash || "/"
+                : location.pathname,
+            ]}
+            className="hidden sm:flex bg-transparent border-0"
+            items={menuItems}
+            style={{
+              backgroundColor: "transparent",
+              minWidth: "auto",
+            }}
+            theme="dark"
+            disabledOverflow={true}
+          />
 
-      {/* Mobile Menu Dropdown with Glassmorphism */}
-      {isMenuOpen && (
-        <Menu
-          mode="vertical"
-          selectedKeys={[
-            location.pathname === "/"
-              ? location.hash || "/"
-              : location.pathname,
-          ]}
-          className="sm:hidden mt-16 backdrop-blur-md bg-blue-600/80 border-b border-white/20 shadow-lg z-40"
-          items={menuItems}
-          style={{
-            backgroundColor: "transparent",
-          }}
-          theme="dark"
-          onClick={() => setIsMenuOpen(false)}
-          disabledOverflow={true}
-        />
-      )}
+          {/* Mobile Menu Toggle */}
+          <Button
+            type="text"
+            icon={<MenuOutlined />}
+            onClick={() => setIsMenuOpen(!isMenuOpen)}
+            className="sm:hidden text-white"
+          />
+        </Header>
 
-      {/* Main Content */}
-      <Content className="site-content h-full relative z-10">
-        <Outlet />
-      </Content>
+        {/* Mobile Menu Dropdown with Glassmorphism */}
+        {isMenuOpen && (
+          <Menu
+            mode="vertical"
+            selectedKeys={[
+              location.pathname === "/"
+                ? location.hash || "/"
+                : location.pathname,
+            ]}
+            className="sm:hidden mt-16 backdrop-blur-md bg-blue-600/80 border-b border-white/20 shadow-lg z-40"
+            items={menuItems}
+            style={{
+              backgroundColor: "transparent",
+            }}
+            theme="dark"
+            onClick={() => setIsMenuOpen(false)}
+            disabledOverflow={true}
+          />
+        )}
 
-      {/* Footer with Glassmorphism */}
-      <Footer className="justify-center flex backdrop-blur-md bg-blue-600/50 text-white border-t border-white/20 z-10">
-        © {new Date().getFullYear()} Millat Vocational Training. All rights
-        reserved.
-      </Footer>
-    </Layout>
+        {/* Main Content */}
+        <Content className="site-content h-full relative z-10">
+          <Outlet />
+        </Content>
+
+        {/* Footer with Glassmorphism */}
+        <Footer className="justify-center flex backdrop-blur-md bg-blue-600/50 text-white border-t border-white/20 z-10">
+          © {new Date().getFullYear()} Millat Vocational Training. All rights
+          reserved.
+        </Footer>
+      </Layout>
+    </>
   );
 };
 
