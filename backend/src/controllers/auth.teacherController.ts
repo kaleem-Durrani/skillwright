@@ -386,7 +386,7 @@ export const resetPassword = asyncHandler(async (req: Request, res: Response) =>
     throw parseValidationErrors(errors);
   }
 
-  const { email, otp, password } = req.body;
+  const { email, otp, newPassword } = req.body;
 
   await withTransaction(async (tx) => {
     // Check if teacher exists
@@ -418,7 +418,7 @@ export const resetPassword = asyncHandler(async (req: Request, res: Response) =>
 
     // Hash password
     const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
 
     await tx.teacher.update({
       where: { email },
