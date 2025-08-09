@@ -95,13 +95,13 @@ export const authService = {
   teacherForgotPassword: (email: string): Promise<ApiResponse<{ message: string }>> =>
     api.post('/auth/teacher/forgot-password', { email }),
 
-  teacherResetPassword: (data: ResetPasswordData): Promise<ApiResponse<{ message: string }>> =>
+  teacherResetPassword: (data: { email: string; otp: string; newPassword: string }): Promise<ApiResponse<{ message: string }>> =>
     api.post('/auth/teacher/reset-password', data),
 
   studentForgotPassword: (email: string): Promise<ApiResponse<{ message: string }>> =>
     api.post('/auth/student/forgot-password', { email }),
 
-  studentResetPassword: (data: ResetPasswordData): Promise<ApiResponse<{ message: string }>> =>
+  studentResetPassword: (data: { email: string; otp: string; newPassword: string }): Promise<ApiResponse<{ message: string }>> =>
     api.post('/auth/student/reset-password', data),
 
   // Token Management
