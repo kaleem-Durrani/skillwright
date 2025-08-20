@@ -1,0 +1,44 @@
+/* Custom styles for ExploreCourses component */
+
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Custom gradient button hover effects */
+.gradient-button {
+  background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+  transition: all 0.3s ease;
+}
+
+.gradient-button:hover {
+  background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px rgba(59, 130, 246, 0.3);
+}
+
+/* Glass morphism enhancements */
+.glass-container {
+  backdrop-filter: blur(10px);
+  background: rgba(255, 255, 255, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+/* Card hover effects */
+.course-card {
+  transition: all 0.3s ease;
+}
+
+.course-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+}
