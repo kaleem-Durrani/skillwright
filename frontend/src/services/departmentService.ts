@@ -40,13 +40,13 @@ export const departmentService = {
 
   // Create department (Admin only)
   createDepartment: (data: DepartmentCreateData): Promise<ApiResponse<Department>> =>
-    api.post('/admin/departments', data),
+    api.post('/departments', data),
 
   // Update department (Admin only)
   updateDepartment: (id: string, data: DepartmentUpdateData): Promise<ApiResponse<Department>> =>
-    api.put(`/admin/departments/${id}`, data),
+    api.put(`/departments/${id}`, data),
 
   // Delete department (Admin only)
   deleteDepartment: (id: string): Promise<ApiResponse<{ message: string }>> =>
-    api.delete(`/admin/departments/${id}`),
+    api.delete(`/departments/${id}`),
 };
