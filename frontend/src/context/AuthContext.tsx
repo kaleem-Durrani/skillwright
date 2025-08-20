@@ -20,6 +20,7 @@ interface AuthContextType {
   isLoading: boolean;
   login: (credentials: LoginCredentials, type: UserType) => Promise<void>;
   logout: () => Promise<void>;
+  updateUserVerification: (isVerified: boolean) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -220,6 +221,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
+  const updateUserVerification = (isVerified: boolean): void => {
+    if (user) {
+      const updatedUser = { ...user, isVerified };
+      setUser(updatedUser as User);
+      localStorage.setItem("user", JSON.stringify(updatedUser));
+    }
+  };
+
   // Get isVerified from user data (backend provides this)
   const isVerified =
     userType === "admin" ? true : (user as any)?.isVerified || false;
@@ -232,6 +241,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     isLoading,
     login,
     logout,
+    updateUserVerification,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
