@@ -20,6 +20,7 @@ import { useNavigate } from "react-router-dom";
 import { ROUTES } from "@/common/constants";
 import { useMutation } from "@/hooks";
 import { authService } from "@/services";
+import { useAuth } from "@/context/AuthContext";
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -31,6 +32,7 @@ const VerifyEmail = () => {
   const [userEmail, setUserEmail] = useState<string>("");
   const [userType, setUserType] = useState<"student" | "teacher" | null>(null);
   const navigate = useNavigate();
+  const { updateUserVerification } = useAuth();
 
   // Create mutation hooks for OTP verification and resend
   const studentVerifyOtpMutation = useMutation(authService.studentVerifyOtp, {
@@ -121,10 +123,8 @@ const VerifyEmail = () => {
       const response = await mutation.mutateAsync(values);
 
       if (response?.success) {
-        // Update user data in localStorage to mark as verified
-        const userData = JSON.parse(localStorage.getItem("user") || "{}");
-        userData.isVerified = true;
-        localStorage.setItem("user", JSON.stringify(userData));
+        // Update user verification status in AuthContext and localStorage
+        updateUserVerification(true);
 
         // Show success notification
         notification.success({
@@ -134,14 +134,14 @@ const VerifyEmail = () => {
 
         setVerified(true);
 
-        // Redirect to dashboard after 3 seconds
+        // Redirect to dashboard after 2 seconds (reduced from 3)
         setTimeout(() => {
           const dashboardRoute =
             userType === "teacher"
               ? ROUTES.TEACHER.DASHBOARD
               : ROUTES.STUDENT.DASHBOARD;
           navigate(dashboardRoute);
-        }, 3000);
+        }, 2000);
       }
     } catch (error: any) {
       notification.error({
