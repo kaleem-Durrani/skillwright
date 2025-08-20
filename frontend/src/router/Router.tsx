@@ -3,6 +3,8 @@ import { Routes, Route } from "react-router-dom";
 import { routes } from "./routes";
 import ProtectedRoute from "./ProtectedRoute";
 import { AuthLayout, AppLayout } from "@/layouts";
+import { VerifyEmail } from "@/pages";
+import { ROUTES } from "@/common/constants";
 
 // Loading component for Suspense
 const Loading = () => (
@@ -18,7 +20,9 @@ const Router = () => {
         {/* Public routes with AuthLayout */}
         <Route element={<AuthLayout />}>
           {routes
-            .filter((route) => !route.protected)
+            .filter(
+              (route) => !route.protected && route.path !== ROUTES.VERIFY_EMAIL
+            )
             .map((route) => (
               <Route
                 key={route.path}
@@ -26,6 +30,9 @@ const Router = () => {
                 element={<route.component />}
               />
             ))}
+
+          {/* Special handling for verify-email route */}
+          <Route path={ROUTES.VERIFY_EMAIL} element={<VerifyEmail />} />
         </Route>
 
         {/* Protected routes with AppLayout */}

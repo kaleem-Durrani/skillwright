@@ -8,6 +8,7 @@ const Register = lazy(() => import('../pages').then((module) => ({ default: modu
 const ForgotPassword = lazy(() => import('../pages').then((module) => ({ default: module.ForgotPassword })));
 const ResetPassword = lazy(() => import('../pages').then((module) => ({ default: module.ResetPassword })));
 const VerifyEmail = lazy(() => import('../pages').then((module) => ({ default: module.VerifyEmail })));
+const ExploreCourses = lazy(() => import('../pages').then((module) => ({ default: module.ExploreCourses })));
 
 // Admin pages
 const AdminDashboard = lazy(() => import('../pages').then((module) => ({ default: module.AdminDashboard })));
@@ -56,6 +57,7 @@ export const publicRoutes: RouteType[] = [
   { path: ROUTES.REGISTER, component: Register },
   { path: ROUTES.FORGOT_PASSWORD, component: ForgotPassword },
   { path: ROUTES.RESET_PASSWORD, component: ResetPassword },
+  { path: ROUTES.EXPLORE_COURSES, component: ExploreCourses },
 ];
 
 // Protected routes that require verification
