@@ -28,3 +28,4 @@ export * from './error/not-found';
 export * from './error/unauthorized';
 export * from './error/forbidden';
 export * from './error/server-error';
+export * from './explore-courses';
