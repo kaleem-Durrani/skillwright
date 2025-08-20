@@ -11,10 +11,31 @@ import {
   PaginatedResponse
 } from '../common/types';
 
+export interface PublicCoursesParams {
+  page?: number;
+  limit?: number;
+  search?: string;
+  departmentId?: string;
+}
+
+export interface PublicCoursesResponse extends ApiResponse<Course[]> {
+  pagination: {
+    currentPage: number;
+    totalPages: number;
+    totalCourses: number;
+    hasNextPage: boolean;
+    hasPrevPage: boolean;
+    limit: number;
+  };
+}
+
 export const courseService = {
   // Public routes
   getAllCourses: (params?: QueryParams): Promise<ApiResponse<PaginatedResponse<Course>>> =>
     api.get('/course', { params }),
+
+  getPublicCourses: (params?: PublicCoursesParams): Promise<PublicCoursesResponse> =>
+    api.get('/course/public', { params }),
 
   getCourse: (id: string): Promise<ApiResponse<Course>> =>
     api.get(`/course/${id}`),
