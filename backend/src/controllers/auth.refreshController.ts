@@ -2,10 +2,11 @@ import { Request, Response } from 'express';
 import asyncHandler from '../middleware/asyncHandler.js';
 import { AuthenticationError } from '../utils/customErrors.js';
 import prisma from '../db/prisma.js';
-import { 
-  verifyRefreshToken, 
-  generateAccessToken, 
+import {
+  verifyRefreshToken,
+  generateAccessToken,
   generateRefreshToken,
+  generateWebSocketToken,
   storeRefreshToken,
   deleteRefreshToken,
   setTokens
@@ -101,4 +102,28 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response) => 
       userType
     }
   });
-}); 
+});
+
+// @desc    Get WebSocket token for real-time connections
+// @route   GET /api/auth/refresh/websocket-token
+// @access  Private (requires valid access token)
+export const getWebSocketToken = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.userId;
+  const userType = req.userType;
+
+  if (!userId || !userType) {
+    throw new AuthenticationError('User not authenticated');
+  }
+
+  // Generate WebSocket token
+  const wsToken = generateWebSocketToken(userId, userType);
+
+  res.status(200).json({
+    success: true,
+    message: 'WebSocket token generated successfully',
+    data: {
+      token: wsToken,
+      expiresIn: '1h'
+    }
+  });
+});
