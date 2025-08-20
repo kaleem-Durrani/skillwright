@@ -47,6 +47,101 @@ export const getAllCourses = asyncHandler(async (req: Request, res: Response) =>
   });
 });
 
+// @desc    Get public courses with pagination and filtering
+// @route   GET /api/course/public
+// @access  Public
+export const getPublicCourses = asyncHandler(async (req: Request, res: Response) => {
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 10;
+  const search = req.query.search as string;
+  const departmentId = req.query.departmentId as string;
+  const skip = (page - 1) * limit;
+
+  // Build where clause for filtering
+  const where: any = {};
+
+  if (search) {
+    where.OR = [
+      { name: { contains: search, mode: 'insensitive' } },
+      { description: { contains: search, mode: 'insensitive' } },
+      { code: { contains: search, mode: 'insensitive' } },
+    ];
+  }
+
+  if (departmentId) {
+    where.departmentId = departmentId;
+  }
+
+  // Get total count for pagination
+  const totalCourses = await prisma.course.count({ where });
+
+  // Get courses with detailed information
+  const courses = await prisma.course.findMany({
+    where,
+    skip,
+    take: limit,
+    select: {
+      id: true,
+      name: true,
+      code: true,
+      description: true,
+      duration: true,
+      capacity: true,
+      startDate: true,
+      endDate: true,
+      createdAt: true,
+      department: {
+        select: {
+          id: true,
+          name: true,
+          description: true,
+        },
+      },
+      teacher: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          qualification: true,
+          specialization: true,
+        },
+      },
+      _count: {
+        select: {
+          enrollments: {
+            where: {
+              status: 'APPROVED'
+            }
+          },
+          resources: true,
+        },
+      },
+    },
+    orderBy: {
+      createdAt: 'desc',
+    },
+  });
+
+  // Calculate pagination info
+  const totalPages = Math.ceil(totalCourses / limit);
+  const hasNextPage = page < totalPages;
+  const hasPrevPage = page > 1;
+
+  res.status(200).json({
+    success: true,
+    message: "Public courses retrieved successfully",
+    data: courses,
+    pagination: {
+      currentPage: page,
+      totalPages,
+      totalCourses,
+      hasNextPage,
+      hasPrevPage,
+      limit,
+    },
+  });
+});
+
 // @desc    Get single course
 // @route   GET /api/course/:id
 // @access  Public

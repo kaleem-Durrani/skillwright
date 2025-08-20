@@ -5,6 +5,7 @@ import {
   deleteCourse,
   getCourse,
   getAllCourses,
+  getPublicCourses,
   getCourseResources,
   getEnrolledStudents,
   updateEnrollmentStatus,
@@ -31,6 +32,7 @@ const router = express.Router();
 
 // Public routes
 router.get("/", getAllCourses);
+router.get("/public", getPublicCourses);
 router.get("/:id", getCourse);
 
 // Protected routes (Teacher only)
