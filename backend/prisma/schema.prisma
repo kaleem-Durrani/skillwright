@@ -29,10 +29,7 @@ model Admin {
   otpExpiry  DateTime?
   isActive   Boolean   @default(true)
 
-  // Communication
-  adminConversations ConversationParticipant[] @relation("AdminConversations")
-  sentMessages       Message[]                 @relation("AdminSentMessages")
-  refreshTokens      RefreshToken[]
+  refreshTokens RefreshToken[]
 }
 
 model Teacher {
@@ -56,11 +53,10 @@ model Teacher {
   isBanned   Boolean   @default(false)
 
   // Communication
-  teacherConversations ConversationParticipant[] @relation("TeacherConversations")
-  sentMessages         Message[]                 @relation("TeacherSentMessages")
-  resourceComments     ResourceComment[]
-  newsEventComments    NewsEventComment[]
-  refreshTokens        RefreshToken[]
+  conversations     Conversation[]
+  resourceComments  ResourceComment[]
+  newsEventComments NewsEventComment[]
+  refreshTokens     RefreshToken[]
 }
 
 model Student {
@@ -82,11 +78,10 @@ model Student {
   isBanned   Boolean   @default(false)
 
   // Communication
-  studentConversations ConversationParticipant[] @relation("StudentConversations")
-  sentMessages         Message[]                 @relation("StudentSentMessages")
-  resourceComments     ResourceComment[]
-  newsEventComments    NewsEventComment[]
-  refreshTokens        RefreshToken[]
+  conversations     Conversation[]
+  resourceComments  ResourceComment[]
+  newsEventComments NewsEventComment[]
+  refreshTokens     RefreshToken[]
 }
 
 model Department {
@@ -185,48 +180,31 @@ enum NewsEventType {
 
 // Communication Models
 model Conversation {
-  id           String                    @id @default(cuid())
-  title        String?
-  createdAt    DateTime                  @default(now())
-  updatedAt    DateTime                  @updatedAt
-  participants ConversationParticipant[]
-  messages     Message[]
-}
+  id        String   @id @default(cuid())
+  teacherId String
+  studentId String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-model ConversationParticipant {
-  id             String       @id @default(cuid())
-  conversation   Conversation @relation(fields: [conversationId], references: [id])
-  conversationId String
+  teacher  Teacher   @relation(fields: [teacherId], references: [id])
+  student  Student   @relation(fields: [studentId], references: [id])
+  messages Message[]
 
-  // Polymorphic relationship with participants
-  admin     Admin?   @relation("AdminConversations", fields: [adminId], references: [id])
-  adminId   String?
-  teacher   Teacher? @relation("TeacherConversations", fields: [teacherId], references: [id])
-  teacherId String?
-  student   Student? @relation("StudentConversations", fields: [studentId], references: [id])
-  studentId String?
-
-  joinedAt DateTime  @default(now())
-  leftAt   DateTime?
-
-  @@unique([conversationId, adminId, teacherId, studentId])
+  @@unique([teacherId, studentId])
 }
 
 model Message {
-  id             String       @id @default(cuid())
-  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  id             String   @id @default(cuid())
   conversationId String
   content        String
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  isFromTeacher  Boolean
+  createdAt      DateTime @default(now())
 
-  // Sender (one of these will be populated)
-  adminSender     Admin?   @relation("AdminSentMessages", fields: [adminSenderId], references: [id])
-  adminSenderId   String?
-  teacherSender   Teacher? @relation("TeacherSentMessages", fields: [teacherSenderId], references: [id])
-  teacherSenderId String?
-  studentSender   Student? @relation("StudentSentMessages", fields: [studentSenderId], references: [id])
-  studentSenderId String?
+  // Read tracking
+  teacherReadAt DateTime?
+  studentReadAt DateTime?
+
+  conversation Conversation @relation(fields: [conversationId], references: [id])
 }
 
 model ResourceComment {
