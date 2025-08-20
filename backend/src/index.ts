@@ -2,6 +2,8 @@ import express from "express";
 import dotenv from "dotenv";
 import cookieParser from "cookie-parser";
 import cors from "cors";
+import { createServer } from "http";
+import { setupWebSocket } from "./websocket/socketHandler.js";
 
 import { notFound, errorHandler } from "./middleware/errorMiddleware.js";
 
@@ -60,6 +62,47 @@ app.get("/", (req, res) => {
 app.use(notFound);
 app.use(errorHandler);
 
-app.listen(process.env.PORT, () => {
-	console.log(`Server is running on port ${process.env.PORT}`);
+// Create HTTP server and setup WebSocket
+const server = createServer(app);
+const io = setupWebSocket(server);
+
+// Make io available globally for broadcasting messages
+app.set('io', io);
+
+const PORT = process.env.PORT || 5000;
+
+server.listen(PORT, () => {
+	console.log(`Server is running on port ${PORT}`);
+	console.log(`WebSocket server is ready for real-time messaging`);
+});
+
+// Handle server errors
+server.on('error', (error: any) => {
+	if (error.code === 'EADDRINUSE') {
+		console.error(`Port ${PORT} is already in use. Please:`);
+		console.error('1. Stop any other processes using this port');
+		console.error('2. Or change the PORT in your .env file');
+		console.error('3. Or kill the process using: npx kill-port 5000');
+		process.exit(1);
+	} else {
+		console.error('Server error:', error);
+		process.exit(1);
+	}
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+	console.log('SIGTERM received, shutting down gracefully');
+	server.close(() => {
+		console.log('Server closed');
+		process.exit(0);
+	});
+});
+
+process.on('SIGINT', () => {
+	console.log('SIGINT received, shutting down gracefully');
+	server.close(() => {
+		console.log('Server closed');
+		process.exit(0);
+	});
 });
