@@ -166,8 +166,13 @@ const Home = () => {
               <Card
                 className="h-full shadow-md hover:shadow-lg transition-shadow"
                 cover={
-                  <div className="h-48 bg-blue-500 flex items-center justify-center text-white text-5xl">
-                    🎓
+                  <div className="h-48 relative overflow-hidden">
+                    <img
+                      src="https://images.unsplash.com/photo-1523240795612-9a054b0db644?q=80&w=2070"
+                      alt="Students in classroom"
+                      className="w-full h-full object-cover"
+                    />
+                    <div className="absolute top-4 right-4 text-4xl">🎓</div>
                   </div>
                 }
               >
@@ -187,8 +192,13 @@ const Home = () => {
               <Card
                 className="h-full shadow-md hover:shadow-lg transition-shadow"
                 cover={
-                  <div className="h-48 bg-purple-500 flex items-center justify-center text-white text-5xl">
-                    🌟
+                  <div className="h-48 relative overflow-hidden">
+                    <img
+                      src="https://images.unsplash.com/photo-1552664730-d307ca884978?q=80&w=2070"
+                      alt="Innovation and technology"
+                      className="w-full h-full object-cover"
+                    />
+                    <div className="absolute top-4 right-4 text-4xl">🌟</div>
                   </div>
                 }
               >
@@ -208,8 +218,13 @@ const Home = () => {
               <Card
                 className="h-full shadow-md hover:shadow-lg transition-shadow"
                 cover={
-                  <div className="h-48 bg-green-500 flex items-center justify-center text-white text-5xl">
-                    🌱
+                  <div className="h-48 relative overflow-hidden">
+                    <img
+                      src="https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?q=80&w=2070"
+                      alt="Values and growth"
+                      className="w-full h-full object-cover"
+                    />
+                    <div className="absolute top-4 right-4 text-4xl">🌱</div>
                   </div>
                 }
               >
@@ -260,7 +275,12 @@ const Home = () => {
                     Career guidance and placement assistance
                   </li>
                 </ul>
-                <Button type="primary" size="large" className="mt-4">
+                <Button
+                  type="primary"
+                  size="large"
+                  className="mt-4"
+                  href="/explore-courses"
+                >
                   Explore Our Courses
                 </Button>
               </Col>
