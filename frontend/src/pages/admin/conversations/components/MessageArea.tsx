@@ -1,7 +1,7 @@
-import React, { useRef, useEffect } from 'react';
-import { Empty, Spin } from 'antd';
-import { Message } from '@/common/types';
-import MessageItem from './MessageItem';
+import React, { useRef, useEffect } from "react";
+import { Empty, Spin } from "antd";
+import { Message } from "@/common/types";
+import MessageItem from "./MessageItem";
 
 interface MessageAreaProps {
   messages: Message[];
@@ -21,7 +21,18 @@ const MessageArea: React.FC<MessageAreaProps> = ({
 
   // Scroll to bottom when messages change
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (messagesEndRef.current) {
+      // Find the scrollable container
+      const scrollContainer = messagesEndRef.current.closest(
+        '[style*="overflow"]'
+      ) as HTMLElement;
+      if (scrollContainer) {
+        scrollContainer.scrollTo({
+          top: scrollContainer.scrollHeight,
+          behavior: "smooth",
+        });
+      }
+    }
   }, [messages]);
 
   if (loading) {

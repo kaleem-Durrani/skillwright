@@ -1,0 +1,85 @@
+// Student Message Bubble Styles
+.student-conversations .message-bubble {
+  display: flex;
+  margin-bottom: 12px;
+  align-items: flex-end;
+
+  &.own {
+    justify-content: flex-end;
+
+    .message-content {
+      background: #dcf8c6;
+      margin-right: 8px;
+      margin-left: 40px;
+
+      .message-text {
+        color: #111b21;
+      }
+    }
+  }
+
+  &.other {
+    justify-content: flex-start;
+
+    .message-content {
+      background: white;
+      margin-left: 8px;
+      margin-right: 40px;
+
+      .message-text {
+        color: #111b21;
+      }
+    }
+  }
+
+  .message-avatar {
+    flex-shrink: 0;
+  }
+
+  .message-content {
+    max-width: 70%;
+    padding: 8px 12px;
+    border-radius: 8px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    position: relative;
+
+    .message-text {
+      font-size: 14px;
+      line-height: 1.4;
+      word-wrap: break-word;
+      margin-bottom: 4px;
+    }
+
+    .message-time {
+      font-size: 11px;
+      color: #667781;
+      text-align: right;
+      margin-top: 4px;
+    }
+  }
+}
+
+// Student Message bubble tails (optional)
+.student-conversations .message-bubble.own .message-content::after {
+  content: '';
+  position: absolute;
+  right: -8px;
+  bottom: 8px;
+  width: 0;
+  height: 0;
+  border-left: 8px solid #dcf8c6;
+  border-top: 8px solid transparent;
+  border-bottom: 8px solid transparent;
+}
+
+.student-conversations .message-bubble.other .message-content::after {
+  content: '';
+  position: absolute;
+  left: -8px;
+  bottom: 8px;
+  width: 0;
+  height: 0;
+  border-right: 8px solid white;
+  border-top: 8px solid transparent;
+  border-bottom: 8px solid transparent;
+}

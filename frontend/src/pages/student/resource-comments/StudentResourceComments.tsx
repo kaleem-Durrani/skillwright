@@ -234,7 +234,16 @@ const StudentResourceComments: React.FC = () => {
   // Auto-scroll to bottom when new comments are added
   useEffect(() => {
     if (commentsEndRef.current) {
-      commentsEndRef.current.scrollIntoView({ behavior: "smooth" });
+      // Find the scrollable container (the comments list div)
+      const scrollContainer = commentsEndRef.current.closest(
+        '[style*="overflowY: auto"]'
+      ) as HTMLElement;
+      if (scrollContainer) {
+        scrollContainer.scrollTo({
+          top: scrollContainer.scrollHeight,
+          behavior: "smooth",
+        });
+      }
     }
   }, [comments.length]);
 

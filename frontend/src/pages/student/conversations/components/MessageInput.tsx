@@ -1,61 +1,52 @@
 import React, { useState } from "react";
-import { Button, Input, Typography } from "antd";
+import { Input, Button } from "antd";
 import { SendOutlined } from "@ant-design/icons";
-
-const { TextArea } = Input;
-const { Text } = Typography;
+import "./MessageInput.scss";
 
 interface MessageInputProps {
-  onSendMessage: (message: string) => void;
-  disabled?: boolean;
+  onSendMessage: (content: string) => void;
+  placeholder?: string;
 }
 
-/**
- * Component for the message input area
- */
-const MessageInput: React.FC<MessageInputProps> = ({
+export const MessageInput: React.FC<MessageInputProps> = ({
   onSendMessage,
-  disabled = false,
+  placeholder = "Type a message...",
 }) => {
-  const [messageText, setMessageText] = useState("");
+  const [message, setMessage] = useState("");
 
-  const handleSendMessage = () => {
-    if (!messageText.trim() || disabled) return;
-    
-    onSendMessage(messageText);
-    setMessageText("");
+  const handleSend = () => {
+    if (message.trim()) {
+      onSendMessage(message.trim());
+      setMessage("");
+    }
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      handleSendMessage();
+      handleSend();
     }
   };
 
   return (
-    <div className="mt-auto">
-      <div className="flex gap-2">
-        <TextArea
-          placeholder="Type your message..."
-          value={messageText}
-          onChange={(e) => setMessageText(e.target.value)}
-          autoSize={{ minRows: 1, maxRows: 4 }}
+    <div className="message-input">
+      <div className="input-container">
+        <Input.TextArea
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
           onKeyDown={handleKeyPress}
-          disabled={disabled}
+          placeholder={placeholder}
+          autoSize={{ minRows: 1, maxRows: 4 }}
+          className="message-textarea"
         />
         <Button
-          type="primary"
+          type="text"
           icon={<SendOutlined />}
-          onClick={handleSendMessage}
-          disabled={!messageText.trim() || disabled}
+          onClick={handleSend}
+          disabled={!message.trim()}
+          className="send-button"
         />
       </div>
-      <Text type="secondary" className="text-xs mt-1">
-        Press Enter to send, Shift+Enter for new line
-      </Text>
     </div>
   );
 };
-
-export default MessageInput;
