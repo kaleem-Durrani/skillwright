@@ -1,77 +1,110 @@
-import React, { useState } from 'react';
-import { Input, Button } from 'antd';
-import { SendOutlined, PaperClipOutlined, SmileOutlined } from '@ant-design/icons';
+import React, { useState, useRef, useEffect } from "react";
+import { Input, Button, message } from "antd";
+import { SendOutlined, SmileOutlined } from "@ant-design/icons";
+import "./MessageInput.scss";
 
 const { TextArea } = Input;
 
 interface MessageInputProps {
-  onSend: (content: string) => void;
-  disabled: boolean;
-  loading: boolean;
+  onSendMessage: (content: string) => Promise<void>;
+  placeholder?: string;
+  disabled?: boolean;
 }
 
-/**
- * Component for the message input area
- */
-const MessageInput: React.FC<MessageInputProps> = ({
-  onSend,
-  disabled,
-  loading,
+export const MessageInput: React.FC<MessageInputProps> = ({
+  onSendMessage,
+  placeholder = "Type a message...",
+  disabled = false,
 }) => {
-  const [message, setMessage] = useState('');
+  const [messageText, setMessageText] = useState("");
+  const [sending, setSending] = useState(false);
+  const textAreaRef = useRef<any>(null);
 
-  const handleSend = () => {
-    if (message.trim() && !disabled && !loading) {
-      onSend(message);
-      setMessage('');
+  // Auto-focus on mount
+  useEffect(() => {
+    if (textAreaRef.current && !disabled) {
+      textAreaRef.current.focus();
+    }
+  }, [disabled]);
+
+  const handleSend = async () => {
+    const trimmedMessage = messageText.trim();
+    
+    if (!trimmedMessage || sending) {
+      return;
+    }
+
+    try {
+      setSending(true);
+      await onSendMessage(trimmedMessage);
+      setMessageText("");
+      
+      // Refocus the input after sending
+      setTimeout(() => {
+        if (textAreaRef.current) {
+          textAreaRef.current.focus();
+        }
+      }, 100);
+    } catch (error) {
+      message.error("Failed to send message");
+      console.error("Error sending message:", error);
+    } finally {
+      setSending(false);
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
   };
 
+  const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setMessageText(e.target.value);
+  };
+
   return (
-    <div className="p-4 border-t border-gray-200">
-      <div className="flex">
-        <TextArea
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Type a message..."
-          autoSize={{ minRows: 1, maxRows: 4 }}
-          disabled={disabled || loading}
-          className="flex-1 mr-2"
-        />
-        <div className="flex flex-col justify-end">
-          <Button
-            type="primary"
-            icon={<SendOutlined />}
-            onClick={handleSend}
-            disabled={!message.trim() || disabled || loading}
-            loading={loading}
-          />
-        </div>
-      </div>
-      <div className="flex mt-2">
-        <Button
-          type="text"
-          icon={<PaperClipOutlined />}
-          disabled={disabled || loading}
-          title="Attach file (coming soon)"
-        />
+    <div className="message-input">
+      <div className="input-container">
+        {/* Emoji Button (placeholder for future emoji picker) */}
         <Button
           type="text"
           icon={<SmileOutlined />}
-          disabled={disabled || loading}
-          title="Insert emoji (coming soon)"
+          className="emoji-btn"
+          disabled={disabled}
+          title="Emoji (coming soon)"
         />
+
+        {/* Text Input */}
+        <TextArea
+          ref={textAreaRef}
+          value={messageText}
+          onChange={handleTextChange}
+          onKeyDown={handleKeyPress}
+          placeholder={placeholder}
+          disabled={disabled || sending}
+          autoSize={{ minRows: 1, maxRows: 4 }}
+          className="message-textarea"
+        />
+
+        {/* Send Button */}
+        <Button
+          type="primary"
+          icon={<SendOutlined />}
+          onClick={handleSend}
+          loading={sending}
+          disabled={disabled || !messageText.trim()}
+          className="send-btn"
+          title="Send message (Enter)"
+        />
+      </div>
+      
+      <div className="input-footer">
+        <span className="input-hint">
+          Press Enter to send, Shift+Enter for new line
+        </span>
       </div>
     </div>
   );
 };
-
-export default MessageInput;

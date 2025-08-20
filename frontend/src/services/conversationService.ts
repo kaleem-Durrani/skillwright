@@ -1,59 +1,144 @@
 import { api } from './api';
-import {
-  Conversation,
-  Message,
-  ApiResponse,
-  ConversationCreateData
-} from '../common/types';
+import { ApiResponse } from '../common/types';
 
-// Note: Conversations feature is temporarily disabled
-// These endpoints exist but are not currently used in the UI
+// Simplified conversation types
+export interface ConversationParticipant {
+  id: string;
+  name: string;
+  email: string;
+}
+
+export interface ConversationListItem {
+  id: string;
+  participant: ConversationParticipant;
+  lastMessage: {
+    id: string;
+    content: string;
+    createdAt: string;
+    isFromTeacher: boolean;
+    teacherReadAt: string | null;
+    studentReadAt: string | null;
+  } | null;
+  unreadCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ConversationListResponse {
+  conversations: ConversationListItem[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+    hasMore: boolean;
+  };
+}
+
+export interface ConversationMessage {
+  id: string;
+  content: string;
+  isFromTeacher: boolean;
+  createdAt: string;
+  teacherReadAt: string | null;
+  studentReadAt: string | null;
+}
+
+export interface ConversationMessagesResponse {
+  messages: ConversationMessage[];
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
+export interface CreateConversationRequest {
+  participantId: string;
+}
+
+export interface CreateConversationResponse {
+  id: string;
+  participant: ConversationParticipant;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SendMessageRequest {
+  content: string;
+}
+
+export interface SendMessageResponse {
+  id: string;
+  content: string;
+  isFromTeacher: boolean;
+  createdAt: string;
+}
+
+export interface Contact {
+  id: string;
+  name: string;
+  email: string;
+  department: {
+    id: string;
+    name: string;
+  };
+  // Teacher-specific fields
+  qualification?: string;
+  specialization?: string;
+  // Student-specific fields
+  enrollmentNo?: string;
+}
+
+/**
+ * Simplified Conversation Service
+ * Teacher-Student messaging system
+ */
 export const conversationService = {
-  // Admin routes
-  getMyConversations: (): Promise<ApiResponse<Conversation[]>> =>
-    api.get('/conversations/admin'),
+  // Teacher endpoints
+  teacher: {
+    getConversations: (page?: number, limit?: number) =>
+      api.get<ApiResponse<ConversationListResponse>>('/conversations/teacher', {
+        params: { page, limit }
+      }),
 
-  getConversation: (id: string): Promise<ApiResponse<Conversation>> =>
-    api.get(`/conversations/admin/${id}`),
+    getContacts: () =>
+      api.get<ApiResponse<Contact[]>>('/conversations/teacher/contacts'),
 
-  createConversation: (data: ConversationCreateData): Promise<ApiResponse<Conversation>> =>
-    api.post('/conversations/admin', data),
+    getMessages: (conversationId: string, cursor?: string, limit?: number) =>
+      api.get<ApiResponse<ConversationMessagesResponse>>(`/conversations/teacher/${conversationId}/messages`, {
+        params: { cursor, limit }
+      }),
 
-  sendMessage: (conversationId: string, data: { content: string }): Promise<ApiResponse<Message>> =>
-    api.post(`/conversations/admin/${conversationId}/messages`, data),
+    createConversation: (data: CreateConversationRequest) =>
+      api.post<ApiResponse<CreateConversationResponse>>('/conversations/teacher/create', data),
 
-  leaveConversation: (id: string): Promise<ApiResponse<{ message: string }>> =>
-    api.put(`/conversations/admin/${id}/leave`),
+    sendMessage: (conversationId: string, data: SendMessageRequest) =>
+      api.post<ApiResponse<SendMessageResponse>>(`/conversations/teacher/${conversationId}/messages`, data),
 
-  // Teacher routes
-  getMyTeacherConversations: (): Promise<ApiResponse<Conversation[]>> =>
-    api.get('/conversations/teacher'),
+    markAsRead: (conversationId: string) =>
+      api.put<ApiResponse<{ markedAsRead: number }>>(`/conversations/teacher/${conversationId}/read`),
+  },
 
-  getTeacherConversation: (id: string): Promise<ApiResponse<Conversation>> =>
-    api.get(`/conversations/teacher/${id}`),
+  // Student endpoints
+  student: {
+    getConversations: (page?: number, limit?: number) =>
+      api.get<ApiResponse<ConversationListResponse>>('/conversations/student', {
+        params: { page, limit }
+      }),
 
-  createTeacherConversation: (data: ConversationCreateData): Promise<ApiResponse<Conversation>> =>
-    api.post('/conversations/teacher', data),
+    getContacts: () =>
+      api.get<ApiResponse<Contact[]>>('/conversations/student/contacts'),
 
-  sendTeacherMessage: (conversationId: string, data: { content: string }): Promise<ApiResponse<Message>> =>
-    api.post(`/conversations/teacher/${conversationId}/messages`, data),
+    getMessages: (conversationId: string, cursor?: string, limit?: number) =>
+      api.get<ApiResponse<ConversationMessagesResponse>>(`/conversations/student/${conversationId}/messages`, {
+        params: { cursor, limit }
+      }),
 
-  leaveTeacherConversation: (id: string): Promise<ApiResponse<{ message: string }>> =>
-    api.put(`/conversations/teacher/${id}/leave`),
+    createConversation: (data: CreateConversationRequest) =>
+      api.post<ApiResponse<CreateConversationResponse>>('/conversations/student/create', data),
 
-  // Student routes
-  getMyStudentConversations: (): Promise<ApiResponse<Conversation[]>> =>
-    api.get('/conversations/student'),
+    sendMessage: (conversationId: string, data: SendMessageRequest) =>
+      api.post<ApiResponse<SendMessageResponse>>(`/conversations/student/${conversationId}/messages`, data),
 
-  getStudentConversation: (id: string): Promise<ApiResponse<Conversation>> =>
-    api.get(`/conversations/student/${id}`),
-
-  createStudentConversation: (data: ConversationCreateData): Promise<ApiResponse<Conversation>> =>
-    api.post('/conversations/student', data),
-
-  sendStudentMessage: (conversationId: string, data: { content: string }): Promise<ApiResponse<Message>> =>
-    api.post(`/conversations/student/${conversationId}/messages`, data),
-
-  leaveStudentConversation: (id: string): Promise<ApiResponse<{ message: string }>> =>
-    api.put(`/conversations/student/${id}/leave`),
+    markAsRead: (conversationId: string) =>
+      api.put<ApiResponse<{ markedAsRead: number }>>(`/conversations/student/${conversationId}/read`),
+  },
 };

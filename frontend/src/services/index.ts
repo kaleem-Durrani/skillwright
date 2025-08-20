@@ -9,6 +9,7 @@ export { courseService } from './courseService';
 export { newsService } from './newsService';
 export { resourceService } from './resourceService';
 export { conversationService } from './conversationService';
+export { webSocketService } from './webSocketService';
 
 // Re-export types
 export type { UserType, LoginResponse, SignupData } from './authService';

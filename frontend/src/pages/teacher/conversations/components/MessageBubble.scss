@@ -1,0 +1,149 @@
+// Message Bubble Styles - WhatsApp-like
+.message-bubble-container {
+  display: flex;
+  margin-bottom: 8px;
+  align-items: flex-end;
+
+  &.own-message {
+    justify-content: flex-end;
+    
+    .message-bubble {
+      background: #dcf8c6;
+      margin-left: 60px;
+      margin-right: 8px;
+      
+      &::before {
+        content: '';
+        position: absolute;
+        right: -8px;
+        bottom: 0;
+        width: 0;
+        height: 0;
+        border-left: 8px solid #dcf8c6;
+        border-bottom: 8px solid transparent;
+      }
+    }
+  }
+
+  &.other-message {
+    justify-content: flex-start;
+    
+    .message-bubble {
+      background: white;
+      margin-right: 60px;
+      margin-left: 8px;
+      
+      &::before {
+        content: '';
+        position: absolute;
+        left: -8px;
+        bottom: 0;
+        width: 0;
+        height: 0;
+        border-right: 8px solid white;
+        border-bottom: 8px solid transparent;
+      }
+    }
+  }
+
+  .message-avatar {
+    margin: 0 8px;
+    flex-shrink: 0;
+  }
+
+  .message-bubble {
+    position: relative;
+    max-width: 65%;
+    min-width: 80px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    word-wrap: break-word;
+
+    .message-content {
+      margin-bottom: 4px;
+
+      .message-text {
+        color: #111b21;
+        font-size: 14px;
+        line-height: 1.4;
+        margin: 0;
+        white-space: pre-wrap;
+      }
+    }
+
+    .message-footer {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 4px;
+      margin-top: 4px;
+
+      .message-time {
+        font-size: 11px;
+        color: #667781;
+        margin: 0;
+      }
+
+      .message-status {
+        display: flex;
+        align-items: center;
+
+        .double-check {
+          font-size: 12px;
+          font-weight: bold;
+          
+          &.blue {
+            color: #4fc3f7;
+          }
+          
+          &:not(.blue) {
+            color: #667781;
+          }
+        }
+      }
+    }
+  }
+}
+
+// Group consecutive messages from same sender
+.message-bubble-container + .message-bubble-container {
+  &.own-message + .own-message,
+  &.other-message + .other-message {
+    margin-top: -4px;
+    
+    .message-bubble {
+      &::before {
+        display: none;
+      }
+    }
+  }
+}
+
+// First message in a group gets the tail
+.message-bubble-container:first-child,
+.message-bubble-container.own-message + .message-bubble-container.other-message,
+.message-bubble-container.other-message + .message-bubble-container.own-message {
+  .message-bubble {
+    &::before {
+      display: block !important;
+    }
+  }
+}
+
+// Responsive design
+@media (max-width: 768px) {
+  .message-bubble-container {
+    .message-bubble {
+      max-width: 80%;
+      
+      &.own {
+        margin-left: 40px;
+      }
+      
+      &.other {
+        margin-right: 40px;
+      }
+    }
+  }
+}
