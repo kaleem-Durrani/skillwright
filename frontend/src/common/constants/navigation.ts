@@ -6,6 +6,10 @@ export const AUTH_MENU = [
     path: '/',
   },
   {
+    label: 'Courses',
+    path: ROUTES.EXPLORE_COURSES,
+  },
+  {
     label: 'About',
     path: '#about',
   },
