@@ -14,6 +14,15 @@ export const generateAccessToken = (userId: string, userType: UserType): string 
   );
 };
 
+// Generate WebSocket token (short-lived, for WebSocket authentication only)
+export const generateWebSocketToken = (userId: string, userType: UserType): string => {
+  return jwt.sign(
+    { userId, userType, purpose: 'websocket' },
+    process.env.JWT_ACCESS_SECRET as string,
+    { expiresIn: '1h' } // Longer than access token but still secure
+  );
+};
+
 // Generate a random refresh token
 export const generateRefreshToken = (): string => {
   return crypto.randomBytes(40).toString('hex');
