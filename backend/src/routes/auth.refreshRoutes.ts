@@ -1,15 +1,18 @@
 import express from 'express';
-import { refreshToken } from '../controllers/auth.refreshController.js';
+import { refreshToken, getWebSocketToken } from '../controllers/auth.refreshController.js';
+import { protect } from '../middleware/authMiddleware.js';
 
 /**
  * Auth Refresh Routes
- * 
- * This file contains the route for refreshing access tokens:
+ *
+ * This file contains routes for token management:
  * - Refresh access token using refresh token
+ * - Get WebSocket token for real-time connections
  */
 
 const router = express.Router();
 
 router.post('/', refreshToken);
+router.get('/websocket-token', protect, getWebSocketToken);
 
-export default router; 
+export default router;
