@@ -79,7 +79,7 @@ const StudentDashboard: React.FC = () => {
 
   return (
     <div className="p-6">
-      <Title level={2} className="mb-6">
+      <Title level={2} className="mb-8 text-3xl md:text-4xl font-bold">
         Dashboard
       </Title>
 
@@ -88,30 +88,48 @@ const StudentDashboard: React.FC = () => {
         <Col xs={24} sm={8}>
           <Card>
             <Statistic
-              title="Enrolled Courses"
+              title={
+                <span className="text-lg font-medium">Enrolled Courses</span>
+              }
               value={data.stats.enrolledCourses}
               prefix={<BookOutlined />}
-              valueStyle={{ color: "#3f8600" }}
+              valueStyle={{
+                color: "#3f8600",
+                fontSize: "2rem",
+                fontWeight: "bold",
+              }}
             />
           </Card>
         </Col>
         <Col xs={24} sm={8}>
           <Card>
             <Statistic
-              title="Pending Requests"
+              title={
+                <span className="text-lg font-medium">Pending Requests</span>
+              }
               value={data.stats.pendingRequests}
               prefix={<ClockCircleOutlined />}
-              valueStyle={{ color: "#cf1322" }}
+              valueStyle={{
+                color: "#cf1322",
+                fontSize: "2rem",
+                fontWeight: "bold",
+              }}
             />
           </Card>
         </Col>
         <Col xs={24} sm={8}>
           <Card>
             <Statistic
-              title="Available Resources"
+              title={
+                <span className="text-lg font-medium">Available Resources</span>
+              }
               value={data.stats.totalResources}
               prefix={<FileTextOutlined />}
-              valueStyle={{ color: "#1890ff" }}
+              valueStyle={{
+                color: "#1890ff",
+                fontSize: "2rem",
+                fontWeight: "bold",
+              }}
             />
           </Card>
         </Col>

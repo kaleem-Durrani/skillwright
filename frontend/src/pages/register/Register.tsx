@@ -97,11 +97,14 @@ const Register = () => {
     <Row className="h-full py-12">
       <Col xs={24} sm={22} md={20} lg={16} xl={14} xxl={12} className="mx-auto">
         <Card className="shadow-md bg-white/40 backdrop-blur-md border border-white/20">
-          <Title level={2} className="mb-6 text-center text-blue-700">
+          <Title
+            level={2}
+            className="mb-8 text-center text-blue-700 text-3xl md:text-4xl font-bold"
+          >
             {userType === "student" ? "Student" : "Teacher"} Registration
           </Title>
 
-          <Paragraph className="text-center mb-8">
+          <Paragraph className="text-center mb-10 text-lg md:text-xl">
             {userType === "student"
               ? "Register to access courses, resources, and connect with teachers"
               : "Register to create courses, share resources, and connect with students"}
@@ -142,10 +145,10 @@ const Register = () => {
           <Divider />
 
           <div className="text-center">
-            <Text>Already have an account?</Text>{" "}
+            <Text className="text-lg">Already have an account?</Text>{" "}
             <Link
               to={ROUTES.LOGIN}
-              className="text-blue-600 hover:text-blue-800"
+              className="text-blue-600 hover:text-blue-800 text-lg font-medium"
             >
               Login here
             </Link>

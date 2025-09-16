@@ -15,8 +15,8 @@ const LoginTypeSelector: React.FC<LoginTypeSelectorProps> = ({
   onChange,
 }) => {
   return (
-    <div className=" flex flex-col items-center py-3 px-4 rounded-xl bg-white/10 border border-white/40 shadow-md backdrop-blur-md">
-      <Text className="text-lg mb-2 font-medium text-gray-800">
+    <div className=" flex flex-col items-center py-4 px-6 rounded-xl bg-white/10 border border-white/40 shadow-md backdrop-blur-md">
+      <Text className="text-xl mb-3 font-semibold text-gray-800">
         Select User Type
       </Text>
       <Radio.Group

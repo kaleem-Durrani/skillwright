@@ -134,7 +134,9 @@ const AdminTeachers: React.FC = () => {
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
-        <Title level={2}>Teachers</Title>
+        <Title level={2} className="text-3xl md:text-4xl font-bold">
+          Teachers
+        </Title>
         <Button type="primary" icon={<PlusOutlined />} onClick={showModal}>
           Add Teacher
         </Button>

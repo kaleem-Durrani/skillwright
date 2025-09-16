@@ -55,15 +55,15 @@ const InfoPanel: React.FC<InfoPanelProps> = ({ type, className = "" }) => {
 
   return (
     <div className={`p-8 text-white ${className}`}>
-      <Title level={2} className="text-white mb-4">
+      <Title level={1} className="text-white mb-4">
         {content.title}
       </Title>
-      <Paragraph className="text-white text-lg mb-6">
+      <Paragraph className="text-white text-2xl mb-6">
         {content.description}
       </Paragraph>
       <ul className="space-y-2">
         {content.points.map((point, index) => (
-          <li key={index} className="flex items-start">
+          <li key={index} className="flex items-start text-lg">
             <span className="mr-2 text-blue-300">•</span>
             <span>{point}</span>
           </li>

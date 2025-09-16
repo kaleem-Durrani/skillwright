@@ -267,8 +267,10 @@ const StudentResources = () => {
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
         <div>
-          <Title level={2}>Learning Resources</Title>
-          <Text className="text-gray-600">
+          <Title level={2} className="text-3xl md:text-4xl font-bold">
+            Learning Resources
+          </Title>
+          <Text className="text-gray-600 text-lg">
             Access course materials and learning resources
           </Text>
         </div>

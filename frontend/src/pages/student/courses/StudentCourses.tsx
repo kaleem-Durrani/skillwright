@@ -216,7 +216,9 @@ const StudentCourses: React.FC = () => {
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
-        <Title level={2}>My Courses</Title>
+        <Title level={2} className="text-3xl md:text-4xl font-bold">
+          My Courses
+        </Title>
         <Search
           placeholder="Search courses..."
           allowClear

@@ -1,9 +1,9 @@
-import React from 'react';
-import { Card, List, Typography, Tag, Skeleton, Button, Avatar } from 'antd';
-import { Link } from 'react-router-dom';
-import { RightOutlined, UserOutlined } from '@ant-design/icons';
-import { Teacher } from '@/common/types';
-import { ROUTES } from '@/common/constants';
+import React from "react";
+import { Card, List, Typography, Tag, Skeleton, Button, Avatar } from "antd";
+import { Link } from "react-router-dom";
+import { RightOutlined, UserOutlined } from "@ant-design/icons";
+import { Teacher } from "@/common/types";
+import { ROUTES } from "@/common/constants";
 
 const { Title, Text } = Typography;
 
@@ -17,11 +17,15 @@ interface TeachersListProps {
  */
 const TeachersList: React.FC<TeachersListProps> = ({ teachers, loading }) => {
   return (
-    <Card 
-      title={<Title level={5}>Recent Teachers</Title>}
+    <Card
+      title={
+        <Title level={5} className="text-xl font-semibold">
+          Recent Teachers
+        </Title>
+      }
       extra={
         <Link to={ROUTES.ADMIN.TEACHERS}>
-          <Button type="link" size="small">
+          <Button type="link" size="small" className="text-lg">
             View All <RightOutlined />
           </Button>
         </Link>
@@ -48,16 +52,14 @@ const TeachersList: React.FC<TeachersListProps> = ({ teachers, loading }) => {
                       {teacher.department?.name && (
                         <Tag color="purple">{teacher.department.name}</Tag>
                       )}
-                      {teacher.isBanned && (
-                        <Tag color="red">Banned</Tag>
-                      )}
+                      {teacher.isBanned && <Tag color="red">Banned</Tag>}
                     </div>
                   </>
                 }
               />
             </List.Item>
           )}
-          locale={{ emptyText: 'No teachers found' }}
+          locale={{ emptyText: "No teachers found" }}
         />
       </Skeleton>
     </Card>

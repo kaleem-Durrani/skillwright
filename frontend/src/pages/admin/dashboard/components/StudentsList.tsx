@@ -1,9 +1,9 @@
-import React from 'react';
-import { Card, List, Typography, Tag, Skeleton, Button, Avatar } from 'antd';
-import { Link } from 'react-router-dom';
-import { RightOutlined, UserOutlined } from '@ant-design/icons';
-import { Student } from '@/common/types';
-import { ROUTES } from '@/common/constants';
+import React from "react";
+import { Card, List, Typography, Tag, Skeleton, Button, Avatar } from "antd";
+import { Link } from "react-router-dom";
+import { RightOutlined, UserOutlined } from "@ant-design/icons";
+import { Student } from "@/common/types";
+import { ROUTES } from "@/common/constants";
 
 const { Title, Text } = Typography;
 
@@ -17,8 +17,12 @@ interface StudentsListProps {
  */
 const StudentsList: React.FC<StudentsListProps> = ({ students, loading }) => {
   return (
-    <Card 
-      title={<Title level={5}>Recent Students</Title>}
+    <Card
+      title={
+        <Title level={5} className="text-xl font-semibold">
+          Recent Students
+        </Title>
+      }
       extra={
         <Link to={ROUTES.ADMIN.STUDENTS}>
           <Button type="link" size="small">
@@ -48,16 +52,14 @@ const StudentsList: React.FC<StudentsListProps> = ({ students, loading }) => {
                       {student.department?.name && (
                         <Tag color="purple">{student.department.name}</Tag>
                       )}
-                      {student.isBanned && (
-                        <Tag color="red">Banned</Tag>
-                      )}
+                      {student.isBanned && <Tag color="red">Banned</Tag>}
                     </div>
                   </>
                 }
               />
             </List.Item>
           )}
-          locale={{ emptyText: 'No students found' }}
+          locale={{ emptyText: "No students found" }}
         />
       </Skeleton>
     </Card>

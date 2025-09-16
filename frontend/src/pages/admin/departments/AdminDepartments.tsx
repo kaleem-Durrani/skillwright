@@ -143,7 +143,9 @@ const AdminDepartments: React.FC = () => {
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
-        <Title level={2}>Departments</Title>
+        <Title level={2} className="text-3xl md:text-4xl font-bold">
+          Departments
+        </Title>
         <Button type="primary" icon={<PlusOutlined />} onClick={showModal}>
           Add Department
         </Button>

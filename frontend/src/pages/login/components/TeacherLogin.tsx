@@ -44,7 +44,10 @@ const TeacherLogin: React.FC<TeacherLoginProps> = ({
         <LoginTypeSelector selectedType="teacher" onChange={onTypeChange} />
       </div>
 
-      <Title level={2} className="mb-6 text-center text-green-700">
+      <Title
+        level={2}
+        className="mb-8 text-center text-green-700 text-3xl md:text-4xl font-bold"
+      >
         Teacher Login
       </Title>
       <Form
@@ -84,11 +87,11 @@ const TeacherLogin: React.FC<TeacherLoginProps> = ({
         <Form.Item>
           <div className="flex justify-between items-center">
             <Form.Item name="remember" valuePropName="checked" noStyle>
-              <Checkbox>Remember me</Checkbox>
+              <Checkbox className="text-lg">Remember me</Checkbox>
             </Form.Item>
             <Link
               to={ROUTES.FORGOT_PASSWORD}
-              className="text-green-600 hover:text-green-800"
+              className="text-green-600 hover:text-green-800 text-lg"
             >
               Forgot password?
             </Link>
@@ -100,20 +103,22 @@ const TeacherLogin: React.FC<TeacherLoginProps> = ({
             type="primary"
             htmlType="submit"
             loading={isLoading}
-            className="w-full rounded-lg h-12 text-lg bg-green-600 hover:bg-green-700 border-green-600"
+            className="w-full rounded-lg h-14 text-xl font-semibold bg-green-600 hover:bg-green-700 border-green-600"
           >
             {isLoading ? "Logging in..." : "Log in"}
           </Button>
         </Form.Item>
 
         <Divider plain>
-          <Text type="secondary">New to the platform?</Text>
+          <Text type="secondary" className="text-lg">
+            New to the platform?
+          </Text>
         </Divider>
 
         <div className="text-center">
           <Link
             to={ROUTES.REGISTER}
-            className="text-green-600 hover:text-green-800"
+            className="text-green-600 hover:text-green-800 text-lg font-medium"
           >
             Register as a teacher
           </Link>

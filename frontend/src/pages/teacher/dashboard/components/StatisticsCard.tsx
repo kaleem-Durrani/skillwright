@@ -1,6 +1,6 @@
-import React from 'react';
-import { Card, Statistic } from 'antd';
-import { StatisticProps } from 'antd/es/statistic/Statistic';
+import React from "react";
+import { Card, Statistic } from "antd";
+import { StatisticProps } from "antd/es/statistic/Statistic";
 
 interface StatisticsCardProps {
   title: string;
@@ -23,16 +23,18 @@ const StatisticsCard: React.FC<StatisticsCardProps> = ({
   suffix,
   precision = 0,
   loading = false,
-  className = '',
+  className = "",
   valueStyle,
 }) => {
   return (
-    <Card className={`shadow-sm hover:shadow-md transition-shadow ${className}`}>
+    <Card
+      className={`shadow-sm hover:shadow-md transition-shadow ${className}`}
+    >
       <Statistic
-        title={title}
+        title={<span className="text-lg font-medium">{title}</span>}
         value={value}
         precision={precision}
-        valueStyle={valueStyle}
+        valueStyle={{ fontSize: "2rem", fontWeight: "bold", ...valueStyle }}
         prefix={prefix}
         suffix={suffix}
         loading={loading}

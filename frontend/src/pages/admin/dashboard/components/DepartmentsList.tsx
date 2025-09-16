@@ -1,9 +1,9 @@
-import React from 'react';
-import { Card, List, Typography, Tag, Skeleton, Button } from 'antd';
-import { Link } from 'react-router-dom';
-import { RightOutlined, TeamOutlined, BookOutlined } from '@ant-design/icons';
-import { Department } from '@/common/types';
-import { ROUTES } from '@/common/constants';
+import React from "react";
+import { Card, List, Typography, Tag, Skeleton, Button } from "antd";
+import { Link } from "react-router-dom";
+import { RightOutlined, TeamOutlined, BookOutlined } from "@ant-design/icons";
+import { Department } from "@/common/types";
+import { ROUTES } from "@/common/constants";
 
 const { Title, Text } = Typography;
 
@@ -15,10 +15,17 @@ interface DepartmentsListProps {
 /**
  * Component to display departments on the dashboard
  */
-const DepartmentsList: React.FC<DepartmentsListProps> = ({ departments, loading }) => {
+const DepartmentsList: React.FC<DepartmentsListProps> = ({
+  departments,
+  loading,
+}) => {
   return (
-    <Card 
-      title={<Title level={5}>Departments</Title>}
+    <Card
+      title={
+        <Title level={5} className="text-xl font-semibold">
+          Departments
+        </Title>
+      }
       extra={
         <Link to={ROUTES.ADMIN.DEPARTMENTS}>
           <Button type="link" size="small">
@@ -42,7 +49,7 @@ const DepartmentsList: React.FC<DepartmentsListProps> = ({ departments, loading 
                 description={
                   <>
                     <Text type="secondary">
-                      {department.description || 'No description provided'}
+                      {department.description || "No description provided"}
                     </Text>
                     <div className="mt-1">
                       <Tag color="blue">
@@ -63,7 +70,7 @@ const DepartmentsList: React.FC<DepartmentsListProps> = ({ departments, loading 
               />
             </List.Item>
           )}
-          locale={{ emptyText: 'No departments found' }}
+          locale={{ emptyText: "No departments found" }}
         />
       </Skeleton>
     </Card>

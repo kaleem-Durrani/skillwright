@@ -44,7 +44,10 @@ const StudentLogin: React.FC<StudentLoginProps> = ({
         <LoginTypeSelector selectedType="student" onChange={onTypeChange} />
       </div>
 
-      <Title level={2} className="mb-6 text-center text-blue-700">
+      <Title
+        level={2}
+        className="mb-8 text-center text-blue-700 text-3xl md:text-4xl font-bold"
+      >
         Student Login
       </Title>
       <Form
@@ -84,11 +87,11 @@ const StudentLogin: React.FC<StudentLoginProps> = ({
         <Form.Item>
           <div className="flex justify-between items-center">
             <Form.Item name="remember" valuePropName="checked" noStyle>
-              <Checkbox>Remember me</Checkbox>
+              <Checkbox className="text-lg">Remember me</Checkbox>
             </Form.Item>
             <Link
               to={ROUTES.FORGOT_PASSWORD}
-              className="text-blue-600 hover:text-blue-800"
+              className="text-blue-600 hover:text-blue-800 text-lg"
             >
               Forgot password?
             </Link>
@@ -100,20 +103,22 @@ const StudentLogin: React.FC<StudentLoginProps> = ({
             type="primary"
             htmlType="submit"
             loading={isLoading}
-            className="w-full rounded-lg h-12 text-lg"
+            className="w-full rounded-lg h-14 text-xl font-semibold"
           >
             {isLoading ? "Logging in..." : "Log in"}
           </Button>
         </Form.Item>
 
         <Divider plain>
-          <Text type="secondary">New to the platform?</Text>
+          <Text type="secondary" className="text-lg">
+            New to the platform?
+          </Text>
         </Divider>
 
         <div className="text-center">
           <Link
             to={ROUTES.REGISTER}
-            className="text-blue-600 hover:text-blue-800"
+            className="text-blue-600 hover:text-blue-800 text-lg font-medium"
           >
             Register as a student
           </Link>

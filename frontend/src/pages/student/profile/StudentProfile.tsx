@@ -111,8 +111,10 @@ const StudentProfile = () => {
   return (
     <div className="p-6">
       <div className="mb-6">
-        <Title level={2}>My Profile</Title>
-        <Text className="text-gray-600">
+        <Title level={2} className="text-3xl md:text-4xl font-bold">
+          My Profile
+        </Title>
+        <Text className="text-gray-600 text-lg">
           View and manage your personal information
         </Text>
       </div>
@@ -132,7 +134,7 @@ const StudentProfile = () => {
 
         <TabPane tab="Enrolled Courses" key="courses">
           <div>
-            <Title level={4} className="mb-4">
+            <Title level={4} className="mb-4 text-xl md:text-2xl font-semibold">
               Approved Courses
             </Title>
             <EnrolledCoursesList
@@ -145,7 +147,10 @@ const StudentProfile = () => {
             {pendingCourses.length > 0 && (
               <>
                 <Divider />
-                <Title level={4} className="mb-4">
+                <Title
+                  level={4}
+                  className="mb-4 text-xl md:text-2xl font-semibold"
+                >
                   Pending Enrollments
                 </Title>
                 <EnrolledCoursesList

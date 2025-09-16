@@ -39,15 +39,18 @@ const AdminLogin: React.FC<AdminLoginProps> = ({
         <LoginTypeSelector selectedType="admin" onChange={onTypeChange} />
       </div>
 
-      <Title level={2} className="mb-4 text-center text-indigo-700">
+      <Title
+        level={2}
+        className="mb-6 text-center text-indigo-700 text-3xl md:text-4xl font-bold"
+      >
         Administrator Login
       </Title>
 
-      <div className="flex justify-center mb-4">
-        <SafetyOutlined className="text-5xl text-indigo-600" />
+      <div className="flex justify-center mb-6">
+        <SafetyOutlined className="text-6xl text-indigo-600" />
       </div>
 
-      <Text className="block text-center mb-6 text-gray-600">
+      <Text className="block text-center mb-8 text-gray-600 text-lg">
         This area is restricted to authorized administrators only.
       </Text>
 
@@ -88,11 +91,11 @@ const AdminLogin: React.FC<AdminLoginProps> = ({
         <Form.Item>
           <div className="flex justify-between items-center">
             <Form.Item name="remember" valuePropName="checked" noStyle>
-              <Checkbox>Remember me</Checkbox>
+              <Checkbox className="text-lg">Remember me</Checkbox>
             </Form.Item>
             <Link
               to={ROUTES.FORGOT_PASSWORD}
-              className="text-indigo-600 hover:text-indigo-800"
+              className="text-indigo-600 hover:text-indigo-800 text-lg"
             >
               Forgot password?
             </Link>
@@ -104,7 +107,7 @@ const AdminLogin: React.FC<AdminLoginProps> = ({
             type="primary"
             htmlType="submit"
             loading={isLoading}
-            className="w-full rounded-lg h-12 text-lg bg-indigo-600 hover:bg-indigo-700 border-indigo-600"
+            className="w-full rounded-lg h-14 text-xl font-semibold bg-indigo-600 hover:bg-indigo-700 border-indigo-600"
           >
             {isLoading ? "Logging in..." : "Log in"}
           </Button>
