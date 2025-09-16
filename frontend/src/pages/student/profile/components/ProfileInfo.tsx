@@ -88,8 +88,20 @@ const ProfileInfo: React.FC<ProfileInfoProps> = ({
                 <Input prefix={<MailOutlined />} disabled />
               </Form.Item>
 
-              <Form.Item name="phoneNumber" label="Phone Number">
-                <Input prefix={<PhoneOutlined />} />
+              <Form.Item
+                name="phoneNumber"
+                label="Phone Number"
+                rules={[
+                  {
+                    pattern: /^\+?[1-9]\d{1,14}$/,
+                    message: "Please enter a valid phone number",
+                  },
+                ]}
+              >
+                <Input
+                  prefix={<PhoneOutlined />}
+                  placeholder="Enter your phone number"
+                />
               </Form.Item>
 
               <div className="flex justify-end gap-2 mt-4">
