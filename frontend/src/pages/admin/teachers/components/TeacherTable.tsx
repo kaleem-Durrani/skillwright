@@ -115,42 +115,42 @@ const TeacherTable: React.FC<TeacherTableProps> = ({
           <Tag color="green">Active</Tag>
         ),
     },
-    {
-      title: "Actions",
-      key: "actions",
-      render: (_: any, record: Teacher) => (
-        <Space size="small">
-          <Tooltip title="View Details">
-            <Link to={ROUTES.ADMIN.TEACHER_DETAILS(record.id)}>
-              <Button type="text" icon={<EyeOutlined />} />
-            </Link>
-          </Tooltip>
-          <Tooltip title="Edit">
-            <Link to={ROUTES.ADMIN.TEACHER_DETAILS(record.id)}>
-              <Button type="text" icon={<EditOutlined />} />
-            </Link>
-          </Tooltip>
-          <Tooltip title={record.isBanned ? "Unban" : "Ban"}>
-            <Button
-              type="text"
-              danger={!record.isBanned}
-              icon={record.isBanned ? <UnlockOutlined /> : <LockOutlined />}
-              onClick={() =>
-                showBanConfirm(record.id, record.name, record.isBanned)
-              }
-            />
-          </Tooltip>
-          <Tooltip title="Delete">
-            <Button
-              type="text"
-              danger
-              icon={<DeleteOutlined />}
-              onClick={() => showDeleteConfirm(record.id, record.name)}
-            />
-          </Tooltip>
-        </Space>
-      ),
-    },
+    // {
+    //   title: "Actions",
+    //   key: "actions",
+    //   render: (_: any, record: Teacher) => (
+    //     <Space size="small">
+    //       <Tooltip title="View Details">
+    //         <Link to={ROUTES.ADMIN.TEACHER_DETAILS(record.id)}>
+    //           <Button type="text" icon={<EyeOutlined />} />
+    //         </Link>
+    //       </Tooltip>
+    //       <Tooltip title="Edit">
+    //         <Link to={ROUTES.ADMIN.TEACHER_DETAILS(record.id)}>
+    //           <Button type="text" icon={<EditOutlined />} />
+    //         </Link>
+    //       </Tooltip>
+    //       <Tooltip title={record.isBanned ? "Unban" : "Ban"}>
+    //         <Button
+    //           type="text"
+    //           danger={!record.isBanned}
+    //           icon={record.isBanned ? <UnlockOutlined /> : <LockOutlined />}
+    //           onClick={() =>
+    //             showBanConfirm(record.id, record.name, record.isBanned)
+    //           }
+    //         />
+    //       </Tooltip>
+    //       <Tooltip title="Delete">
+    //         <Button
+    //           type="text"
+    //           danger
+    //           icon={<DeleteOutlined />}
+    //           onClick={() => showDeleteConfirm(record.id, record.name)}
+    //         />
+    //       </Tooltip>
+    //     </Space>
+    //   ),
+    // },
   ];
 
   return (
