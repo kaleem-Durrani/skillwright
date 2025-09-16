@@ -153,9 +153,17 @@ export const deleteResource = async (req: Request, res: Response, next: NextFunc
     const publicId = extractPublicId(resource.url);
     await deleteFile(publicId);
 
-    // Delete from database
-    await prisma.resource.delete({
-      where: { id }
+    // Delete from database using transaction to handle foreign key constraints
+    await prisma.$transaction(async (tx) => {
+      // First delete all related comments
+      await tx.resourceComment.deleteMany({
+        where: { resourceId: id }
+      });
+
+      // Then delete the resource
+      await tx.resource.delete({
+        where: { id }
+      });
     });
 
     res.json({
