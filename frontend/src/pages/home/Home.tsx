@@ -8,6 +8,13 @@ import {
   EnvironmentOutlined,
 } from "@ant-design/icons";
 
+// Import local images
+import mainHomeImage from "@/assets/main-home.jpeg";
+import about1Image from "@/assets/about1.jpeg";
+import about2Image from "@/assets/about2.jpeg";
+import about3Image from "@/assets/about3.jpeg";
+import whyChooseUsImage from "@/assets/why-choose-us.jpeg";
+
 const { Title, Paragraph, Text } = Typography;
 const { TextArea } = Input;
 
@@ -102,7 +109,10 @@ const Home = () => {
         id="home"
         className="min-h-screen flex flex-col items-center justify-center relative bg-gradient-to-b from-blue-500 to-purple-600 text-white p-4"
       >
-        <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?q=80&w=2070')] bg-cover bg-center opacity-20"></div>
+        <div
+          className="absolute inset-0 bg-cover bg-center opacity-20"
+          style={{ backgroundImage: `url(${mainHomeImage})` }}
+        ></div>
         <div className="container mx-auto text-center relative z-10 max-w-4xl">
           <Title className="text-5xl md:text-7xl font-bold mb-6 text-white fade-in">
             Millat Vocational Training
@@ -168,8 +178,8 @@ const Home = () => {
                 cover={
                   <div className="h-48 relative overflow-hidden">
                     <img
-                      src="https://images.unsplash.com/photo-1523240795612-9a054b0db644?q=80&w=2070"
-                      alt="Students in classroom"
+                      src={about1Image}
+                      alt="Our Mission"
                       className="w-full h-full object-cover"
                     />
                     <div className="absolute top-4 right-4 text-4xl">🎓</div>
@@ -194,8 +204,8 @@ const Home = () => {
                 cover={
                   <div className="h-48 relative overflow-hidden">
                     <img
-                      src="https://images.unsplash.com/photo-1552664730-d307ca884978?q=80&w=2070"
-                      alt="Innovation and technology"
+                      src={about2Image}
+                      alt="Our Vision"
                       className="w-full h-full object-cover"
                     />
                     <div className="absolute top-4 right-4 text-4xl">🌟</div>
@@ -220,8 +230,8 @@ const Home = () => {
                 cover={
                   <div className="h-48 relative overflow-hidden">
                     <img
-                      src="https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?q=80&w=2070"
-                      alt="Values and growth"
+                      src={about3Image}
+                      alt="Our Values"
                       className="w-full h-full object-cover"
                     />
                     <div className="absolute top-4 right-4 text-4xl">🌱</div>
@@ -247,8 +257,8 @@ const Home = () => {
               <Col xs={24} lg={12}>
                 <div className="aspect-video bg-gray-200 rounded-lg overflow-hidden">
                   <img
-                    src="https://images.unsplash.com/photo-1524178232363-1fb2b075b655?q=80&w=2070"
-                    alt="Students learning"
+                    src={whyChooseUsImage}
+                    alt="Why Choose Us"
                     className="w-full h-full object-cover"
                   />
                 </div>
@@ -369,7 +379,8 @@ const Home = () => {
               </div>
             </Col>
 
-            <Col
+            {/* Send Message Form - Commented Out */}
+            {/* <Col
               xs={24}
               lg={12}
               className={contactVisible ? "fade-in-delay-1" : "opacity-0"}
@@ -379,7 +390,7 @@ const Home = () => {
                   Send Us a Message
                 </Title>
 
-                <Form layout="vertical" onFinish={onFinish}>
+                {/* <Form layout="vertical" onFinish={onFinish}>
                   <Row gutter={16}>
                     <Col xs={24} sm={12}>
                       <Form.Item
@@ -447,9 +458,9 @@ const Home = () => {
                       Send Message
                     </Button>
                   </Form.Item>
-                </Form>
+                </Form> */}
               </div>
-            </Col>
+            </Col> */}
           </Row>
         </div>
       </section>
