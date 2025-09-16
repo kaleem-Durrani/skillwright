@@ -10,6 +10,7 @@ import {
   NewsEventTable,
   NewsEventFilter,
   CreateNewsEventModal,
+  ViewNewsEventModal,
 } from "./components";
 import { useApi, useMutation } from "@/hooks";
 import { adminService, AdminQueryParams } from "@/services";
@@ -25,7 +26,11 @@ const AdminNewsEvents: React.FC = () => {
     limit: 10,
   });
   const [isModalVisible, setIsModalVisible] = useState(false);
+  const [isViewModalVisible, setIsViewModalVisible] = useState(false);
   const [editingNewsEvent, setEditingNewsEvent] = useState<NewsEvent | null>(
+    null
+  );
+  const [viewingNewsEvent, setViewingNewsEvent] = useState<NewsEvent | null>(
     null
   );
 
@@ -79,6 +84,14 @@ const AdminNewsEvents: React.FC = () => {
         });
         newsEventsQuery.refetch();
       },
+      onError: (error: any) => {
+        notification.error({
+          message: "Error",
+          description:
+            error.response?.data?.message ||
+            "Failed to delete news event. Please try again.",
+        });
+      },
     }
   );
 
@@ -91,6 +104,14 @@ const AdminNewsEvents: React.FC = () => {
           description: "News event publish status updated successfully.",
         });
         newsEventsQuery.refetch();
+      },
+      onError: (error: any) => {
+        notification.error({
+          message: "Error",
+          description:
+            error.response?.data?.message ||
+            "Failed to update publish status. Please try again.",
+        });
       },
     }
   );
@@ -142,6 +163,16 @@ const AdminNewsEvents: React.FC = () => {
     setIsModalVisible(true);
   };
 
+  const handleView = (newsEvent: NewsEvent) => {
+    setViewingNewsEvent(newsEvent);
+    setIsViewModalVisible(true);
+  };
+
+  const handleViewCancel = () => {
+    setIsViewModalVisible(false);
+    setViewingNewsEvent(null);
+  };
+
   const handleSubmit = async (
     values: NewsEventCreateData | NewsEventUpdateData
   ) => {
@@ -156,16 +187,37 @@ const AdminNewsEvents: React.FC = () => {
   };
 
   const handleDelete = async (id: string) => {
-    await deleteNewsEventMutation.mutateAsync(id);
+    console.log("handleDelete called with ID:", id);
+    try {
+      console.log("Calling deleteNewsEventMutation.mutateAsync...");
+      await deleteNewsEventMutation.mutateAsync(id);
+      console.log("Delete mutation completed successfully");
+    } catch (error) {
+      console.error("Delete error:", error);
+    }
   };
 
   const handleTogglePublish = async (id: string, _isPublished: boolean) => {
-    await toggleNewsEventPublishMutation.mutateAsync(id);
+    console.log(
+      "handleTogglePublish called with ID:",
+      id,
+      "isPublished:",
+      _isPublished
+    );
+    try {
+      console.log("Calling toggleNewsEventPublishMutation.mutateAsync...");
+      await toggleNewsEventPublishMutation.mutateAsync(id);
+      console.log("Toggle publish mutation completed successfully");
+    } catch (error) {
+      console.error("Toggle publish error:", error);
+    }
   };
 
   const isLoading = newsEventsQuery.loading;
   const isSubmitting =
     createNewsEventMutation.loading || updateNewsEventMutation.loading;
+  const isDeleting = deleteNewsEventMutation.loading;
+  const isToggling = toggleNewsEventPublishMutation.loading;
 
   return (
     <div className="p-6">
@@ -181,8 +233,11 @@ const AdminNewsEvents: React.FC = () => {
       <NewsEventTable
         newsEvents={newsEvents}
         loading={isLoading}
+        deleteLoading={isDeleting}
+        toggleLoading={isToggling}
         onDelete={handleDelete}
         onEdit={handleEdit}
+        onView={handleView}
         onTogglePublish={handleTogglePublish}
       />
 
@@ -192,6 +247,12 @@ const AdminNewsEvents: React.FC = () => {
         onSubmit={handleSubmit}
         isSubmitting={isSubmitting}
         editingNewsEvent={editingNewsEvent}
+      />
+
+      <ViewNewsEventModal
+        visible={isViewModalVisible}
+        newsEvent={viewingNewsEvent}
+        onCancel={handleViewCancel}
       />
     </div>
   );
