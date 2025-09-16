@@ -459,8 +459,8 @@ const Home = () => {
                     </Button>
                   </Form.Item>
                 </Form> */}
-              </div>
-            </Col> */}
+            {/* </div> */}
+            {/* </Col> */}
           </Row>
         </div>
       </section>
