@@ -99,11 +99,11 @@ export const ADMIN_MENU_ITEMS: MenuItem[] = [
     icon: <NotificationOutlined />,
     label: "News & Events",
   },
-  {
-    key: ROUTES.ADMIN.CONVERSATIONS,
-    icon: <MessageOutlined />,
-    label: "Messages",
-  },
+  // {
+  //   key: ROUTES.ADMIN.CONVERSATIONS,
+  //   icon: <MessageOutlined />,
+  //   label: "Messages",
+  // },
   {
     key: ROUTES.ADMIN.PROFILE,
     icon: <UserOutlined />,
