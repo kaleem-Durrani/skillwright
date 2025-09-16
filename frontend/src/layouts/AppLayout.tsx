@@ -80,11 +80,6 @@ const AppLayout = () => {
       label: "Profile",
     },
     {
-      key: "settings",
-      icon: <SettingOutlined />,
-      label: "Settings",
-    },
-    {
       type: "divider",
     },
     {
@@ -124,15 +119,6 @@ const AppLayout = () => {
           </div>
 
           <div className="user-area flex items-center gap-4">
-            {/* Notifications */}
-            <Button
-              type="text"
-              icon={<BellOutlined />}
-              className="text-gray-600"
-            />
-
-            <Divider type="vertical" />
-
             {/* User dropdown */}
             <Dropdown
               menu={{
@@ -147,11 +133,13 @@ const AppLayout = () => {
               arrow
               rootClassName="user-dropdown"
             >
-              <div className="flex items-center cursor-pointer">
+              <div className="flex items-center cursor-pointer py-2">
                 <Avatar icon={<UserOutlined />} className="bg-blue-500" />
-                <div className="ml-2 hidden md:block">
-                  <Text strong>{user?.name || "User"}</Text>
-                  <Text className="block text-xs text-gray-500">
+                <div className="ml-2 hidden md:block min-w-0 flex-1">
+                  <Text strong className="block truncate">
+                    {user?.name || "User"}
+                  </Text>
+                  <Text className="block text-xs text-gray-500 truncate">
                     {userType.charAt(0).toUpperCase() + userType.slice(1)}
                   </Text>
                 </div>
