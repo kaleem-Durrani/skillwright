@@ -114,10 +114,10 @@ const Home = () => {
           style={{ backgroundImage: `url(${mainHomeImage})` }}
         ></div>
         <div className="container mx-auto text-center relative z-10 max-w-4xl">
-          <Title className="text-5xl md:text-7xl font-bold mb-6 text-white fade-in">
+          <Title className="text-6xl md:text-8xl font-bold mb-8 text-white fade-in">
             Millat Vocational Training
           </Title>
-          <Paragraph className="text-xl md:text-2xl mb-8 text-white fade-in-delay-1">
+          <Paragraph className="text-2xl md:text-3xl mb-10 text-white fade-in-delay-1">
             Empowering futures through quality education and practical skills
             training
           </Paragraph>
@@ -160,7 +160,7 @@ const Home = () => {
         <div className="container mx-auto px-4">
           <Title
             level={2}
-            className={`text-center mb-16 text-4xl ${
+            className={`text-center mb-16 text-5xl md:text-6xl font-bold ${
               aboutVisible ? "fade-in" : "opacity-0"
             }`}
           >
@@ -186,8 +186,13 @@ const Home = () => {
                   </div>
                 }
               >
-                <Title level={3}>Our Mission</Title>
-                <Paragraph>
+                <Title
+                  level={3}
+                  className="text-2xl md:text-3xl font-semibold mb-4"
+                >
+                  Our Mission
+                </Title>
+                <Paragraph className="text-lg md:text-xl leading-relaxed">
                   To provide accessible, quality vocational education that
                   empowers individuals with practical skills needed for
                   successful careers in today's dynamic job market.
@@ -212,8 +217,13 @@ const Home = () => {
                   </div>
                 }
               >
-                <Title level={3}>Our Vision</Title>
-                <Paragraph>
+                <Title
+                  level={3}
+                  className="text-2xl md:text-3xl font-semibold mb-4"
+                >
+                  Our Vision
+                </Title>
+                <Paragraph className="text-lg md:text-xl leading-relaxed">
                   To be the leading vocational training institution, recognized
                   for excellence in education, innovation, and producing skilled
                   professionals who contribute positively to society.
@@ -238,8 +248,13 @@ const Home = () => {
                   </div>
                 }
               >
-                <Title level={3}>Our Values</Title>
-                <Paragraph>
+                <Title
+                  level={3}
+                  className="text-2xl md:text-3xl font-semibold mb-4"
+                >
+                  Our Values
+                </Title>
+                <Paragraph className="text-lg md:text-xl leading-relaxed">
                   Excellence, integrity, innovation, inclusivity, and practical
                   learning form the foundation of our educational approach and
                   institutional culture.
@@ -264,24 +279,29 @@ const Home = () => {
                 </div>
               </Col>
               <Col xs={24} lg={12}>
-                <Title level={3}>Why Choose Us?</Title>
-                <Paragraph className="text-lg">
+                <Title
+                  level={3}
+                  className="text-3xl md:text-4xl font-bold mb-6"
+                >
+                  Why Choose Us?
+                </Title>
+                <Paragraph className="text-xl md:text-2xl mb-6">
                   At Millat Vocational Training, we offer:
                 </Paragraph>
-                <ul className="list-disc pl-5 mb-4">
-                  <li className="mb-2">
+                <ul className="list-disc pl-6 mb-6">
+                  <li className="mb-3 text-lg md:text-xl">
                     Industry-relevant curriculum designed by experts
                   </li>
-                  <li className="mb-2">
+                  <li className="mb-3 text-lg md:text-xl">
                     Hands-on practical training with modern equipment
                   </li>
-                  <li className="mb-2">
+                  <li className="mb-3 text-lg md:text-xl">
                     Experienced faculty with real-world expertise
                   </li>
-                  <li className="mb-2">
+                  <li className="mb-3 text-lg md:text-xl">
                     Flexible learning options to suit your schedule
                   </li>
-                  <li className="mb-2">
+                  <li className="mb-3 text-lg md:text-xl">
                     Career guidance and placement assistance
                   </li>
                 </ul>
@@ -308,7 +328,7 @@ const Home = () => {
         <div className="container mx-auto px-4">
           <Title
             level={2}
-            className={`text-center mb-16 text-4xl ${
+            className={`text-center mb-16 text-5xl md:text-6xl font-bold ${
               contactVisible ? "fade-in" : "opacity-0"
             }`}
           >
@@ -322,41 +342,44 @@ const Home = () => {
               className={contactVisible ? "fade-in" : "opacity-0"}
             >
               <div className="bg-white p-8 rounded-lg shadow-md h-full">
-                <Title level={3} className="mb-6">
+                <Title
+                  level={3}
+                  className="mb-8 text-3xl md:text-4xl font-bold"
+                >
                   Contact Information
                 </Title>
 
-                <div className="mb-6 flex items-start">
-                  <PhoneOutlined className="text-2xl text-blue-500 mr-4 mt-1" />
+                <div className="mb-8 flex items-start">
+                  <PhoneOutlined className="text-3xl text-blue-500 mr-6 mt-1" />
                   <div>
-                    <Text strong className="block mb-1 text-lg">
+                    <Text strong className="block mb-2 text-xl md:text-2xl">
                       Phone
                     </Text>
-                    <Paragraph className="text-gray-600">
+                    <Paragraph className="text-gray-600 text-lg md:text-xl">
                       +92 123 456 7890
                     </Paragraph>
                   </div>
                 </div>
 
-                <div className="mb-6 flex items-start">
-                  <MailOutlined className="text-2xl text-blue-500 mr-4 mt-1" />
+                <div className="mb-8 flex items-start">
+                  <MailOutlined className="text-3xl text-blue-500 mr-6 mt-1" />
                   <div>
-                    <Text strong className="block mb-1 text-lg">
+                    <Text strong className="block mb-2 text-xl md:text-2xl">
                       Email
                     </Text>
-                    <Paragraph className="text-gray-600">
+                    <Paragraph className="text-gray-600 text-lg md:text-xl">
                       info@millatvocational.edu
                     </Paragraph>
                   </div>
                 </div>
 
-                <div className="mb-6 flex items-start">
-                  <EnvironmentOutlined className="text-2xl text-blue-500 mr-4 mt-1" />
+                <div className="mb-8 flex items-start">
+                  <EnvironmentOutlined className="text-3xl text-blue-500 mr-6 mt-1" />
                   <div>
-                    <Text strong className="block mb-1 text-lg">
+                    <Text strong className="block mb-2 text-xl md:text-2xl">
                       Address
                     </Text>
-                    <Paragraph className="text-gray-600">
+                    <Paragraph className="text-gray-600 text-lg md:text-xl">
                       123 Education Street, Knowledge City
                       <br />
                       Pakistan
@@ -364,11 +387,14 @@ const Home = () => {
                   </div>
                 </div>
 
-                <div className="mt-8">
-                  <Title level={4} className="mb-4">
+                <div className="mt-10">
+                  <Title
+                    level={4}
+                    className="mb-6 text-2xl md:text-3xl font-semibold"
+                  >
                     Office Hours
                   </Title>
-                  <Paragraph className="text-gray-600">
+                  <Paragraph className="text-gray-600 text-lg md:text-xl leading-relaxed">
                     <strong>Monday - Friday:</strong> 9:00 AM - 5:00 PM
                     <br />
                     <strong>Saturday:</strong> 9:00 AM - 1:00 PM
