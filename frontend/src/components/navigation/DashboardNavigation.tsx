@@ -115,9 +115,6 @@ const DashboardNavigation: React.FC = () => {
       <Menu.Item key="profile" icon={<UserOutlined />}>
         Profile
       </Menu.Item>
-      <Menu.Item key="settings" icon={<SettingOutlined />}>
-        Settings
-      </Menu.Item>
       <Menu.Divider />
       <Menu.Item key="logout" icon={<LogoutOutlined />}>
         Logout
@@ -179,19 +176,6 @@ const DashboardNavigation: React.FC = () => {
             style={{ width: 250, marginRight: 16 }}
             prefix={<SearchOutlined />}
           />
-
-          <Dropdown
-            overlay={notificationsMenu}
-            trigger={["click"]}
-            placement="bottomRight"
-          >
-            <Badge count={3} style={{ marginRight: 16 }}>
-              <Avatar
-                icon={<BellOutlined />}
-                style={{ backgroundColor: "#f0f2f5", color: "#000" }}
-              />
-            </Badge>
-          </Dropdown>
 
           <Dropdown
             overlay={userMenu}
