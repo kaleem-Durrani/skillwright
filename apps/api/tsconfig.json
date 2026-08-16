@@ -1,0 +1,23 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "tsBuildInfoFile": "dist/.tsbuildinfo",
+    "types": ["node"],
+
+    // The API is an application, not a library: nothing imports its types.
+    "declaration": false,
+    "declarationMap": false,
+
+    // `@skillwright/shared` and `@skillwright/db` publish TypeScript SOURCE through
+    // their exports maps — there is no compiled artifact to link against. Emitting
+    // JavaScript here would therefore produce a bundle whose imports resolve to .ts
+    // files at runtime. So `build` is a full typecheck and the process is executed by
+    // tsx, which transpiles those workspace sources on import. Restoring real emit
+    // means giving the two packages a build step first, not flipping this flag.
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}
