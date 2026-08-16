@@ -25,15 +25,15 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@prisma/client": "^6.3.0",
+    "@prisma/client": "^7.9.1",
     "argon2": "^0.41.1",
-    "ulid": "^2.3.0"
+    "ulid": "^3.0.2"
   },
   "devDependencies": {
-    "@faker-js/faker": "^9.3.0",
+    "@faker-js/faker": "^10.5.0",
     "@types/node": "^22.10.5",
-    "prisma": "^6.3.0",
+    "prisma": "^7.9.1",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.3"
+    "typescript": "^7.0.2"
   }
 }
