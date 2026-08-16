@@ -1,0 +1,645 @@
+// Skillwright data model.
+//
+// Design rules enforced throughout this file:
+//   1. ONE identity table. Role is a column, never a table. Profiles are 1:1 satellites.
+//   2. Explicit `onDelete` on EVERY relation. No implicit defaults, anywhere.
+//   3. Soft delete via `deletedAt` on anything a human can remove; hard delete only
+//      for rows that are pure infrastructure (sessions, verifications, uploads).
+//   4. Every foreign key and every column used in a WHERE or ORDER BY is indexed.
+//   5. Invariants that the database can hold are held by the database — see the
+//      CHECK constraints added in migration 0002, not by application code alone.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions", "fullTextSearchPostgres"]
+  binaryTargets   = ["native"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [citext, pg_trgm]
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  STUDENT
+  TEACHER
+  ADMIN
+}
+
+enum UserStatus {
+  /// Registered, email not yet confirmed. Can log in but `can()` denies everything
+  /// except resending verification.
+  PENDING_VERIFICATION
+  ACTIVE
+  /// Set by an admin. Every session is destroyed on transition; login is refused.
+  SUSPENDED
+}
+
+/// Why a session exists. DEMO sessions are issued by the demo endpoint and are
+/// denied any mutating action by the policy layer.
+enum SessionProvenance {
+  PASSWORD
+  DEMO
+  /// Password accepted, TOTP still outstanding. This session may ONLY call
+  /// /auth/mfa/verify — every other action is denied by policy.
+  MFA_PENDING
+}
+
+enum VerificationPurpose {
+  EMAIL_VERIFY
+  PASSWORD_RESET
+  EMAIL_CHANGE
+}
+
+enum EnrollmentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  WITHDRAWN
+  COMPLETED
+}
+
+/// Set explicitly by the creator. Never inferred from a MIME type — inferring is
+/// what made this enum meaningless in the previous system.
+/// ASSIGNMENT and QUIZ are deliberately absent: the assessment engine is out of
+/// scope, and a reserved enum value is an invitation to build it.
+enum ResourceType {
+  DOCUMENT
+  VIDEO
+  LINK
+}
+
+enum AnnouncementType {
+  NEWS
+  EVENT
+  ANNOUNCEMENT
+}
+
+enum UploadStatus {
+  /// Presigned URL issued, bytes not yet confirmed in the bucket.
+  PENDING
+  /// HeadObject confirmed real content-type and size; row is referenced by a domain entity.
+  COMMITTED
+}
+
+enum DurationUnit {
+  HOUR
+  DAY
+  WEEK
+  MONTH
+}
+
+enum NotificationType {
+  ENROLLMENT_REQUESTED
+  ENROLLMENT_APPROVED
+  ENROLLMENT_REJECTED
+  RESOURCE_PUBLISHED
+  ANNOUNCEMENT_PUBLISHED
+  MESSAGE_RECEIVED
+  COMMENT_REPLIED
+  ACCOUNT_SUSPENDED
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  RESTORE
+  LOGIN
+  LOGOUT
+  SUSPEND
+  REINSTATE
+  APPROVE
+  REJECT
+  PUBLISH
+  MFA_ENABLE
+  MFA_DISABLE
+}
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+model User {
+  id       String     @id @default(cuid())
+  /// citext: case-insensitive uniqueness at the database level, so "A@b.com"
+  /// and "a@b.com" cannot both exist. The previous system enforced this nowhere.
+  email    String     @unique @db.Citext
+  /// Argon2id. Null only for accounts provisioned by an admin who have not yet
+  /// set a password via the invite flow.
+  passwordHash String?
+  role     Role
+  status   UserStatus @default(PENDING_VERIFICATION)
+
+  name        String
+  phoneNumber String?
+  bio         String?
+
+  avatarUpload   Upload? @relation("UserAvatar", fields: [avatarUploadId], references: [id], onDelete: SetNull)
+  avatarUploadId String? @unique
+
+  // --- optional TOTP two-factor ---
+  /// AES-256-GCM ciphertext of the TOTP shared secret. Never leaves the server.
+  /// Non-null does NOT mean enabled — enrolment is only complete once the user
+  /// has proved one code and `totpEnabledAt` is set.
+  totpSecret     String?
+  totpEnabledAt  DateTime?
+  /// Highest TOTP counter already accepted, so a code cannot be replayed inside
+  /// its own validity window.
+  totpLastUsedCounter BigInt?
+
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  teacherProfile TeacherProfile?
+  studentProfile StudentProfile?
+
+  sessions      Session[]
+  recoveryCodes RecoveryCode[]
+  verifications Verification[]
+
+  coursesTaught     Course[]                  @relation("CourseTeacher")
+  enrollments       Enrollment[]              @relation("EnrollmentStudent")
+  enrollmentsDecided Enrollment[]             @relation("EnrollmentDecidedBy")
+  resourcesAuthored Resource[]                @relation("ResourceAuthor")
+  announcements     Announcement[]            @relation("AnnouncementAuthor")
+  comments          Comment[]                 @relation("CommentAuthor")
+  uploads           Upload[]                  @relation("UploadOwner")
+  conversations     ConversationParticipant[]
+  messages          Message[]                 @relation("MessageSender")
+  notifications     Notification[]
+  auditEvents       AuditEvent[]              @relation("AuditActor")
+
+  @@index([role, status])
+  @@index([status])
+  @@index([deletedAt])
+  @@index([createdAt])
+}
+
+model TeacherProfile {
+  id     String @id @default(cuid())
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String @unique
+
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  departmentId String
+
+  qualification  String
+  specialization String?
+  /// Employee/staff reference. Optional because admins provision teachers before
+  /// HR assigns one.
+  staffNo        String? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([departmentId])
+}
+
+model StudentProfile {
+  id     String @id @default(cuid())
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String @unique
+
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  departmentId String
+
+  enrollmentNo String   @unique
+  enrolledOn   DateTime @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([departmentId])
+}
+
+// ---------------------------------------------------------------------------
+// Sessions & credentials
+// ---------------------------------------------------------------------------
+
+/// Server-side opaque sessions. The cookie carries 32 random bytes; only the
+/// SHA-256 of that value is stored, so a database leak does not yield live
+/// sessions. Revocation is a DELETE, which is the whole point of not using JWTs.
+model Session {
+  id        String            @id @default(cuid())
+  tokenHash String            @unique
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  provenance SessionProvenance @default(PASSWORD)
+
+  /// Sliding window. Refreshed on use, capped by absoluteExpiresAt.
+  expiresAt         DateTime
+  /// Hard ceiling. Never extended.
+  absoluteExpiresAt DateTime
+
+  ip        String?
+  userAgent String?
+
+  createdAt  DateTime @default(now())
+  lastUsedAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/// Single-use TOTP recovery codes. Argon2id hashed, exactly like passwords —
+/// they are password-equivalent credentials.
+model RecoveryCode {
+  id       String    @id @default(cuid())
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId   String
+  codeHash String
+  usedAt   DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, usedAt])
+}
+
+/// Email verification and password reset. A `purpose` discriminator means a
+/// verification code can never be spent as a reset code — the previous system
+/// used one column pair for both.
+model Verification {
+  id      String              @id @default(cuid())
+  user    User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId  String
+  purpose VerificationPurpose
+
+  /// SHA-256 of the 6-digit code. Never stored in plaintext.
+  codeHash String
+  /// For EMAIL_CHANGE, the address being moved to.
+  payload  String?
+
+  expiresAt  DateTime
+  attempts   Int       @default(0)
+  consumedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, purpose])
+  @@index([expiresAt])
+}
+
+// ---------------------------------------------------------------------------
+// Academic structure
+// ---------------------------------------------------------------------------
+
+model Department {
+  id          String  @id @default(cuid())
+  name        String  @unique
+  slug        String  @unique
+  description String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  courses         Course[]
+  teacherProfiles TeacherProfile[]
+  studentProfiles StudentProfile[]
+
+  @@index([deletedAt])
+}
+
+model Course {
+  id          String  @id @default(cuid())
+  code        String  @unique
+  slug        String  @unique
+  name        String
+  description String?
+
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  departmentId String
+
+  teacher   User   @relation("CourseTeacher", fields: [teacherId], references: [id], onDelete: Restrict)
+  teacherId String
+
+  /// Structured duration. Never a free-text string like "6 months".
+  durationValue Int
+  durationUnit  DurationUnit
+
+  capacity Int
+  /// Denormalised count of APPROVED enrollments, maintained inside the approval
+  /// transaction. Guarded by CHECK (approved_count BETWEEN 0 AND capacity) so the
+  /// database refuses to oversell even if application code is wrong.
+  approvedCount Int @default(0)
+
+  startDate DateTime?
+  endDate   DateTime?
+
+  syllabusUpload   Upload? @relation("CourseSyllabus", fields: [syllabusUploadId], references: [id], onDelete: SetNull)
+  syllabusUploadId String? @unique
+
+  publishedAt DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  enrollments Enrollment[]
+  resources   Resource[]
+
+  @@index([departmentId])
+  @@index([teacherId])
+  @@index([publishedAt])
+  @@index([deletedAt])
+  @@index([departmentId, publishedAt])
+}
+
+model Enrollment {
+  id String @id @default(cuid())
+
+  student   User   @relation("EnrollmentStudent", fields: [studentId], references: [id], onDelete: Cascade)
+  studentId String
+
+  course   Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  courseId String
+
+  status EnrollmentStatus @default(PENDING)
+
+  requestedAt DateTime  @default(now())
+  decidedAt   DateTime?
+  /// Which teacher or admin approved/rejected. Kept even if they later leave.
+  decidedBy   User?     @relation("EnrollmentDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
+  decidedById String?
+  /// Shown to the student on rejection.
+  decisionNote String?
+
+  updatedAt DateTime @updatedAt
+
+  /// One enrollment row per (student, course), forever. A withdrawn student who
+  /// re-applies updates this row rather than creating a second one.
+  @@unique([studentId, courseId])
+  @@index([courseId, status])
+  @@index([studentId, status])
+  @@index([decidedById])
+}
+
+// ---------------------------------------------------------------------------
+// Content
+// ---------------------------------------------------------------------------
+
+/// First-class upload record. Stores the REAL object-store key, never a URL that
+/// a key must later be parsed back out of — parsing the key out of a URL is what
+/// made every delete in the previous system silently fail.
+model Upload {
+  id     String @id @default(cuid())
+  /// Server-generated: `${assetFolder}/${entity}/${ulid}${ext}`. Never the
+  /// client's filename.
+  key    String @unique
+  bucket String
+
+  /// Verified server-side with HeadObject after the browser's PUT completes.
+  contentType String
+  sizeBytes   Int
+  /// What the user called it. Display only; never used to build the key.
+  originalName String
+
+  status UploadStatus @default(PENDING)
+
+  owner   User   @relation("UploadOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  ownerId String
+
+  createdAt   DateTime  @default(now())
+  committedAt DateTime?
+
+  resource       Resource?
+  courseSyllabus Course?   @relation("CourseSyllabus")
+  userAvatar     User?     @relation("UserAvatar")
+
+  @@index([ownerId])
+  @@index([status, createdAt])
+}
+
+model Resource {
+  id          String       @id @default(cuid())
+  title       String
+  description String?
+  type        ResourceType
+
+  course   Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  courseId String
+
+  author   User   @relation("ResourceAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  authorId String
+
+  /// Exactly one of uploadId / externalUrl is set — enforced by CHECK in migration 0002.
+  upload      Upload? @relation(fields: [uploadId], references: [id], onDelete: SetNull)
+  uploadId    String? @unique
+  externalUrl String?
+
+  /// Public resources are readable by anonymous visitors. Private ones require an
+  /// APPROVED enrollment — enforced by the policy layer AND by the object store,
+  /// which never serves an unsigned request.
+  isPublic Boolean @default(false)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  comments Comment[]
+
+  @@index([courseId, createdAt])
+  @@index([authorId])
+  @@index([isPublic, deletedAt])
+  @@index([deletedAt])
+}
+
+model Announcement {
+  id      String           @id @default(cuid())
+  title   String
+  slug    String           @unique
+  content String
+  type    AnnouncementType
+
+  /// Required. The previous system's NewsEvent had no author relation at all.
+  author   User   @relation("AnnouncementAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  authorId String
+
+  /// The date the event happens (for EVENT), distinct from when the post went live.
+  eventDate   DateTime?
+  publishedAt DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  comments Comment[]
+
+  @@index([publishedAt])
+  @@index([type, publishedAt])
+  @@index([authorId])
+  @@index([deletedAt])
+}
+
+/// ONE comment table for both resources and announcements. The previous system
+/// had two near-identical tables, each with nullable teacherId AND studentId —
+/// four nullable columns expressing what one authorId expresses.
+///
+/// Exactly one of resourceId / announcementId is non-null, enforced by
+/// CHECK (num_nonnulls(resource_id, announcement_id) = 1) in migration 0002.
+model Comment {
+  id      String @id @default(cuid())
+  content String
+
+  author   User   @relation("CommentAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  authorId String
+
+  resource   Resource? @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  resourceId String?
+
+  announcement   Announcement? @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  announcementId String?
+
+  parent   Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  parentId String?
+  replies  Comment[] @relation("CommentReplies")
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([resourceId, createdAt])
+  @@index([announcementId, createdAt])
+  @@index([parentId])
+  @@index([authorId])
+  @@index([deletedAt])
+}
+
+// ---------------------------------------------------------------------------
+// Messaging
+// ---------------------------------------------------------------------------
+
+/// N participants, not a fixed (teacherId, studentId) pair. This is what makes
+/// admin participation possible at all — the previous schema physically could not
+/// seat an admin, which is why its admin chat shipped a "Feature Under
+/// Development" placeholder.
+model Conversation {
+  id      String  @id @default(cuid())
+  /// Null for direct conversations; set for named group threads.
+  title   String?
+  /// Monotonic high-water mark. Every message takes `nextSeq` and increments it
+  /// inside the same transaction, so ordering never depends on comparing cuids
+  /// or timestamps.
+  nextSeq BigInt  @default(1)
+
+  createdAt     DateTime @default(now())
+  lastMessageAt DateTime @default(now())
+
+  participants ConversationParticipant[]
+  messages     Message[]
+
+  @@index([lastMessageAt])
+}
+
+model ConversationParticipant {
+  id String @id @default(cuid())
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationId String
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  /// One timestamp per participant replaces per-message read rows entirely.
+  lastReadAt DateTime?
+  /// Highest seq this participant has seen. Unread count is a range query.
+  lastReadSeq BigInt   @default(0)
+
+  joinedAt DateTime  @default(now())
+  leftAt   DateTime?
+
+  @@unique([conversationId, userId])
+  @@index([userId, leftAt])
+}
+
+model Message {
+  id String @id @default(cuid())
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationId String
+
+  sender   User   @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  senderId String
+
+  /// Gap-free per conversation. Backfill after a reconnect is a range query on
+  /// this column, which is why offline recovery is exact rather than approximate.
+  seq BigInt
+
+  content String
+
+  /// Client-generated ULID. Unique per sender, so a retry after a timeout can
+  /// never double-post the same message.
+  clientMsgId String
+
+  createdAt DateTime  @default(now())
+  editedAt  DateTime?
+  deletedAt DateTime?
+
+  @@unique([conversationId, seq])
+  @@unique([senderId, clientMsgId])
+  @@index([conversationId, seq])
+  @@index([senderId])
+}
+
+// ---------------------------------------------------------------------------
+// Platform
+// ---------------------------------------------------------------------------
+
+model Notification {
+  id     String           @id @default(cuid())
+  user   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+  type   NotificationType
+
+  /// Denormalised render payload, so rendering a notification never needs a join
+  /// to a row that may since have been deleted.
+  payload Json
+
+  /// Where clicking it goes.
+  linkPath String?
+
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, readAt, createdAt])
+  @@index([createdAt])
+}
+
+/// Append-only. Written by a Prisma client extension in the data-access layer, so
+/// no service can forget to write one. Migration 0002 revokes UPDATE and DELETE
+/// on this table from the application role — the append-only property is enforced
+/// by Postgres, not by convention.
+model AuditEvent {
+  id String @id @default(cuid())
+
+  /// Null for system-initiated events (cron, queue workers).
+  actor   User?   @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  actorId String?
+
+  action     AuditAction
+  entityType String
+  entityId   String
+
+  /// Redacted diffs. Never contains password hashes, TOTP secrets, or tokens.
+  before Json?
+  after  Json?
+
+  ip        String?
+  userAgent String?
+  requestId String?
+
+  createdAt DateTime @default(now())
+
+  @@index([actorId, createdAt])
+  @@index([entityType, entityId, createdAt])
+  @@index([action, createdAt])
+  @@index([createdAt])
+}
