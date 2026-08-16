@@ -16,15 +16,20 @@ export type NotificationTypeValue = z.infer<typeof notificationTypeSchema>;
 
 /**
  * The payload is denormalised on write, so rendering a notification never joins to
- * a row that may since have been soft-deleted. `title` and `body` are the only
- * keys the SPA needs; anything else is type-specific context.
+ * a row that may since have been soft-deleted. `title` and `body` are the only keys
+ * the SPA needs, and they are the only two that reach it.
+ *
+ * Deliberately NOT `.catchall(z.unknown())`. `Notification.payload` is an
+ * unconstrained `Json` column written by other modules' side effects, so a passthrough
+ * would make every future producer free to denormalise a target's email address or a
+ * verification link into it and have that served to the client unfiltered. Extra
+ * context keys may be stored — they are simply stripped on the way out, which is what
+ * every other DTO in the system already does.
  */
-export const notificationPayloadSchema = z
-  .object({
-    title: z.string(),
-    body: z.string(),
-  })
-  .catchall(z.unknown());
+export const notificationPayloadSchema = z.object({
+  title: z.string(),
+  body: z.string(),
+});
 export type NotificationPayload = z.infer<typeof notificationPayloadSchema>;
 
 export const notificationSchema = z.object({

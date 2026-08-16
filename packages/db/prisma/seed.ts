@@ -1032,6 +1032,43 @@ async function seedNotifications(
     'COMMENT_REPLIED',
   ] as const;
 
+  /**
+   * `notificationPayloadSchema` requires `title` and `body` — they are the only two keys
+   * the SPA renders, and the payload is denormalised on write precisely so that rendering
+   * never joins to a row that may since have been soft-deleted.
+   *
+   * This seed used to write only the context keys, so every seeded row failed the
+   * response schema's `safeParse` and served `{title: '', body: ''}`: 147 notifications
+   * that existed, counted, and rendered blank.
+   */
+  const copyFor = (
+    type: (typeof STUDENT_TYPES)[number] | 'ENROLLMENT_REQUESTED',
+    courseName: string,
+  ): { title: string; body: string } => {
+    switch (type) {
+      case 'ENROLLMENT_APPROVED':
+        return { title: 'Enrolment approved', body: `You have a seat on ${courseName}.` };
+      case 'ENROLLMENT_REJECTED':
+        return {
+          title: 'Enrolment declined',
+          body: `Your request for ${courseName} was not approved.`,
+        };
+      case 'RESOURCE_PUBLISHED':
+        return { title: 'New resource', body: `Material was added to ${courseName}.` };
+      case 'ANNOUNCEMENT_PUBLISHED':
+        return { title: 'New announcement', body: `Your teacher posted in ${courseName}.` };
+      case 'MESSAGE_RECEIVED':
+        return { title: 'New message', body: `You have an unread message about ${courseName}.` };
+      case 'COMMENT_REPLIED':
+        return { title: 'New reply', body: `Someone replied to your comment in ${courseName}.` };
+      case 'ENROLLMENT_REQUESTED':
+        return {
+          title: 'Enrolment requests waiting',
+          body: `3 students applied to ${courseName}.`,
+        };
+    }
+  };
+
   let count = 0;
 
   for (const [i, student] of students.slice(0, 45).entries()) {
@@ -1044,7 +1081,7 @@ async function seedNotifications(
         userId: student.id,
         type,
         // Denormalised so rendering never joins to a row that may since have been deleted.
-        payload: { courseName: course.name, courseSlug: course.slug, actorName: 'Skillwright' },
+        payload: { ...copyFor(type, course.name), courseSlug: course.slug },
         linkPath: `/courses/${course.slug}`,
         readAt: rnd() > 0.55 ? at(-3, n) : null,
         createdAt: at(-6 + n, i % 12),
@@ -1060,7 +1097,7 @@ async function seedNotifications(
     const data = {
       userId: teacher.id,
       type: 'ENROLLMENT_REQUESTED' as const,
-      payload: { courseName: course.name, courseSlug: course.slug, pending: 3 },
+      payload: { ...copyFor('ENROLLMENT_REQUESTED', course.name), courseSlug: course.slug },
       linkPath: `/courses/${course.slug}/enrollments`,
       readAt: null,
       createdAt: at(-1, i),
