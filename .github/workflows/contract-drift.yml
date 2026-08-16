@@ -1,0 +1,110 @@
+name: Contract drift
+
+# The README claims that the database schema is the single source of truth and
+# that a column rename cannot silently reach production. That claim is worth
+# nothing unless something tries to break it on every push. This job does.
+#
+# It renames a column in the Prisma schema on a throwaway branch, regenerates the
+# client, and runs `pnpm -r typecheck`. A PASSING typecheck means the type chain
+# from Postgres to the SPA is broken somewhere — hand-written duplicate types,
+# an `any`, a `@ts-expect-error` — and this job fails to say so.
+#
+# Inverted assertion. Read the last step carefully before "fixing" it.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'packages/db/prisma/schema.prisma'
+      - 'packages/shared/**'
+      - 'apps/**'
+      - '.github/workflows/contract-drift.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: contract-drift-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '22'
+  PNPM_VERSION: '9'
+  TURBO_TELEMETRY_DISABLED: '1'
+  # The column that gets renamed. Chosen because it is read by the API, carried in
+  # a DTO, and rendered by the SPA — so it exercises the whole chain.
+  DRIFT_FIELD: capacity
+  DRIFT_REPLACEMENT: seatCeiling
+
+jobs:
+  prove-drift-breaks-the-build:
+    name: a column rename must break the build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Baseline — typecheck must pass BEFORE the rename
+        run: |
+          pnpm --filter @skillwright/db exec prisma generate
+          pnpm -r typecheck
+
+      # A scratch branch, never pushed. It exists so the mutation is a real commit
+      # in a real tree rather than an uncommitted edit that a tool might ignore.
+      - name: Create scratch branch
+        run: |
+          git config user.email "ci@example.invalid"
+          git config user.name "contract-drift"
+          git checkout -b contract-drift-probe
+
+      - name: Rename a column in the Prisma schema
+        run: |
+          SCHEMA=packages/db/prisma/schema.prisma
+          before=$(grep -c "\b${DRIFT_FIELD}\b" "$SCHEMA" || true)
+          if [ "$before" -eq 0 ]; then
+            echo "::error::'${DRIFT_FIELD}' no longer exists in $SCHEMA."
+            echo "Point DRIFT_FIELD at a column that is still read by the API and the SPA."
+            exit 1
+          fi
+          sed -i "s/\b${DRIFT_FIELD}\b/${DRIFT_REPLACEMENT}/g" "$SCHEMA"
+          echo "Renamed ${before} occurrence(s) of '${DRIFT_FIELD}' -> '${DRIFT_REPLACEMENT}'."
+          git --no-pager diff --stat
+          git commit -am "test: rename ${DRIFT_FIELD} to prove the type chain holds"
+
+      - name: Regenerate the Prisma client from the mutated schema
+        run: pnpm --filter @skillwright/db exec prisma generate
+
+      - name: Typecheck must now FAIL
+        run: |
+          set +e
+          pnpm -r typecheck
+          status=$?
+          set -e
+          echo "pnpm -r typecheck exited with ${status}"
+          if [ "$status" -eq 0 ]; then
+            echo "::error title=Contract drift::Renaming '${DRIFT_FIELD}' in the database schema did NOT break the build."
+            echo ""
+            echo "The type chain Postgres -> Prisma -> @skillwright/shared -> apps/api -> apps/web"
+            echo "is broken. Something between the schema and the SPA is hand-written,"
+            echo "cast to any, or suppressed with @ts-expect-error. Find it."
+            exit 1
+          fi
+          echo "Contract holds: a database rename breaks the build, as claimed."
+
+      - name: Discard the scratch branch
+        if: always()
+        run: |
+          git checkout -f - 2>/dev/null || true
+          git branch -D contract-drift-probe 2>/dev/null || true
