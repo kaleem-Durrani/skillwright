@@ -1,0 +1,48 @@
+{
+  "name": "@skillwright/shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Authorization policy and API shapes. The single source of truth both the API and the SPA compile against.",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./policy": {
+      "types": "./src/policy/index.ts",
+      "import": "./src/policy/index.ts",
+      "default": "./src/policy/index.ts"
+    },
+    "./schema": {
+      "types": "./src/schema/index.ts",
+      "import": "./src/schema/index.ts",
+      "default": "./src/schema/index.ts"
+    },
+    "./brand": {
+      "types": "./src/brand.ts",
+      "import": "./src/brand.ts",
+      "default": "./src/brand.ts"
+    }
+  },
+  "types": "./src/index.ts",
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@vitest/coverage-v8": "^2.1.8",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}
