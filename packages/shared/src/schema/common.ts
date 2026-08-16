@@ -1,7 +1,25 @@
 import { z } from 'zod';
 
-/** Every primary key in the schema is a cuid. */
-export const idSchema = z.string().cuid();
+/**
+ * Primary keys arrive from two generators, and both are legitimate:
+ *
+ *   - `@default(cuid())` in schema.prisma, for every row the application inserts
+ *     (`cmsvme3r703ucw4g0i6oyh6fh`).
+ *   - Deterministic ULIDs from `packages/db/prisma/seed.ts` (`01JGXDFAM0K2Z1GYCSNM5F5RCX`),
+ *     because a byte-identical reseed is what keeps screenshots and e2e assertions
+ *     valid across resets, and `cuid()` is random by design.
+ *
+ * This was `z.string().cuid()`, which accepted the first and rejected the second — so
+ * every response schema carrying an id turned into a 500 the moment it met seeded data,
+ * while the test suite stayed green because its fixtures insert through Prisma and get
+ * cuids. Validate the shape of both rather than asserting a uniformity that is not true.
+ */
+const CUID = /^c[^\s-]{8,}$/i;
+const ULID = /^[0-7][0-9ABCDEFGHJKMNPQRSTVWXYZ]{25}$/i;
+
+export const idSchema = z.string().refine((value) => CUID.test(value) || ULID.test(value), {
+  message: 'Expected a cuid or a ULID',
+});
 
 export const idParamSchema = z.object({ id: idSchema });
 export type IdParam = z.infer<typeof idParamSchema>;
