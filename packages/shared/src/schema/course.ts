@@ -57,6 +57,29 @@ export const courseDetailSchema = courseSummarySchema.extend({
 });
 export type CourseDetail = z.infer<typeof courseDetailSchema>;
 
+/**
+ * One row of the catalogue: the summary plus the two fields the browse screen renders
+ * on every card — the blurb, and whether the viewer has already applied.
+ *
+ * It is a THIRD schema rather than two more fields on `courseSummarySchema`, and the
+ * reason is `enrollmentSchema.course` (enrollment.ts:20): the summary is EMBEDDED in
+ * other DTOs. `viewerEnrollmentStatus` is relative to whoever is asking, and nested
+ * inside an enrollment — a row that already names its own student and status — it has
+ * no meaning at all; it would read as a second, contradictory status on the same
+ * record. A viewer-relative field belongs only to the top-level shape a viewer asked
+ * for, which is this one and `courseDetailSchema`.
+ *
+ * The enum is taken from `courseDetailSchema` rather than restated so the catalogue and
+ * the detail page can never drift apart. It cannot come from `enrollmentStatusSchema`
+ * (enrollment.ts:7-13) instead: enrollment.ts imports this file, so importing it back
+ * would be a cycle.
+ */
+export const courseListItemSchema = courseSummarySchema.extend({
+  description: z.string().nullable(),
+  viewerEnrollmentStatus: courseDetailSchema.shape.viewerEnrollmentStatus,
+});
+export type CourseListItem = z.infer<typeof courseListItemSchema>;
+
 const courseDatesRefinement = (
   body: { startDate?: string | null | undefined; endDate?: string | null | undefined },
   ctx: z.RefinementCtx,
