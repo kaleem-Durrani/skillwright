@@ -1,0 +1,593 @@
+/*
+ * Skillwright design tokens — three tiers, one direction of reference.
+ *
+ *   Tier 1  PRIMITIVES  raw ramps. No meaning. Never used directly in a component.
+ *   Tier 2  SEMANTIC    role names. THE ONLY TIER THAT IS REDEFINED FOR DARK.
+ *   Tier 3  COMPONENT   per-component knobs, expressed in tier-2 terms.
+ *
+ * Because dark mode only ever rewrites tier 2, a new component is automatically
+ * correct in both themes the moment it is written against semantic names. The
+ * previous system re-declared every colour per theme and drifted within a week.
+ *
+ * MOBILE FIRST: every value here is the value for the SMALLEST viewport.
+ * Media queries below only ever use min-width, and only ever ADD.
+ */
+
+/* ===========================================================================
+ * TIER 1 — PRIMITIVES
+ * `static` so the ramps survive tree-shaking: tier 2 references them through
+ * var(), which Tailwind's usage scanner cannot see.
+ * ======================================================================== */
+@theme static {
+  /* --- iron: neutral ramp, deliberately biased toward blue-steel so that
+     surfaces read as "workshop" rather than "generic SaaS grey". --- */
+  --color-iron-50: #f5f7f9;
+  --color-iron-100: #eaeef2;
+  --color-iron-200: #d3dae2;
+  --color-iron-300: #b2bdca;
+  --color-iron-400: #8996a8;
+  --color-iron-500: #67758a;
+  --color-iron-600: #505d70;
+  --color-iron-700: #414b5b;
+  --color-iron-800: #2c3441;
+  --color-iron-900: #1f2530;
+  --color-iron-950: #12161d;
+
+  /* --- ember: the brand accent. Hot metal. --- */
+  --color-ember-50: #fff5ed;
+  --color-ember-100: #ffe8d5;
+  --color-ember-200: #fecdaa;
+  --color-ember-300: #fdaa74;
+  --color-ember-400: #fb7d3c;
+  --color-ember-500: #f95c16;
+  --color-ember-600: #ea410c;
+  --color-ember-700: #c22e0c;
+  --color-ember-800: #9a2612;
+  --color-ember-900: #7c2212;
+  --color-ember-950: #430d07;
+
+  /* --- blueprint: informational / links / focus. --- */
+  --color-blueprint-50: #eef6ff;
+  --color-blueprint-100: #d9ecff;
+  --color-blueprint-200: #bcdeff;
+  --color-blueprint-300: #8ecaff;
+  --color-blueprint-400: #59acff;
+  --color-blueprint-500: #338bfd;
+  --color-blueprint-600: #1c6cf2;
+  --color-blueprint-700: #1556de;
+  --color-blueprint-800: #1846b4;
+  --color-blueprint-900: #1a3e8e;
+  --color-blueprint-950: #152656;
+
+  /* --- verdant: success / approved. --- */
+  --color-verdant-50: #f0fdf4;
+  --color-verdant-100: #dcfce7;
+  --color-verdant-200: #bbf7d0;
+  --color-verdant-300: #86efac;
+  --color-verdant-400: #4ade80;
+  --color-verdant-500: #22c55e;
+  --color-verdant-600: #16a34a;
+  --color-verdant-700: #15803d;
+  --color-verdant-800: #166534;
+  --color-verdant-900: #14532d;
+  --color-verdant-950: #052e16;
+
+  /* --- oxide: danger / rejected / destructive. Rust, not fire-engine red,
+     so it is never mistaken for the ember brand accent. --- */
+  --color-oxide-50: #fef3f2;
+  --color-oxide-100: #fee4e2;
+  --color-oxide-200: #fececa;
+  --color-oxide-300: #fcaca4;
+  --color-oxide-400: #f87a6e;
+  --color-oxide-500: #ef4f3f;
+  --color-oxide-600: #dc3220;
+  --color-oxide-700: #b92617;
+  --color-oxide-800: #991f16;
+  --color-oxide-900: #7f1f19;
+  --color-oxide-950: #450d08;
+
+  /* --- amber: warning / pending. Distinct hue from ember so a pending badge
+     is never read as a brand element. --- */
+  --color-amber-50: #fffbeb;
+  --color-amber-100: #fef3c7;
+  --color-amber-200: #fde68a;
+  --color-amber-300: #fcd34d;
+  --color-amber-400: #fbbf24;
+  --color-amber-500: #f59e0b;
+  --color-amber-600: #d97706;
+  --color-amber-700: #b45309;
+  --color-amber-800: #92400e;
+  --color-amber-900: #78350f;
+  --color-amber-950: #451a03;
+
+  /* --- typefaces. Self-hosted via @fontsource-variable, imported in globals.css.
+     No network font request is ever made. --- */
+  --font-display:
+    'Bricolage Grotesque Variable', 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', 'Cascadia Mono', monospace;
+
+  /* --- type scale. THESE ARE THE MOBILE SIZES. Larger viewports override the
+     display end of the ramp in the min-width block further down. --- */
+  --text-2xs: 0.6875rem; /* 11px — metadata only, never body copy */
+  --text-2xs--line-height: 1rem;
+  --text-2xs--letter-spacing: 0.01em;
+
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.125rem;
+  --text-xs--letter-spacing: 0.005em;
+
+  --text-sm: 0.8125rem;
+  --text-sm--line-height: 1.25rem;
+
+  --text-base: 0.9375rem; /* 15px reads better than 16 at 375px */
+  --text-base--line-height: 1.5rem;
+
+  --text-lg: 1.0625rem;
+  --text-lg--line-height: 1.625rem;
+
+  --text-xl: 1.1875rem;
+  --text-xl--line-height: 1.75rem;
+  --text-xl--letter-spacing: -0.01em;
+
+  --text-2xl: 1.375rem;
+  --text-2xl--line-height: 1.875rem;
+  --text-2xl--letter-spacing: -0.015em;
+
+  --text-3xl: 1.625rem;
+  --text-3xl--line-height: 2.125rem;
+  --text-3xl--letter-spacing: -0.02em;
+
+  --text-4xl: 2rem;
+  --text-4xl--line-height: 2.375rem;
+  --text-4xl--letter-spacing: -0.025em;
+
+  --text-5xl: 2.5rem;
+  --text-5xl--line-height: 2.75rem;
+  --text-5xl--letter-spacing: -0.03em;
+
+  /* --- radii --- */
+  --radius-xs: 0.25rem;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+  --radius-2xl: 1.25rem;
+  --radius-full: 9999px;
+
+  /* --- motion. Durations are short because this is a tool, not a showreel. --- */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-decelerate: cubic-bezier(0, 0, 0, 1);
+  --ease-accelerate: cubic-bezier(0.3, 0, 1, 1);
+  --ease-spring: cubic-bezier(0.34, 1.32, 0.64, 1);
+
+  /* --- named spacing on top of the 0.25rem ramp --- */
+  --spacing-gutter: 1rem; /* the mobile page gutter */
+  --spacing-tap: 2.75rem; /* 44px — the minimum touch target, full stop */
+}
+
+/* ===========================================================================
+ * TIER 2 — SEMANTIC (light is the base)
+ *
+ * `[data-theme-preview]` joins each selector list so a SUBTREE can be forced
+ * into a theme. That is what lets /design show light and dark side by side in
+ * one document — and it costs nothing, because it reuses the same declarations
+ * rather than adding a third copy of the palette.
+ * ======================================================================== */
+:root,
+[data-theme-preview='light'] {
+  /* surfaces */
+  --surface-canvas: var(--color-iron-50);
+  --surface-base: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-sunken: var(--color-iron-100);
+  --surface-overlay: #ffffff;
+  --surface-inverse: var(--color-iron-900);
+  --surface-hover: var(--color-iron-100);
+  --surface-active: var(--color-iron-200);
+  --surface-selected: var(--color-ember-50);
+  --surface-scrim: rgb(18 22 29 / 0.5);
+  --surface-skeleton: var(--color-iron-200);
+
+  /* text */
+  --text-primary: var(--color-iron-900);
+  --text-secondary: var(--color-iron-600);
+  --text-tertiary: var(--color-iron-500);
+  --text-disabled: var(--color-iron-400);
+  --text-inverse: var(--color-iron-50);
+  --text-brand: var(--color-ember-700);
+  --text-link: var(--color-blueprint-700);
+  --text-on-brand: #ffffff;
+  --text-on-status: #ffffff;
+
+  /* borders */
+  --border-subtle: var(--color-iron-200);
+  --border-default: var(--color-iron-300);
+  --border-strong: var(--color-iron-400);
+  --border-brand: var(--color-ember-500);
+  --border-focus: var(--color-blueprint-600);
+  --border-danger: var(--color-oxide-500);
+
+  /* brand */
+  --brand-solid: var(--color-ember-600);
+  --brand-solid-hover: var(--color-ember-700);
+  --brand-solid-active: var(--color-ember-800);
+  --brand-soft: var(--color-ember-100);
+  --brand-soft-hover: var(--color-ember-200);
+  --brand-on-soft: var(--color-ember-800);
+
+  /* status */
+  --status-success-solid: var(--color-verdant-600);
+  --status-success-soft: var(--color-verdant-100);
+  --status-success-text: var(--color-verdant-800);
+  --status-success-border: var(--color-verdant-300);
+
+  --status-warning-solid: var(--color-amber-500);
+  --status-warning-soft: var(--color-amber-100);
+  --status-warning-text: var(--color-amber-800);
+  --status-warning-border: var(--color-amber-300);
+
+  --status-danger-solid: var(--color-oxide-600);
+  --status-danger-soft: var(--color-oxide-100);
+  --status-danger-text: var(--color-oxide-800);
+  --status-danger-border: var(--color-oxide-300);
+
+  --status-info-solid: var(--color-blueprint-600);
+  --status-info-soft: var(--color-blueprint-100);
+  --status-info-text: var(--color-blueprint-800);
+  --status-info-border: var(--color-blueprint-300);
+
+  --status-neutral-solid: var(--color-iron-500);
+  --status-neutral-soft: var(--color-iron-100);
+  --status-neutral-text: var(--color-iron-700);
+  --status-neutral-border: var(--color-iron-300);
+
+  /* data visualisation — ordered for categorical use, hue-separated so the
+     series stay distinguishable in greyscale and for deuteranopia */
+  --viz-1: var(--color-ember-500);
+  --viz-2: var(--color-blueprint-600);
+  --viz-3: var(--color-verdant-600);
+  --viz-4: var(--color-amber-500);
+  --viz-5: var(--color-iron-500);
+  --viz-6: var(--color-oxide-500);
+  --viz-7: var(--color-blueprint-300);
+  --viz-8: var(--color-verdant-300);
+  --viz-grid: var(--color-iron-200);
+  --viz-axis: var(--color-iron-400);
+
+  /* elevation ingredients — the shadow COLOUR is semantic, the ladder is not */
+  --shadow-umbra: rgb(31 37 48 / 0.1);
+  --shadow-penumbra: rgb(31 37 48 / 0.06);
+  --shadow-ring: rgb(31 37 48 / 0.04);
+}
+
+/* Dark: SEMANTIC TIER ONLY. Two selectors, deliberately duplicated —
+   the media query serves the "system" default (nothing stamped) and the
+   attribute serves an explicit user choice. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --surface-canvas: var(--color-iron-950);
+    --surface-base: var(--color-iron-900);
+    --surface-raised: var(--color-iron-800);
+    --surface-sunken: #0c0f14;
+    --surface-overlay: var(--color-iron-800);
+    --surface-inverse: var(--color-iron-50);
+    --surface-hover: rgb(255 255 255 / 0.06);
+    --surface-active: rgb(255 255 255 / 0.11);
+    --surface-selected: rgb(249 92 22 / 0.14);
+    --surface-scrim: rgb(6 8 11 / 0.7);
+    --surface-skeleton: var(--color-iron-800);
+
+    --text-primary: var(--color-iron-50);
+    --text-secondary: var(--color-iron-300);
+    --text-tertiary: var(--color-iron-400);
+    --text-disabled: var(--color-iron-600);
+    --text-inverse: var(--color-iron-900);
+    --text-brand: var(--color-ember-300);
+    --text-link: var(--color-blueprint-300);
+    --text-on-brand: #ffffff;
+    --text-on-status: var(--color-iron-950);
+
+    --border-subtle: rgb(255 255 255 / 0.09);
+    --border-default: rgb(255 255 255 / 0.16);
+    --border-strong: rgb(255 255 255 / 0.28);
+    --border-brand: var(--color-ember-500);
+    --border-focus: var(--color-blueprint-400);
+    --border-danger: var(--color-oxide-400);
+
+    --brand-solid: var(--color-ember-500);
+    --brand-solid-hover: var(--color-ember-400);
+    --brand-solid-active: var(--color-ember-300);
+    --brand-soft: rgb(249 92 22 / 0.16);
+    --brand-soft-hover: rgb(249 92 22 / 0.24);
+    --brand-on-soft: var(--color-ember-200);
+
+    --status-success-solid: var(--color-verdant-500);
+    --status-success-soft: rgb(34 197 94 / 0.16);
+    --status-success-text: var(--color-verdant-300);
+    --status-success-border: rgb(34 197 94 / 0.35);
+
+    --status-warning-solid: var(--color-amber-400);
+    --status-warning-soft: rgb(245 158 11 / 0.16);
+    --status-warning-text: var(--color-amber-300);
+    --status-warning-border: rgb(245 158 11 / 0.35);
+
+    --status-danger-solid: var(--color-oxide-500);
+    --status-danger-soft: rgb(239 79 63 / 0.16);
+    --status-danger-text: var(--color-oxide-300);
+    --status-danger-border: rgb(239 79 63 / 0.35);
+
+    --status-info-solid: var(--color-blueprint-500);
+    --status-info-soft: rgb(51 139 253 / 0.16);
+    --status-info-text: var(--color-blueprint-300);
+    --status-info-border: rgb(51 139 253 / 0.35);
+
+    --status-neutral-solid: var(--color-iron-400);
+    --status-neutral-soft: rgb(255 255 255 / 0.08);
+    --status-neutral-text: var(--color-iron-300);
+    --status-neutral-border: rgb(255 255 255 / 0.16);
+
+    --viz-1: var(--color-ember-400);
+    --viz-2: var(--color-blueprint-400);
+    --viz-3: var(--color-verdant-400);
+    --viz-4: var(--color-amber-400);
+    --viz-5: var(--color-iron-400);
+    --viz-6: var(--color-oxide-400);
+    --viz-7: var(--color-blueprint-200);
+    --viz-8: var(--color-verdant-200);
+    --viz-grid: rgb(255 255 255 / 0.1);
+    --viz-axis: rgb(255 255 255 / 0.3);
+
+    --shadow-umbra: rgb(0 0 0 / 0.55);
+    --shadow-penumbra: rgb(0 0 0 / 0.4);
+    --shadow-ring: rgb(0 0 0 / 0.3);
+  }
+}
+
+:root[data-theme='dark'],
+[data-theme-preview='dark'] {
+  --surface-canvas: var(--color-iron-950);
+  --surface-base: var(--color-iron-900);
+  --surface-raised: var(--color-iron-800);
+  --surface-sunken: #0c0f14;
+  --surface-overlay: var(--color-iron-800);
+  --surface-inverse: var(--color-iron-50);
+  --surface-hover: rgb(255 255 255 / 0.06);
+  --surface-active: rgb(255 255 255 / 0.11);
+  --surface-selected: rgb(249 92 22 / 0.14);
+  --surface-scrim: rgb(6 8 11 / 0.7);
+  --surface-skeleton: var(--color-iron-800);
+
+  --text-primary: var(--color-iron-50);
+  --text-secondary: var(--color-iron-300);
+  --text-tertiary: var(--color-iron-400);
+  --text-disabled: var(--color-iron-600);
+  --text-inverse: var(--color-iron-900);
+  --text-brand: var(--color-ember-300);
+  --text-link: var(--color-blueprint-300);
+  --text-on-brand: #ffffff;
+  --text-on-status: var(--color-iron-950);
+
+  --border-subtle: rgb(255 255 255 / 0.09);
+  --border-default: rgb(255 255 255 / 0.16);
+  --border-strong: rgb(255 255 255 / 0.28);
+  --border-brand: var(--color-ember-500);
+  --border-focus: var(--color-blueprint-400);
+  --border-danger: var(--color-oxide-400);
+
+  --brand-solid: var(--color-ember-500);
+  --brand-solid-hover: var(--color-ember-400);
+  --brand-solid-active: var(--color-ember-300);
+  --brand-soft: rgb(249 92 22 / 0.16);
+  --brand-soft-hover: rgb(249 92 22 / 0.24);
+  --brand-on-soft: var(--color-ember-200);
+
+  --status-success-solid: var(--color-verdant-500);
+  --status-success-soft: rgb(34 197 94 / 0.16);
+  --status-success-text: var(--color-verdant-300);
+  --status-success-border: rgb(34 197 94 / 0.35);
+
+  --status-warning-solid: var(--color-amber-400);
+  --status-warning-soft: rgb(245 158 11 / 0.16);
+  --status-warning-text: var(--color-amber-300);
+  --status-warning-border: rgb(245 158 11 / 0.35);
+
+  --status-danger-solid: var(--color-oxide-500);
+  --status-danger-soft: rgb(239 79 63 / 0.16);
+  --status-danger-text: var(--color-oxide-300);
+  --status-danger-border: rgb(239 79 63 / 0.35);
+
+  --status-info-solid: var(--color-blueprint-500);
+  --status-info-soft: rgb(51 139 253 / 0.16);
+  --status-info-text: var(--color-blueprint-300);
+  --status-info-border: rgb(51 139 253 / 0.35);
+
+  --status-neutral-solid: var(--color-iron-400);
+  --status-neutral-soft: rgb(255 255 255 / 0.08);
+  --status-neutral-text: var(--color-iron-300);
+  --status-neutral-border: rgb(255 255 255 / 0.16);
+
+  --viz-1: var(--color-ember-400);
+  --viz-2: var(--color-blueprint-400);
+  --viz-3: var(--color-verdant-400);
+  --viz-4: var(--color-amber-400);
+  --viz-5: var(--color-iron-400);
+  --viz-6: var(--color-oxide-400);
+  --viz-7: var(--color-blueprint-200);
+  --viz-8: var(--color-verdant-200);
+  --viz-grid: rgb(255 255 255 / 0.1);
+  --viz-axis: rgb(255 255 255 / 0.3);
+
+  --shadow-umbra: rgb(0 0 0 / 0.55);
+  --shadow-penumbra: rgb(0 0 0 / 0.4);
+  --shadow-ring: rgb(0 0 0 / 0.3);
+}
+
+/* ===========================================================================
+ * TIER 3 — COMPONENT TOKENS
+ * Expressed purely in tier-2 terms, so they inherit dark mode for free.
+ * ======================================================================== */
+:root {
+  /* the non-negotiable minimum touch target */
+  --tap-min: 2.75rem;
+
+  /* controls */
+  --control-height-sm: var(--tap-min);
+  --control-height-md: var(--tap-min);
+  --control-height-lg: 3.25rem;
+  --control-radius: var(--radius-md);
+  --control-border: var(--border-default);
+  --control-bg: var(--surface-base);
+  --control-placeholder: var(--text-tertiary);
+  --control-invalid-border: var(--border-danger);
+  --control-focus-ring: 0 0 0 2px var(--surface-base), 0 0 0 4px var(--border-focus);
+
+  /* card */
+  --card-bg: var(--surface-base);
+  --card-border: var(--border-subtle);
+  --card-radius: var(--radius-lg);
+  --card-padding: 1rem;
+
+  /* app shell */
+  --shell-topbar-h: 3.5rem;
+  --shell-tabbar-h: 3.75rem;
+  --shell-sidebar-w: 15rem;
+  --shell-safe-top: env(safe-area-inset-top, 0px);
+  --shell-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --shell-safe-left: env(safe-area-inset-left, 0px);
+  --shell-safe-right: env(safe-area-inset-right, 0px);
+  --shell-gutter: 1rem;
+  --layout-measure: 42rem; /* prose measure */
+  --layout-wide: 80rem; /* the widest a content column ever gets */
+
+  /* elevation ladder */
+  --elevation-0: none;
+  --elevation-1: 0 1px 2px var(--shadow-ring);
+  --elevation-2: 0 1px 2px var(--shadow-ring), 0 2px 6px -1px var(--shadow-penumbra);
+  --elevation-3: 0 2px 4px var(--shadow-ring), 0 8px 20px -4px var(--shadow-umbra);
+  --elevation-4: 0 4px 8px var(--shadow-ring), 0 16px 40px -8px var(--shadow-umbra);
+
+  /* motion durations — mirrored numerically in src/lib/motion.ts */
+  --duration-instant: 80ms;
+  --duration-fast: 140ms;
+  --duration-normal: 220ms;
+  --duration-slow: 340ms;
+}
+
+/* Larger viewports ADD: the display end of the type ramp grows, the shell
+   gutter opens up. Base (mobile) values above are untouched. */
+@media (min-width: 48rem) {
+  :root {
+    --text-base: 1rem;
+    --text-base--line-height: 1.5rem;
+    --text-2xl: 1.5rem;
+    --text-2xl--line-height: 2rem;
+    --text-3xl: 1.875rem;
+    --text-3xl--line-height: 2.375rem;
+    --text-4xl: 2.375rem;
+    --text-4xl--line-height: 2.75rem;
+    --text-5xl: 3rem;
+    --text-5xl--line-height: 3.25rem;
+
+    --shell-gutter: 1.5rem;
+    --card-padding: 1.25rem;
+    --control-height-sm: 2.25rem;
+    --control-height-md: 2.5rem;
+  }
+}
+
+@media (min-width: 64rem) {
+  :root {
+    --text-4xl: 2.75rem;
+    --text-4xl--line-height: 3rem;
+    --text-5xl: 3.5rem;
+    --text-5xl--line-height: 3.75rem;
+
+    --shell-gutter: 2rem;
+    --shell-sidebar-w: 16.5rem;
+  }
+}
+
+/* ===========================================================================
+ * UTILITY MAPPING
+ * `inline` so the generated utilities emit `var(--surface-base)` rather than a
+ * frozen copy — that is what lets the theme flip at runtime with no re-render.
+ * ======================================================================== */
+@theme inline {
+  --color-canvas: var(--surface-canvas);
+  --color-surface: var(--surface-base);
+  --color-raised: var(--surface-raised);
+  --color-sunken: var(--surface-sunken);
+  --color-overlay: var(--surface-overlay);
+  --color-inverse: var(--surface-inverse);
+  --color-hover: var(--surface-hover);
+  --color-active: var(--surface-active);
+  --color-selected: var(--surface-selected);
+  --color-scrim: var(--surface-scrim);
+  --color-skeleton: var(--surface-skeleton);
+
+  --color-fg: var(--text-primary);
+  --color-fg-secondary: var(--text-secondary);
+  --color-fg-tertiary: var(--text-tertiary);
+  --color-fg-disabled: var(--text-disabled);
+  --color-fg-inverse: var(--text-inverse);
+  --color-fg-brand: var(--text-brand);
+  --color-fg-link: var(--text-link);
+  --color-fg-on-brand: var(--text-on-brand);
+  --color-fg-on-status: var(--text-on-status);
+
+  --color-line: var(--border-default);
+  --color-line-subtle: var(--border-subtle);
+  --color-line-strong: var(--border-strong);
+  --color-line-brand: var(--border-brand);
+  --color-line-focus: var(--border-focus);
+  --color-line-danger: var(--border-danger);
+
+  --color-brand: var(--brand-solid);
+  --color-brand-hover: var(--brand-solid-hover);
+  --color-brand-active: var(--brand-solid-active);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-soft-hover: var(--brand-soft-hover);
+  --color-brand-on-soft: var(--brand-on-soft);
+
+  --color-success: var(--status-success-solid);
+  --color-success-soft: var(--status-success-soft);
+  --color-success-fg: var(--status-success-text);
+  --color-success-line: var(--status-success-border);
+
+  --color-warning: var(--status-warning-solid);
+  --color-warning-soft: var(--status-warning-soft);
+  --color-warning-fg: var(--status-warning-text);
+  --color-warning-line: var(--status-warning-border);
+
+  --color-danger: var(--status-danger-solid);
+  --color-danger-soft: var(--status-danger-soft);
+  --color-danger-fg: var(--status-danger-text);
+  --color-danger-line: var(--status-danger-border);
+
+  --color-info: var(--status-info-solid);
+  --color-info-soft: var(--status-info-soft);
+  --color-info-fg: var(--status-info-text);
+  --color-info-line: var(--status-info-border);
+
+  --color-neutral: var(--status-neutral-solid);
+  --color-neutral-soft: var(--status-neutral-soft);
+  --color-neutral-fg: var(--status-neutral-text);
+  --color-neutral-line: var(--status-neutral-border);
+
+  --color-viz-1: var(--viz-1);
+  --color-viz-2: var(--viz-2);
+  --color-viz-3: var(--viz-3);
+  --color-viz-4: var(--viz-4);
+  --color-viz-5: var(--viz-5);
+  --color-viz-6: var(--viz-6);
+  --color-viz-7: var(--viz-7);
+  --color-viz-8: var(--viz-8);
+  --color-viz-grid: var(--viz-grid);
+  --color-viz-axis: var(--viz-axis);
+
+  --shadow-e1: var(--elevation-1);
+  --shadow-e2: var(--elevation-2);
+  --shadow-e3: var(--elevation-3);
+  --shadow-e4: var(--elevation-4);
+}

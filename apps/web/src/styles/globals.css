@@ -1,0 +1,294 @@
+/*
+ * Global stylesheet. Everything here is either (a) an element default that a
+ * component should not have to restate, or (b) a custom utility that encodes a
+ * layout rule we refuse to let drift.
+ *
+ * Fonts are self-hosted through @fontsource-variable. There is no Google Fonts
+ * link, no preconnect, no third-party request in the critical path.
+ */
+@import 'tailwindcss';
+
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/bricolage-grotesque';
+/* IBM Plex Mono has no variable cut on Fontsource, so the two weights the UI
+   actually uses are imported statically. Family name is 'IBM Plex Mono'. */
+@import '@fontsource/ibm-plex-mono/400.css';
+@import '@fontsource/ibm-plex-mono/600.css';
+
+@import './tokens.css';
+
+/*
+ * A `dark:` variant that agrees with the blocking script in index.html:
+ * "system" stamps nothing and falls to prefers-color-scheme; an explicit choice
+ * stamps data-theme and wins in BOTH directions.
+ * Components should almost never need this — the semantic tier already flipped.
+ * It exists for the handful of cases (illustrations, blend modes) that cannot be
+ * expressed as a colour token.
+ */
+@custom-variant dark {
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme='light']), :root:not([data-theme='light']) *) {
+      @slot;
+    }
+  }
+  &:where([data-theme='dark'], [data-theme='dark'] *) {
+    @slot;
+  }
+}
+
+/* ===========================================================================
+ * Base element styles
+ * ======================================================================== */
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+    /* NOTE: font-family is deliberately NOT set here. Setting it on `*` breaks
+       every element that legitimately inherits a different family — <code>,
+       <kbd>, form controls on iOS — and forces components to fight it back. */
+    border-color: var(--border-subtle);
+    min-inline-size: 0;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    /* Anchor scrolling must clear the sticky top bar. */
+    scroll-padding-block-start: calc(var(--shell-topbar-h) + var(--shell-safe-top) + 1rem);
+  }
+
+  body {
+    margin: 0;
+    min-block-size: 100dvh;
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: var(--text-base--line-height);
+    font-synthesis-weight: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    background-color: var(--surface-canvas);
+    color: var(--text-primary);
+    /* Stop iOS rubber-banding the shell behind the fixed tab bar. */
+    overscroll-behavior-y: none;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    color: var(--text-primary);
+    text-wrap: balance;
+    margin: 0;
+  }
+
+  p {
+    text-wrap: pretty;
+    margin: 0;
+  }
+
+  code,
+  kbd,
+  samp,
+  pre {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+  }
+
+  /* Inputs do not inherit the document family by default on any platform. */
+  input,
+  button,
+  textarea,
+  select {
+    font: inherit;
+    color: inherit;
+  }
+
+  /* iOS zooms the viewport when a focused control's text is under 16px. The
+     control tokens keep the rendered size legible; this stops the zoom. */
+  @supports (-webkit-touch-callout: none) {
+    input,
+    textarea,
+    select {
+      font-size: 1rem;
+    }
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  /* One focus treatment for the whole app. Never removed, only relocated. */
+  :focus-visible {
+    outline: 2px solid var(--border-focus);
+    outline-offset: 2px;
+    border-radius: var(--radius-xs);
+  }
+
+  ::selection {
+    background-color: var(--brand-soft);
+    color: var(--text-primary);
+  }
+
+  ::placeholder {
+    color: var(--control-placeholder);
+    opacity: 1;
+  }
+
+  img,
+  svg,
+  video,
+  canvas {
+    display: block;
+    inline-size: auto;
+    block-size: auto;
+  }
+
+  img,
+  video {
+    max-inline-size: 100%;
+  }
+
+  /* Respect the OS setting globally. Individual animations ALSO check this via
+     lib/motion.ts, because a Motion animation is JS, not CSS, and this rule
+     alone would not stop it. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* ===========================================================================
+ * Custom utilities
+ * Widths are capped with `inline-size: min(100%, …)`: one declaration, logical
+ * -property correct, and it keeps the whole codebase free of the `max-`
+ * vocabulary that the mobile-first lint rejects.
+ * ======================================================================== */
+
+/** The minimum touch target. Applied by every interactive primitive. */
+@utility tap {
+  min-block-size: var(--tap-min);
+  min-inline-size: var(--tap-min);
+}
+
+/** Readable prose column. */
+@utility measure {
+  inline-size: min(100%, var(--layout-measure));
+}
+
+/** The widest a content column is ever allowed to be, centred. */
+@utility wide {
+  inline-size: min(100%, var(--layout-wide));
+  margin-inline: auto;
+}
+
+/** Auth cards and single-field forms. */
+@utility narrow {
+  inline-size: min(100%, 26rem);
+  margin-inline: auto;
+}
+
+/** The page gutter, which grows at md/lg via the tier-3 token. */
+@utility gutter {
+  padding-inline: var(--shell-gutter);
+}
+
+/** Gutter that also clears a landscape notch. */
+@utility gutter-safe {
+  padding-inline-start: calc(var(--shell-gutter) + var(--shell-safe-left));
+  padding-inline-end: calc(var(--shell-gutter) + var(--shell-safe-right));
+}
+
+/** Clears the home indicator under a fixed bottom element. */
+@utility safe-bottom {
+  padding-block-end: var(--shell-safe-bottom);
+}
+
+/** Clears the status bar under a fixed top element. */
+@utility safe-top {
+  padding-block-start: var(--shell-safe-top);
+}
+
+/** Scroll a wide child (table, chart, code) without scrolling the page. */
+@utility scroll-x {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/** Momentum list that does not chain its scroll to the document. */
+@utility scroll-y {
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+}
+
+/** Skip link: off-screen until focused, then a real, tappable control. */
+@utility skip-link {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  z-index: 100;
+  transform: translateY(-120%);
+  transition: transform var(--duration-fast) var(--ease-standard);
+
+  &:focus-visible {
+    transform: translateY(calc(var(--shell-safe-top) + 0.5rem));
+  }
+}
+
+/** Visible to screen readers only, without display:none removing it. */
+@utility sr-only-focusable {
+  &:not(:focus):not(:focus-within) {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+/** The shimmer used by every Skeleton. Defined once so it never desynchronises. */
+@utility shimmer {
+  position: relative;
+  overflow: hidden;
+  background-color: var(--surface-skeleton);
+
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background-image: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.12), transparent);
+    animation: sw-shimmer 1.4s var(--ease-standard) infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    &::after {
+      animation: none;
+    }
+  }
+}
+
+@keyframes sw-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes sw-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
