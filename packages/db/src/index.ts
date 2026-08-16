@@ -1,4 +1,4 @@
-import { basePrisma } from './client.js';
+import { auditPrisma, basePrisma } from './client.js';
 import { auditExtension } from './audit.js';
 
 /**
@@ -6,8 +6,12 @@ import { auditExtension } from './audit.js';
  *
  * Every mutation of an audited model that passes through this handle writes an AuditEvent,
  * because the interception lives here rather than in the services that call it.
+ *
+ * The extension writes through `auditPrisma`, a second pool. Handing it `basePrisma` makes
+ * every interactive transaction hold one connection while asking for another from the same
+ * pool, which deadlocks at concurrency — see the comment on `createAuditClient`.
  */
-export const prisma = basePrisma.$extends(auditExtension(basePrisma));
+export const prisma = basePrisma.$extends(auditExtension(auditPrisma));
 
 /** The extended client's type, for anything that needs to accept it as a parameter. */
 export type Db = typeof prisma;
