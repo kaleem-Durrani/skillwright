@@ -11,9 +11,9 @@ calling `can()`. Nothing here was written by hand, which is why it cannot
 disagree with the code — and if it ever did, the `permissions-doc` job in CI
 would fail before the change could merge.
 
-- **44** actions, derived from the policy object's own keys
-- **176** cells in the role matrix
-- **220** cells in the state matrix
+- **45** actions, derived from the policy object's own keys
+- **180** cells in the role matrix
+- **225** cells in the state matrix
 - Asserted independently in `packages/shared/test/policy-matrix.test.ts`
 
 ## Reading a cell
@@ -57,6 +57,7 @@ rule reads named fields off `Subject` and denies when they are absent.
 | `course:update` | ✗ deny | ✗ deny | `ownsCourse` | ✓ allow |
 | `department:create` | ✗ deny | ✗ deny | ✗ deny | ✓ allow |
 | `department:delete` | ✗ deny | ✗ deny | ✗ deny | ✓ allow |
+| `department:list` | ✓ allow | ✓ allow | ✓ allow | ✓ allow |
 | `department:read` | ✗ deny | ✓ allow | ✓ allow | ✓ allow |
 | `department:update` | ✗ deny | ✗ deny | ✗ deny | ✓ allow |
 | `enrollment:approve` | ✗ deny | ✗ deny | `ownsCourse` | ✓ allow |
@@ -125,6 +126,7 @@ demo: reads and ordinary mutations pass, deletions and suspensions do not.
 | `course:update` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `department:create` | ✗ `TEACHER:deny` | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✗ `TEACHER:deny` |
 | `department:delete` | ✗ `TEACHER:deny` | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✗ `provenance:DEMO` |
+| `department:list` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `department:read` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `department:update` | ✗ `TEACHER:deny` | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✗ `TEACHER:deny` |
 | `enrollment:approve` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |

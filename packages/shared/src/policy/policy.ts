@@ -60,6 +60,7 @@ export type Action =
   | 'user:list'
   // department
   | 'department:read'
+  | 'department:list'
   | 'department:create'
   | 'department:update'
   | 'department:delete'
@@ -326,10 +327,29 @@ export const POLICY: PolicyTable = definePolicy({
   // Department
   // -------------------------------------------------------------------------
   'department:read': {
-    // The public catalogue embeds a `department` summary inside every course DTO,
-    // so the logged-out marketing pages never need this action. Keeping it closed
-    // holds the anonymous surface to the three read actions the contract names.
+    // The DETAIL view, which adds teacher and student head-counts. No logged-out
+    // visitor needs those, so this stays closed and `department:list` carries the
+    // public surface instead.
     anonymous: deny,
+    STUDENT: allow,
+    TEACHER: allow,
+    ADMIN: allow,
+  },
+  'department:list': {
+    /**
+     * Registration needs department names before a session can exist: the sign-up
+     * form's department select is required (`registerSchema.departmentId`) and is
+     * filled from `GET /departments` while logged out. Denying it did not protect
+     * anything — the same {id, name, slug} triple is already published inside every
+     * course DTO on the anonymous catalogue — it just made self-registration
+     * impossible.
+     *
+     * A separate action rather than opening `department:read`, because the two
+     * answers genuinely differ: names for a dropdown are public, head-counts are not.
+     * That distinction belongs in the matrix, where it is visible, rather than in a
+     * service branch, where it is not.
+     */
+    anonymous: allow,
     STUDENT: allow,
     TEACHER: allow,
     ADMIN: allow,
@@ -464,4 +484,55 @@ export const ACTIONS: readonly Action[] = Object.freeze(Object.keys(POLICY) as A
 /** Runtime membership test, for parsing an action name off the wire. */
 export function isAction(value: string): value is Action {
   return Object.prototype.hasOwnProperty.call(POLICY, value);
+}
+
+/**
+ * The actions whose answer does not depend on the subject.
+ *
+ * Every other action resolves, for at least one caller class, to a rule that reads a
+ * `Subject` field — and a rule that reads an absent field must deny. So asking
+ * `can(actor, action)` with no subject for anything NOT in this list is a guaranteed
+ * refusal dressed up as a permission check. That is not theoretical: gating a
+ * navigation entry on `course:read` deleted the Courses link for every student and
+ * teacher, and gating one on `conversation:read` deleted Messages for everyone
+ * including admins, silently, because a denial and a typo look identical at runtime.
+ *
+ * Anything that must decide without a subject — a nav destination, a "can this role
+ * use the feature at all" gate — may only use an action from here. The list is
+ * hand-written so it can be a TYPE; `policy-matrix.test.ts` recomputes it from the
+ * rules themselves and fails if the two disagree, so it cannot silently rot.
+ */
+export const SUBJECT_INDEPENDENT_ACTIONS = [
+  'course:create',
+  'announcement:create',
+  'comment:read',
+  'comment:create',
+  'user:list',
+  'department:read',
+  'department:list',
+  'department:create',
+  'department:update',
+  'department:delete',
+  'upload:presign',
+  'conversation:create',
+  'conversation:join',
+  'mfa:enroll',
+  'mfa:verify',
+  'mfa:disable',
+  'audit:read',
+] as const satisfies readonly Action[];
+
+export type SubjectIndependentAction = (typeof SUBJECT_INDEPENDENT_ACTIONS)[number];
+
+/** The rule names that ignore the subject entirely. */
+const SUBJECT_FREE_RULE_NAMES: ReadonlySet<string> = new Set(['allow', 'deny']);
+
+/** Recomputed from the rules, so the list above can be proved rather than trusted. */
+export function computeSubjectIndependentActions(): Action[] {
+  return ACTIONS.filter((action) => {
+    const entry = POLICY[action];
+    return (['anonymous', 'STUDENT', 'TEACHER', 'ADMIN'] as const).every((caller) =>
+      SUBJECT_FREE_RULE_NAMES.has(entry[caller].ruleName),
+    );
+  });
 }

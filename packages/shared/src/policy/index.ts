@@ -21,8 +21,14 @@ export {
   rule,
 } from './combinators.js';
 
-export type { Action, ActionRules, PolicyTable } from './policy.js';
-export { ACTIONS, POLICY, isAction } from './policy.js';
+export type { Action, ActionRules, PolicyTable, SubjectIndependentAction } from './policy.js';
+export {
+  ACTIONS,
+  POLICY,
+  SUBJECT_INDEPENDENT_ACTIONS,
+  computeSubjectIndependentActions,
+  isAction,
+} from './policy.js';
 
 export type { PolicyResult } from './can.js';
 export { PolicyError, allowed, assertCan, can } from './can.js';

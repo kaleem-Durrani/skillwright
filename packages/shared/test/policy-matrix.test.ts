@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   ACTIONS,
+  SUBJECT_INDEPENDENT_ACTIONS,
   can,
+  computeSubjectIndependentActions,
   type Action,
   type Actor,
   type Role,
@@ -704,7 +706,26 @@ const USER_CELLS: readonly Cell[] = [
 ];
 
 const DEPARTMENT_CELLS: readonly Cell[] = [
-  no('anonymous lists departments directly', ANON, 'department:read', 'anonymous:deny', DEPARTMENT),
+  no(
+    'anonymous reads department detail, with its head-counts',
+    ANON,
+    'department:read',
+    'anonymous:deny',
+    DEPARTMENT,
+  ),
+  // The sign-up dropdown. Public on purpose; the denials for this action come from
+  // the generated actor-state blocks below, which cover every action.
+  ok('anonymous lists departments to register', ANON, 'department:list', DEPARTMENT),
+  ok('student lists departments', STUDENT_IN, 'department:list', DEPARTMENT),
+  ok('teacher lists departments', TEACHER_A, 'department:list', DEPARTMENT),
+  ok('admin lists departments', ADMIN, 'department:list', DEPARTMENT),
+  no(
+    'a suspended account cannot even list departments',
+    SUSPENDED_STUDENT,
+    'department:list',
+    'status:SUSPENDED',
+    DEPARTMENT,
+  ),
   ok('student reads departments', STUDENT_IN, 'department:read', DEPARTMENT),
   ok('teacher reads departments', TEACHER_A, 'department:read', DEPARTMENT),
   ok('admin reads departments', ADMIN, 'department:read', DEPARTMENT),
@@ -952,7 +973,13 @@ const permissiveFor = (actor: Actor): Subject => ({
   participantIds: [actor.id],
 });
 
-const ANONYMOUS_ALLOWED: readonly Action[] = ['course:read', 'announcement:read', 'resource:read'];
+const ANONYMOUS_ALLOWED: readonly Action[] = [
+  'course:read',
+  'announcement:read',
+  'resource:read',
+  // Registration cannot happen without it — see the rule's comment in policy.ts.
+  'department:list',
+];
 
 const DESTRUCTIVE_ACTIONS: readonly Action[] = [
   'course:delete',
@@ -1007,7 +1034,7 @@ for (const [groupName, cells] of groups) {
 }
 
 describe('anonymous surface', () => {
-  it('is exactly three read actions, and no more', () => {
+  it('is exactly four actions, and no more', () => {
     const reachable = ACTIONS.filter((action) => can(null, action, PERMISSIVE_SUBJECT).allowed);
     expect([...reachable].sort()).toEqual([...ANONYMOUS_ALLOWED].sort());
   });
@@ -1224,5 +1251,50 @@ describe('matrix completeness', () => {
 
     expect(total).toBeGreaterThan(MATRIX.length);
     expect(ACTIONS.length).toBe(new Set(ACTIONS).size);
+  });
+});
+
+/**
+ * The list that stops a guard from being an off switch.
+ *
+ * A rule that reads an absent `Subject` field must deny, so `can(actor, action)` with
+ * no subject is a guaranteed refusal for every action outside this set. Gating a
+ * navigation entry on `course:read` deleted the Courses link for every student and
+ * teacher; gating one on `conversation:read` deleted Messages for everyone, admins
+ * included. Neither threw, neither logged, and both looked exactly like a correct
+ * denial.
+ *
+ * `SUBJECT_INDEPENDENT_ACTIONS` is hand-written so it can be a TYPE. This recomputes
+ * it from the rules themselves, so changing a cell from `allow` to `ownsCourse`
+ * without updating the list fails here rather than silently in a screen.
+ */
+describe('subject-independent actions', () => {
+  it('matches what the rules actually say', () => {
+    expect([...computeSubjectIndependentActions()].sort()).toEqual(
+      [...SUBJECT_INDEPENDENT_ACTIONS].sort(),
+    );
+  });
+
+  it('every one of them answers the same with and without a subject', () => {
+    const actors = [ADMIN, TEACHER_A, STUDENT_IN, ANON];
+    for (const action of SUBJECT_INDEPENDENT_ACTIONS) {
+      for (const actor of actors) {
+        const bare = can(actor, action);
+        const withSubject = can(actor, action, PERMISSIVE_SUBJECT);
+        expect(bare.allowed, `${actor?.role ?? 'anonymous'} / ${action}`).toBe(withSubject.allowed);
+      }
+    }
+  });
+
+  it('every action NOT in the list denies at least one role when asked bare', () => {
+    const independent = new Set<Action>(SUBJECT_INDEPENDENT_ACTIONS);
+    for (const action of ACTIONS) {
+      if (independent.has(action)) continue;
+      const bare = [ADMIN, TEACHER_A, STUDENT_IN].map((actor) => can(actor, action).allowed);
+      expect(
+        bare.some((allowed) => !allowed),
+        `${action} is bare-safe but unlisted`,
+      ).toBe(true);
+    }
   });
 });
