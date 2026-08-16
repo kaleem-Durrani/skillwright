@@ -1,0 +1,81 @@
+version: 2
+
+# Weekly, grouped, and deliberately quiet. Fifteen separate pull requests every
+# Monday is not supply-chain hygiene, it is a notification that gets muted — and a
+# muted notification is how a security patch sits unmerged for six weeks.
+
+updates:
+  - package-ecosystem: npm
+    directories:
+      - '/'
+      - '/apps/*'
+      - '/packages/*'
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    versioning-strategy: increase
+    commit-message:
+      prefix: 'chore(deps)'
+      prefix-development: 'chore(deps-dev)'
+    labels:
+      - dependencies
+    groups:
+      # Anything that can land without a human reading a changelog.
+      patch-and-minor:
+        applies-to: version-updates
+        update-types:
+          - patch
+          - minor
+      # Majors are grouped only so the list is readable; each still needs review.
+      major:
+        applies-to: version-updates
+        update-types:
+          - major
+      security:
+        applies-to: security-updates
+        patterns:
+          - '*'
+    ignore:
+      # Node's own types track the runtime, which is pinned by .nvmrc and the
+      # Dockerfile. Bumping them independently only produces noise.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
+
+  - package-ecosystem: github-actions
+    directory: '/'
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: Etc/UTC
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: 'chore(ci)'
+    labels:
+      - dependencies
+      - ci
+    groups:
+      actions:
+        patterns:
+          - '*'
+
+  - package-ecosystem: docker
+    directory: '/'
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: Etc/UTC
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: 'chore(docker)'
+    labels:
+      - dependencies
+      - docker
+    groups:
+      base-images:
+        patterns:
+          - '*'
