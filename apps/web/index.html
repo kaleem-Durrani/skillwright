@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- viewport-fit=cover is what makes env(safe-area-inset-*) resolve to real
+         numbers on notched devices; without it the bottom tab bar sits under the
+         home indicator. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f5f7f9" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#12161d" media="(prefers-color-scheme: dark)" />
+    <meta name="description" content="Skillwright — vocational training, permissions first." />
+    <title>Skillwright</title>
+
+    <!--
+      Blocking, deliberately. This runs before the first paint so the document is
+      never painted in the wrong theme and then corrected — that flash is the one
+      bug users notice on every single navigation.
+      "system" stamps NOTHING, so the prefers-color-scheme rules in tokens.css win.
+    -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('sw.theme');
+          var root = document.documentElement;
+          if (stored === 'dark' || stored === 'light') {
+            root.setAttribute('data-theme', stored);
+          } else {
+            root.removeAttribute('data-theme');
+          }
+          var dark =
+            stored === 'dark' ||
+            (stored !== 'light' &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches);
+          root.style.colorScheme = dark ? 'dark' : 'light';
+        } catch (e) {
+          /* private mode: fall through to the CSS default */
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
