@@ -1,19 +1,51 @@
-node_modules
-# Keep environment variables out of version control
+# dependencies
+node_modules/
+.pnp
+.pnp.*
+.yarn/*
+
+# build output
+dist/
+build/
+out/
+.turbo/
+*.tsbuildinfo
+
+# env & secrets
 .env
-issues.txt
-create-pages.js
-navigationDesignGuide.txt
-diagrams.txt
-sequence_diagrams.txt
-use_case_diagrams.txt
-component_diagram.txt
-system_context_diagram.txt
-FPP.docx
-Major_Features_List.txt
-Updated_FPP_Document.txt
-Simple_Features_List.txt
-Presentation_Features_Summary.txt
-FPP_Enhancement_Recommendations.txt
-features.txt
-api-discrepancies.txt
+.env.*
+!.env.example
+
+# test & coverage
+coverage/
+.nyc_output/
+playwright-report/
+test-results/
+blob-report/
+.playwright/
+
+# runtime & uploads
+uploads/
+tmp/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# working docs are local-only; ADRs, the generated permission matrix and the two
+# running logs ship — a progress log that vanishes on a fresh clone is useless
+docs/*
+!docs/adr/
+!docs/permissions.md
+!docs/PROGRESS.md
+!docs/LESSONS-LEARNED.md
+
+# editor & os
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
