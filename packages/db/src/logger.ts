@@ -10,9 +10,28 @@ type Level = 'debug' | 'info' | 'warn' | 'error';
 
 const LEVEL_ORDER: Record<Level, number> = { debug: 10, info: 20, warn: 30, error: 40 };
 
+/**
+ * The API validates LOG_LEVEL against pino's vocabulary, which is wider than the four
+ * levels above. Every accepted value is mapped here rather than ignored: `silent` used
+ * to miss the lookup and fall through to the default, so asking for no output produced
+ * the noisiest output there is. An unknown value still falls through — but only values
+ * `env.ts` already rejects can get that far.
+ */
+const SILENT = Number.POSITIVE_INFINITY;
+const THRESHOLDS: Record<string, number> = {
+  trace: LEVEL_ORDER.debug,
+  debug: LEVEL_ORDER.debug,
+  info: LEVEL_ORDER.info,
+  warn: LEVEL_ORDER.warn,
+  error: LEVEL_ORDER.error,
+  fatal: LEVEL_ORDER.error,
+  silent: SILENT,
+};
+
 function thresholdFromEnv(): number {
   const configured = process.env.LOG_LEVEL?.toLowerCase();
-  if (configured && configured in LEVEL_ORDER) return LEVEL_ORDER[configured as Level];
+  const mapped = configured === undefined ? undefined : THRESHOLDS[configured];
+  if (mapped !== undefined) return mapped;
   return process.env.NODE_ENV === 'production' ? LEVEL_ORDER.info : LEVEL_ORDER.debug;
 }
 
