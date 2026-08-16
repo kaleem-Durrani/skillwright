@@ -1,5 +1,6 @@
 import { createRoute, Outlet } from '@tanstack/react-router';
 import { motion } from 'motion/react';
+import { BRAND } from '@skillwright/shared/brand';
 import { useMotionKit } from '@/lib/motion';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { Route as rootRoute } from './__root.js';
@@ -31,7 +32,7 @@ function PublicLayout() {
         >
           SW
         </span>
-        <span className="font-display text-base font-semibold tracking-tight">Skillwright</span>
+        <span className="font-display text-base font-semibold tracking-tight">{BRAND.name}</span>
         <div className="flex-1" />
         <ThemeToggle />
       </header>
@@ -51,7 +52,7 @@ function PublicLayout() {
       </main>
 
       <footer className="gutter-safe safe-bottom pb-3 text-center text-2xs text-fg-tertiary">
-        Skillwright — vocational training, permissions first.
+        {BRAND.name} — vocational training, permissions first.
       </footer>
     </div>
   );

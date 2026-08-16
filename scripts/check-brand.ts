@@ -62,6 +62,17 @@ const NEVER_SCAN = [
 /** This file, relative to the repo root. It must be able to name the old brand. */
 const SELF = 'scripts/check-brand.ts';
 
+/**
+ * Files whose entire job is to record what happened. The old name is load-bearing in
+ * them: the backup bundle, the extracted secrets file and the pre-rewrite repository
+ * all carry it in their real on-disk paths, and a log that cannot name the path it is
+ * telling you about has stopped being a log.
+ *
+ * Exempt from the old-name rule ONLY. The product-name rule never reached them anyway,
+ * being scoped to workspace `src/` roots.
+ */
+const HISTORICAL_RECORDS = new Set(['NEXT.md', 'docs/PROGRESS.md', 'docs/LESSONS-LEARNED.md']);
+
 const TEXT_EXTENSIONS = new Set([
   '.ts',
   '.tsx',
@@ -157,12 +168,14 @@ function main(): number {
     const legacy = PENDING_DELETION.some((prefix) => file.startsWith(prefix));
 
     // Rule 2 — the old name, any casing, anywhere.
-    const oldHits = scan(
-      file,
-      new RegExp(OLD_PRODUCT_NAME, 'gi'),
-      'old-name',
-      'The previous product name must not survive anywhere in tracked source.',
-    );
+    const oldHits = HISTORICAL_RECORDS.has(file)
+      ? []
+      : scan(
+          file,
+          new RegExp(OLD_PRODUCT_NAME, 'gi'),
+          'old-name',
+          'The previous product name must not survive anywhere in tracked source.',
+        );
     if (legacy) {
       pendingDeletionHits += oldHits.length;
     } else {

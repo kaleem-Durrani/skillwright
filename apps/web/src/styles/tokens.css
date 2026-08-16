@@ -1,5 +1,5 @@
 /*
- * Skillwright design tokens — three tiers, one direction of reference.
+ * Design tokens — three tiers, one direction of reference.
  *
  *   Tier 1  PRIMITIVES  raw ramps. No meaning. Never used directly in a component.
  *   Tier 2  SEMANTIC    role names. THE ONLY TIER THAT IS REDEFINED FOR DARK.

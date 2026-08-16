@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { motion } from 'motion/react';
 import { ArrowLeft, Eye, EyeOff, GraduationCap, ShieldCheck, Users } from 'lucide-react';
 import type { Role } from '@skillwright/shared/policy';
+import { BRAND } from '@skillwright/shared/brand';
 import { ApiError } from '@/lib/problem';
 import { useDemoLogin, useLogin, useMfaVerify } from '@/lib/session';
 import { useMotionKit } from '@/lib/motion';
@@ -71,7 +72,7 @@ export function LoginPage() {
         </h1>
         <p className="text-sm text-fg-secondary">
           {step === 'credentials'
-            ? 'Use your Skillwright account, or take a demo account for a look around.'
+            ? `Use your ${BRAND.name} account, or take a demo account for a look around.`
             : 'Your password was accepted. One more step.'}
         </p>
       </div>

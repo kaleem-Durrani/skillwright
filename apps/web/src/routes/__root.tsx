@@ -3,6 +3,7 @@ import { TooltipProvider } from '@/components/ui/Tooltip';
 import { Toaster } from '@/components/ui/Toast';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Button } from '@/components/ui/Button';
+import { BRAND } from '@skillwright/shared/brand';
 import type { RouterContext } from '@/lib/guards';
 
 /**
@@ -31,7 +32,7 @@ function NotFound() {
         <EmptyState
           variant="no-results"
           title="Page not found"
-          description="That address does not match anything in Skillwright. It may have moved, or the link may be out of date."
+          description={`That address does not match anything in ${BRAND.name}. It may have moved, or the link may be out of date.`}
           action={
             <Button asChild block className="sm:w-auto">
               <Link to="/dashboard">Go to dashboard</Link>
