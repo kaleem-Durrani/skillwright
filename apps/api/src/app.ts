@@ -23,6 +23,15 @@ import csrfPlugin from './plugins/csrf.plugin.js';
 import authPlugin from './plugins/auth.plugin.js';
 import healthRoutes from './routes/health.js';
 import authRoutes from './modules/auth/auth.routes.js';
+import departmentsRoutes from './modules/departments/departments.routes.js';
+import coursesRoutes from './modules/courses/courses.routes.js';
+import enrollmentsRoutes from './modules/enrollments/enrollments.routes.js';
+import usersRoutes from './modules/users/users.routes.js';
+import conversationsRoutes from './modules/conversations/conversations.routes.js';
+import notificationsRoutes from './modules/notifications/notifications.routes.js';
+import dashboardRoutes from './modules/dashboard/dashboard.routes.js';
+import adminRoutes from './modules/admin/admin.routes.js';
+import auditRoutes from './modules/audit/audit.routes.js';
 
 /** Re-exported so route modules never spell the version prefix themselves. */
 export const API_PREFIX = API_BASE_PATH;
@@ -100,6 +109,16 @@ export async function buildApp(): Promise<AppInstance> {
 
   await app.register(healthRoutes);
   await app.register(authRoutes, { prefix: `${API_PREFIX}/auth` });
+  await app.register(departmentsRoutes, { prefix: `${API_PREFIX}/departments` });
+  await app.register(coursesRoutes, { prefix: `${API_PREFIX}/courses` });
+  await app.register(enrollmentsRoutes, { prefix: `${API_PREFIX}/enrollments` });
+  await app.register(usersRoutes, { prefix: `${API_PREFIX}/users` });
+  await app.register(conversationsRoutes, { prefix: `${API_PREFIX}/conversations` });
+  await app.register(notificationsRoutes, { prefix: `${API_PREFIX}/notifications` });
+  await app.register(dashboardRoutes, { prefix: `${API_PREFIX}/dashboard` });
+  await app.register(adminRoutes, { prefix: `${API_PREFIX}/admin` });
+  // `audit-events`, not `audit`: that is the path AdminOverview.tsx already calls.
+  await app.register(auditRoutes, { prefix: `${API_PREFIX}/audit-events` });
 
   await app.ready();
   return app;
