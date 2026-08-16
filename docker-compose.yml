@@ -11,8 +11,11 @@ services:
       # citext + pg_trgm are created by the initial Prisma migration
       POSTGRES_INITDB_ARGS: "--data-checksums"
     ports:
-      # 5433 on the host: a local Postgres already owns 5432 on this machine.
-      - "5433:5432"
+      # Host ports are overridable because a developer machine rarely has the
+      # defaults free. 5433 rather than 5432 is already the default here: a
+      # native Postgres owns 5432 on the machine this was built on, and binding
+      # it connects Prisma to the wrong database silently instead of failing.
+      - "${POSTGRES_PORT:-5433}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -26,7 +29,7 @@ services:
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis-data:/data
     healthcheck:
@@ -44,8 +47,8 @@ services:
       MINIO_ROOT_USER: skillwright
       MINIO_ROOT_PASSWORD: skillwright-dev-secret
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio-data:/data
     healthcheck:
@@ -73,8 +76,8 @@ services:
     image: axllent/mailpit:latest
     restart: unless-stopped
     ports:
-      - "1025:1025"
-      - "8025:8025"
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "${MAILPIT_UI_PORT:-8025}:8025"
     environment:
       MP_MAX_MESSAGES: 500
       MP_SMTP_AUTH_ACCEPT_ANY: 1
