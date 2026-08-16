@@ -70,6 +70,18 @@ const authPlugin: FastifyPluginAsync = async (app) => {
       throw emailNotVerified();
     }
 
+    /**
+     * A first factor without its second factor is not a session, and this is the only
+     * place that holds for every route. `can()` refuses MFA_PENDING too, but a route
+     * that legitimately skips `authorize()` — a list whose visibility is a WHERE clause
+     * rather than a subject decision — would otherwise inherit no provenance check at
+     * all and serve the half-authenticated caller everything their role can see.
+     * The same `/auth/` exemption as above, so `/auth/mfa/verify` stays reachable.
+     */
+    if (session.provenance === 'MFA_PENDING' && !request.url.startsWith(STATUS_EXEMPT_PREFIX)) {
+      throw mfaRequired();
+    }
+
     request.session = session;
     request.actor = toActor(session);
 
