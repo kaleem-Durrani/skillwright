@@ -1,0 +1,33 @@
+# Build output and caches
+dist/
+build/
+out/
+coverage/
+.turbo/
+*.tsbuildinfo
+
+# Dependencies and lockfiles
+node_modules/
+pnpm-lock.yaml
+package-lock.json
+
+# Generated
+packages/db/prisma/migrations/
+docs/permissions.md
+apps/web/src/routeTree.gen.ts
+**/*.gen.ts
+
+# Test output
+playwright-report/
+test-results/
+blob-report/
+
+# Planning docs, not shipped
+docs/rebuild/
+
+# Legacy trees pending deletion — reformatting them would bury the deletion diff
+backend/
+frontend/
+# The root tsconfig.json is the LEGACY backend's build config (rootDir: ./backend),
+# not the monorepo's — that is tsconfig.base.json. It goes when backend/ goes.
+/tsconfig.json
