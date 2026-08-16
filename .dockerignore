@@ -1,0 +1,63 @@
+# Everything the build stage would only have to delete again.
+# Note: pnpm-lock.yaml and pnpm-workspace.yaml MUST stay out of this file —
+# the deps stage copies them before anything else.
+
+# Dependencies — reinstalled from the lockfile inside the image
+node_modules
+**/node_modules
+
+# Build output and caches — rebuilt inside the image
+dist
+build
+out
+.turbo
+**/dist
+**/build
+**/.turbo
+*.tsbuildinfo
+
+# Version control and CI
+.git
+.gitignore
+.github
+.husky
+
+# Secrets and local state
+.env
+.env.*
+!.env.example
+uploads
+tmp
+
+# Tests, coverage and reports — the image ships neither
+coverage
+.nyc_output
+playwright-report
+test-results
+blob-report
+**/*.test.ts
+**/*.spec.ts
+**/e2e
+
+# Docs and planning
+docs
+*.md
+!README.md
+LICENSE
+
+# Legacy trees pending deletion
+backend
+frontend
+package-lock.json
+
+# Editor and OS
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+*.log
+
+# Container files themselves
+Dockerfile
+.dockerignore
+docker-compose.yml
