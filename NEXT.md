@@ -1,7 +1,6 @@
 # Next
 
-**Build the courses module in `apps/api/src/modules/courses` — `GET /api/v1/courses` paginated and policy-filtered, `POST /api/v1/courses`, and `PATCH /api/v1/courses/:id` guarded by `assertCan(actor, 'course:update', subject)` — then add `apps/api/test/courses.test.ts` asserting that a teacher cannot update another teacher's course.**
-
+**Render the app against the live API and walk the five golden paths by hand.** Start `pnpm dev`, sign in as `demo.student@skillwright.dev` / `demo-password-123`, and confirm each screen actually paints: catalogue with enrolment badges, course detail, messages (send one — that path was a 422 until today), notifications, settings save, and the admin console as `demo.admin@skillwright.dev`. Everything below is proved by tests and by `curl`; **no screen of this app has ever been rendered against a real API.** Write down what breaks before building anything new.
 ---
 
 ## Why this file exists
@@ -18,32 +17,33 @@ One sentence at the top of this file removes that cost. It is the first thing to
 
 ## Where things stand
 
-**Done:** the monorepo and Docker Compose stack; the Prisma schema with both migrations; `@skillwright/shared` (policy, Zod DTOs, brand) with the policy matrix green; the API's plugin layer (auth, CSRF, errors, logging, Prisma, Redis, rate limit) and the auth module including TOTP; the web design system and app shell; the CI pipeline with the brand check, the mobile-first check, the contract-drift job and the generated permission matrix; the eight ADRs.
+**Done and _running_:** the monorepo and the Compose stack; both migrations; the seed; `@skillwright/shared`; the API's plugin layer, auth with TOTP, and **all nine modules** the SPA calls — departments, courses, enrollments, users, conversations, notifications, dashboard, admin, audit-events; the web design system, app shell and every screen, now compiling against the shared schemas rather than hand-written guesses.
 
-**Not started:** courses, enrollments, resources, announcements, comments, conversations, uploads, notifications — and every screen that renders them.
+**Not started:** resources, announcements, comments and uploads — API and UI both. Realtime (socket.io) and BullMQ jobs are wired as dependencies but no code uses them yet.
 
-**Green — observed passing, not assumed:** `pnpm install` · `db:generate` · `typecheck` (5/5) · `build` (3/3) · `lint` (3/3) · `format:check` · `check:brand` · `check:mobile-first` · 577 policy tests (44 actions, 194 hand-written cells, 484 generated, 678 decisions proved).
+**Green — observed passing on 2026-08-16, not assumed:** `infra:up` · `db:deploy` · `db:seed` · API boot with `/readyz` green · live catalogue, department, enrolment, conversation, notification, dashboard, admin and audit reads against the seeded database, as both a student and an admin · a live anonymous registration · a credential scan across every endpoint returning clean · `typecheck` 5/5 · `lint` 3/3 · `build` 3/3 · **816 tests** (592 policy + 215 API + 9 web), including 200 concurrent approvals seating exactly 30 · `format:check` · `check:brand` · `check:mobile-first` · `docs:permissions --check`.
 
-**Never executed — no runtime evidence at all:** the API itself, both migrations, the seed, the audit extension, TOTP encryption, the Dockerfile, both CI workflows. Migration 0001 _was_ verified structurally against Prisma's own canonical DDL (295 vs 294 facts, 0 missing, 0 extra); migration 0002 has been read but never run.
+**Still never executed:** the `Dockerfile` and both CI workflows. Everything else in this repository has now run at least once.
 
-## Before anything else runs
-
-Docker Desktop is not running, so nothing touching Postgres, Redis, MinIO or Mailpit has ever executed. Start it, then:
+## Starting a session
 
 ```bash
-pnpm infra:up
-pnpm db:deploy   # first ever execution of migrations 0001 + 0002
-pnpm db:seed
-pnpm --filter @skillwright/api test   # 16 auth tests, all currently unverified
+pnpm infra:up     # Postgres, Redis, MinIO, Mailpit — exits 0 when all four are healthy
+pnpm dev          # infra:up, then turbo dev across api + web
 ```
 
-Postgres publishes on **5433**, not 5432 — a local Postgres install already owns 5432 on this machine.
+Postgres publishes on **5433**. Redis is on **6381** and MinIO on **9002/9003** _on this machine only_ — other projects' containers own the defaults and auto-start with Docker Desktop. The overrides live in the gitignored `.env`; `docker-compose.yml` defaults to the standard ports for anyone else. Mailpit's inbox is at http://localhost:8025.
+
+Tests run against a separate `skillwright_test` database, derived automatically from `DATABASE_URL`. The fixture **refuses to start** against any database whose name does not end in `_test`, because it deletes every user and department between files.
 
 ## Known conflicts to resolve
 
-- **`Resource` delete deadlock.** `Resource.uploadId` is `onDelete: SetNull`, but migration 0002 adds `CHECK (num_nonnulls("uploadId","externalUrl") = 1)`. Deleting an `Upload` that backs a resource nulls the column, the CHECK fails, and the DELETE aborts — so `SetNull` behaves as `Restrict` with a confusing error. Make the FK `Restrict` (honest) or relax the CHECK.
-- **Docker `dist` contract.** `apps/api` is `noEmit` + `tsx` because `shared`/`db` publish TypeScript source, but the `Dockerfile` `CMD` expects `node dist/main.js`.
-- **MFA enrolment UI is a stub.** `Settings.tsx` calls `/auth/mfa/enroll` and throws the response away — no QR rendered, `/auth/mfa/activate` never called, recovery codes never shown. Marked `TODO(mfa-ui)`.
+- **`Resource` delete deadlock.** `Resource.uploadId` is `onDelete: SetNull`, but migration 0002 adds `CHECK (num_nonnulls("uploadId","externalUrl") = 1)`. Deleting an `Upload` that backs a resource nulls the column, the CHECK fails, and the DELETE aborts — so `SetNull` behaves as `Restrict` with a confusing error. Make the FK `Restrict` (honest) or relax the CHECK. **Both migrations now apply cleanly, so this is a runtime conflict only — it bites on the first `Upload` delete, which has not happened yet.**
+- **Docker `dist` contract.** `apps/api` is `noEmit` + `tsx` because `shared`/`db` publish TypeScript source, but the `Dockerfile` `CMD` expects `node dist/main.js`. The image has still never been built.
+- **MFA enrolment UI is a stub.** `Settings.tsx` calls `/auth/mfa/enroll` and throws the response away — no QR rendered, `/auth/mfa/activate` never called, recovery codes never shown. Marked `TODO(mfa-ui)`. The API side is proven: the TOTP enrol → activate → gated login → disable test passes.
+- **`packages/db/.env.example` still says port 5432** while everything else says 5433. A fresh clone that copies it connects to the wrong Postgres.
+- **`apps/web/tsconfig.json` does not extend `tsconfig.base.json`.** It redeclares every option and sets `exactOptionalPropertyTypes: false`, omitting `noUncheckedIndexedAccess` — so the workspace with the most code is the one not held to the repo's strict standard. Closing it is a decision, not a defect; measure the fallout first.
+- **`apps/web/src/lib/api.ts` hand-declares `PaginationMeta`, `Paginated<T>` and `CursorPage<T>`** while `packages/shared/src/schema/pagination.ts` defines them. `CursorPage<T>` is wrong — it says `{ data, nextCursor }`, the wire sends `{ data, meta: { nextCursor, hasMore } }`. Nothing imports it yet, so it is a trap rather than a live bug.
 
 ## Credentials
 
