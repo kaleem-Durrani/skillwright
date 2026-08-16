@@ -2,11 +2,35 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { Plus, Search } from 'lucide-react';
-import { api, type Paginated } from '@/lib/api';
+/*
+ * The page envelope comes from the package that DEFINES it. `@/lib/api` keeps a
+ * hand-written copy of `Paginated` (api.ts:110-127) — a type the schema already
+ * describes, which CONTRIBUTING.md:51 makes an automatic send-back. The API
+ * validates this response against `paginated(...)` (pagination.ts:41-43) before it
+ * sends it, so inferring from there is the only version that cannot drift.
+ *
+ * Type-only, so the specifier erases at build time and pulls no zod into the bundle.
+ */
+import type { Paginated } from '@skillwright/shared/schema';
+import { api } from '@/lib/api';
 import { qk } from '@/lib/query';
 import { usePolicy } from '@/lib/policy';
 import { formatDuration } from '@/lib/format';
-import type { CourseSummary } from '@/lib/types';
+/*
+ * The catalogue row is `CourseListItem`, NOT `CourseSummary`.
+ *
+ * `GET /courses` serves `paginated(courseListItemSchema)` (courses.routes.ts:49-58):
+ * every field of the summary plus `description` and `viewerEnrollmentStatus`
+ * (course.ts:77-81). Those two are what the cards below render — the blurb, and the
+ * chip that tells a student which courses they have already applied to.
+ *
+ * They are a third schema rather than two more fields on `courseSummarySchema`
+ * because the summary is embedded as `enrollmentSchema.course`, where a
+ * viewer-relative status would read as a second, contradictory status on a row that
+ * already has one. Naming `CourseSummary` here would therefore be a lie in both
+ * directions: too narrow for this response, and unfixable at its own definition.
+ */
+import type { CourseListItem } from '@/lib/types';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/Button';
 import { Card, CardTitle } from '@/components/ui/Card';
@@ -41,13 +65,16 @@ export function CoursesPage() {
   const courses = useQuery({
     queryKey: qk.courses(search),
     queryFn: () =>
-      api.get<Paginated<CourseSummary>>('/courses', {
+      api.get<Paginated<CourseListItem>>('/courses', {
         query: {
           page: search.page,
           limit: 20,
           q: search.q,
           departmentId: search.departmentId,
-          status: search.status,
+          // The URL says `status=published|draft`; the endpoint takes `published`
+          // (listCoursesQuerySchema, course.ts:141-154) and its zod object STRIPS
+          // anything else, so sending `status` filtered nothing and failed silently.
+          ...(search.status ? { published: search.status === 'published' } : {}),
         },
       }),
     // Keeps the previous page on screen while the next one loads instead of
@@ -124,18 +151,18 @@ export function CoursesPage() {
           {
             id: 'department',
             header: 'Department',
-            cell: (course) => course.departmentName,
+            cell: (course) => course.department.name,
           },
           {
             id: 'teacher',
             header: 'Teacher',
-            cell: (course) => course.teacherName,
+            cell: (course) => course.teacher.name,
             secondary: true,
           },
           {
             id: 'duration',
             header: 'Duration',
-            cell: (course) => formatDuration(course.durationValue, course.durationUnit),
+            cell: (course) => formatDuration(course.duration.value, course.duration.unit),
             secondary: true,
           },
           {
@@ -179,7 +206,7 @@ export function CoursesPage() {
               )}
             </div>
             <p className="text-xs text-fg-tertiary">
-              {course.code} · {course.departmentName}
+              {course.code} · {course.department.name}
             </p>
             <p className="line-clamp-2 text-sm text-fg-secondary">
               {course.description ?? 'No description yet.'}
@@ -187,12 +214,12 @@ export function CoursesPage() {
             <dl className="flex flex-wrap gap-x-4 gap-y-1 pt-1 text-xs text-fg-tertiary">
               <div className="flex gap-1">
                 <dt>Teacher:</dt>
-                <dd className="text-fg-secondary">{course.teacherName}</dd>
+                <dd className="text-fg-secondary">{course.teacher.name}</dd>
               </div>
               <div className="flex gap-1">
                 <dt>Duration:</dt>
                 <dd className="text-fg-secondary">
-                  {formatDuration(course.durationValue, course.durationUnit)}
+                  {formatDuration(course.duration.value, course.duration.unit)}
                 </dd>
               </div>
               <div className="flex gap-1">

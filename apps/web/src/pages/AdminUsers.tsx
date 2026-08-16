@@ -6,7 +6,7 @@ import { api, type Paginated } from '@/lib/api';
 import { qk } from '@/lib/query';
 import { subject, usePolicy } from '@/lib/policy';
 import { formatRelative } from '@/lib/format';
-import type { UserSummary } from '@/lib/types';
+import type { UserDetail } from '@/lib/types';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Avatar } from '@/components/ui/Avatar';
 import { Badge } from '@/components/ui/Badge';
@@ -28,6 +28,35 @@ import { toast } from '@/components/ui/Toast';
 import { ROLE_LABEL } from '@/components/layout/nav';
 import { Route } from '@/routes/_app/admin.users';
 
+/**
+ * There is no top-level department on a person. `User` has no `departmentId`
+ * column (users.service.ts:31-36) — membership hangs off whichever profile the
+ * account has, and an ADMIN has neither — so `userDetailSchema` nests it as
+ * `teacherProfile.departmentName` / `studentProfile.departmentName`, both nullable
+ * (user.ts:30-45, :64-65). The old `entry.departmentName` read a field no endpoint
+ * has ever served, which is why this column rendered an em dash for every row.
+ */
+function departmentNameOf(user: UserDetail): string | null {
+  return user.teacherProfile?.departmentName ?? user.studentProfile?.departmentName ?? null;
+}
+
+/**
+ * The policy Subject for a `user:*` decision, built to match the SERVER's byte for
+ * byte: `users.routes.ts:51-53` passes `{ userId: idOf(request) }`.
+ *
+ * WHY it is not a spread of the row. `isSelf` matches on `Subject.userId` and denies
+ * when it is absent rather than defaulting to the actor (combinators.ts:46-49). A
+ * user DTO carries `id`, never `userId`, so a spread left `userId` undefined,
+ * `isSelf` false and — because `user:suspend` for ADMIN is `not(isSelf)`
+ * (policy.ts:312-318) — the check came back TRUE for an admin acting on their own
+ * account. The SPA offered "Suspend account" against yourself and the API refused
+ * it. The spread also drags `teacherProfile` / `studentProfile` into a Subject that
+ * has no such fields.
+ */
+function userSubject(user: Pick<UserDetail, 'id'>) {
+  return subject({ userId: user.id });
+}
+
 export function AdminUsersPage() {
   const search = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
@@ -35,13 +64,26 @@ export function AdminUsersPage() {
   const client = useQueryClient();
 
   const [term, setTerm] = useState(search.q ?? '');
-  const [suspending, setSuspending] = useState<UserSummary | null>(null);
+  const [suspending, setSuspending] = useState<UserDetail | null>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
       if ((search.q ?? '') === term) return;
       void navigate({
-        search: (previous) => ({ ...previous, q: term || undefined, page: 1 }),
+        // `q` is OPTIONAL on AdminUsersSearch, so an empty box means the key is
+        // ABSENT, not present-and-undefined — `{ ...previous, q: undefined }` is a
+        // different type and does not compile under exactOptionalPropertyTypes.
+        // Drop the old value by destructuring it away, then spread the new one back
+        // in only when there is one. That is the same conditional-spread idiom this
+        // route's own `validateSearch` uses to build the object
+        // (routes/_app/admin.users.tsx:18-25), so both halves agree on what "no
+        // filter" looks like — and it keeps `?q=` out of the URL entirely rather
+        // than serialising an empty one.
+        search: ({ q: _clearedQ, ...previous }) => ({
+          ...previous,
+          ...(term ? { q: term } : {}),
+          page: 1,
+        }),
         replace: true,
       });
     }, 300);
@@ -51,7 +93,9 @@ export function AdminUsersPage() {
   const users = useQuery({
     queryKey: qk.users(search),
     queryFn: () =>
-      api.get<Paginated<UserSummary>>('/users', {
+      // `GET /users` serves `paginated(userDetailSchema)` (users.routes.ts:75), and
+      // deliberately so: the summary is four fields and cannot draw this table.
+      api.get<Paginated<UserDetail>>('/users', {
         query: {
           page: search.page,
           limit: 20,
@@ -64,7 +108,10 @@ export function AdminUsersPage() {
   });
 
   const suspend = useMutation({
-    mutationFn: (id: string) => api.post<void>(`/users/${id}/suspend`),
+    // The route answers 200 with the updated `userDetailSchema` row
+    // (users.routes.ts:152); nothing here reads it, but the declared type is the
+    // served one so it cannot quietly become a lie.
+    mutationFn: (id: string) => api.post<UserDetail>(`/users/${id}/suspend`),
     onSuccess: async () => {
       setSuspending(null);
       toast.success('Account suspended', {
@@ -132,7 +179,7 @@ export function AdminUsersPage() {
           {
             id: 'department',
             header: 'Department',
-            cell: (entry) => entry.departmentName ?? '—',
+            cell: (entry) => departmentNameOf(entry) ?? '—',
             secondary: true,
           },
           {
@@ -153,27 +200,30 @@ export function AdminUsersPage() {
             cell: (entry) => <RowMenu user={entry} onSuspend={() => setSuspending(entry)} />,
           },
         ]}
-        renderCard={(entry) => (
-          <Card className="flex flex-col gap-3">
-            <div className="flex items-start gap-3">
-              <Avatar name={entry.name} src={entry.avatarUrl} size="md" />
-              <div className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate text-sm font-medium">{entry.name}</span>
-                <span className="truncate text-xs text-fg-tertiary">{entry.email}</span>
+        renderCard={(entry) => {
+          const department = departmentNameOf(entry);
+          return (
+            <Card className="flex flex-col gap-3">
+              <div className="flex items-start gap-3">
+                <Avatar name={entry.name} src={entry.avatarUrl} size="md" />
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate text-sm font-medium">{entry.name}</span>
+                  <span className="truncate text-xs text-fg-tertiary">{entry.email}</span>
+                </div>
+                <RowMenu user={entry} onSuspend={() => setSuspending(entry)} />
               </div>
-              <RowMenu user={entry} onSuspend={() => setSuspending(entry)} />
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge tone="neutral" size="sm">
-                {ROLE_LABEL[entry.role]}
-              </Badge>
-              <StatusChip status={entry.status} size="sm" />
-              {entry.departmentName ? (
-                <span className="text-2xs text-fg-tertiary">{entry.departmentName}</span>
-              ) : null}
-            </div>
-          </Card>
-        )}
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge tone="neutral" size="sm">
+                  {ROLE_LABEL[entry.role]}
+                </Badge>
+                <StatusChip status={entry.status} size="sm" />
+                {department ? (
+                  <span className="text-2xs text-fg-tertiary">{department}</span>
+                ) : null}
+              </div>
+            </Card>
+          );
+        }}
         empty={
           isFiltered ? (
             <EmptyState
@@ -230,7 +280,7 @@ export function AdminUsersPage() {
                 className="sm:w-auto"
                 loading={suspend.isPending}
                 disabled={
-                  !policy.can('user:suspend', suspending ? subject({ ...suspending }) : undefined)
+                  !policy.can('user:suspend', suspending ? userSubject(suspending) : undefined)
                 }
                 onClick={() => suspending && suspend.mutate(suspending.id)}
               >
@@ -249,9 +299,9 @@ export function AdminUsersPage() {
   );
 }
 
-function RowMenu({ user, onSuspend }: { user: UserSummary; onSuspend: () => void }) {
+function RowMenu({ user, onSuspend }: { user: UserDetail; onSuspend: () => void }) {
   const policy = usePolicy();
-  const target = subject({ ...user });
+  const target = userSubject(user);
 
   const canSuspend = policy.can('user:suspend', target) && user.status !== 'SUSPENDED';
   const canUpdate = policy.can('user:update', target);

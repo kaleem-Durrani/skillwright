@@ -1,14 +1,26 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, SendHorizonal } from 'lucide-react';
+import { ulid } from 'ulid';
+/*
+ * The two response envelopes, taken from the package that DEFINES them.
+ *
+ * `@/lib/api` carries its own copies, and the cursor one is wrong: `CursorPage<T>` is
+ * `{ data, nextCursor }` while the endpoint sends `{ data, meta: { nextCursor, hasMore } }`
+ * (pagination.ts:88-95, bound at conversations.routes.ts:81). Importing the shared
+ * declarations is the same rule the rest of this file now follows — CONTRIBUTING.md:51,
+ * "a type hand-written on the client that the schema already describes".
+ *
+ * Type-only, so this specifier erases at build time and pulls no zod into the bundle.
+ */
+import type { CursorPaginated, Paginated } from '@skillwright/shared/schema';
 import { api } from '@/lib/api';
 import { qk } from '@/lib/query';
 import { cn } from '@/lib/cn';
-import { usePolicy } from '@/lib/policy';
 import { useSession } from '@/lib/session';
 import { formatRelative, formatTime } from '@/lib/format';
-import type { ConversationSummary, MessageRecord } from '@/lib/types';
+import type { ConversationDto, MessageDto, ParticipantDto, SendMessageInput } from '@/lib/types';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button, IconButton } from '@/components/ui/Button';
@@ -31,12 +43,32 @@ import { Route } from '@/routes/_app/messages';
 export function MessagesPage() {
   const { conversationId } = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
-  const policy = usePolicy();
+  // Needed to answer "which of these participants is not me" — see `counterparts`.
+  const { user } = useSession();
 
+  /*
+   * No `enabled: policy.can('conversation:read')` here, deliberately — the client-side
+   * mirror of the argument conversations.routes.ts:31-46 makes on the server.
+   *
+   * `conversation:read` is `isParticipant` for all three roles (policy.ts:397-404), and
+   * `isParticipant` reads `Subject.participantIds` (combinators.ts:82-85). A
+   * cross-conversation LIST has no single subject to pass, and `can()` substitutes
+   * EMPTY_SUBJECT when the third argument is omitted (can.ts:53) — a rule that reads an
+   * absent field must deny, so the subject-free call was false for EVERY user, admins
+   * included. That is not a hidden button: an `enabled: false` query stays
+   * `status: 'pending'` in React Query v5, so `conversations.isPending` never cleared and
+   * this pane rendered its skeleton forever for all three roles.
+   *
+   * GET /conversations is authentication-gated and the policy is already a WHERE clause
+   * there (`visibilityWhere`, mirroring policy.ts:397-404 row for row), so the rows that
+   * arrive are exactly the threads this actor is seated in. Just run the query.
+   *
+   * A subject-free `can()` is only correct for an action that is subject-INDEPENDENT for
+   * every role — a bare allow/deny, e.g. 'conversation:create' (policy.ts:405-410).
+   */
   const conversations = useQuery({
     queryKey: qk.conversations,
-    queryFn: () => api.get<{ data: ConversationSummary[] }>('/conversations'),
-    enabled: policy.can('conversation:read'),
+    queryFn: () => api.get<Paginated<ConversationDto>>('/conversations'),
     refetchInterval: 30_000,
   });
 
@@ -70,50 +102,69 @@ export function MessagesPage() {
             />
           ) : (
             <ul className="flex flex-col gap-2">
-              {conversations.data?.data.map((conversation) => (
-                <li key={conversation.id}>
-                  <button
-                    type="button"
-                    onClick={() => open(conversation.id)}
-                    aria-current={conversation.id === conversationId ? 'true' : undefined}
-                    className={cn(
-                      'flex tap w-full items-center gap-3 rounded-[var(--card-radius)] border p-3 text-start',
-                      'transition-colors duration-[var(--duration-fast)]',
-                      'outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-focus',
-                      conversation.id === conversationId
-                        ? 'border-line-brand bg-selected'
-                        : 'border-[var(--card-border)] bg-[var(--card-bg)] hover:bg-hover',
-                    )}
-                  >
-                    <Avatar
-                      name={conversation.participants[0]?.name ?? 'Conversation'}
-                      src={conversation.participants[0]?.avatarUrl ?? null}
-                      size="md"
-                    />
-                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                      <span className="flex items-baseline justify-between gap-2">
-                        <span className="truncate text-sm font-medium">
-                          {conversation.title ??
-                            conversation.participants.map((p) => p.name).join(', ')}
-                        </span>
-                        <span className="shrink-0 text-2xs text-fg-tertiary">
-                          {formatRelative(conversation.lastMessageAt)}
-                        </span>
-                      </span>
-                      <span className="flex items-center justify-between gap-2">
-                        <span className="truncate text-xs text-fg-tertiary">
-                          {conversation.lastMessagePreview ?? 'No messages yet'}
-                        </span>
-                        {conversation.unreadCount > 0 ? (
-                          <span className="grid min-w-5 shrink-0 place-items-center rounded-full bg-brand px-1.5 text-2xs font-bold text-fg-on-brand tabular-nums">
-                            {conversation.unreadCount}
+              {conversations.data?.data.map((conversation) => {
+                const people = counterparts(conversation, user?.id);
+                // The person the row is "about". `people` is never empty in practice —
+                // see the fallback in `counterparts` — but index access is not narrowed
+                // here, so the label degrades instead of rendering `undefined`.
+                const lead = people[0];
+                const label =
+                  conversation.title ??
+                  people.map((participant) => participant.user.name).join(', ');
+                return (
+                  <li key={conversation.id}>
+                    <button
+                      type="button"
+                      onClick={() => open(conversation.id)}
+                      aria-current={conversation.id === conversationId ? 'true' : undefined}
+                      className={cn(
+                        'flex tap w-full items-center gap-3 rounded-[var(--card-radius)] border p-3 text-start',
+                        'transition-colors duration-[var(--duration-fast)]',
+                        'outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-focus',
+                        conversation.id === conversationId
+                          ? 'border-line-brand bg-selected'
+                          : 'border-[var(--card-border)] bg-[var(--card-bg)] hover:bg-hover',
+                      )}
+                    >
+                      <Avatar
+                        // A participant IS NOT a person: `participantSchema` is the
+                        // membership row and the person is one level down, at `.user`
+                        // (conversation.ts:12-18).
+                        name={lead?.user.name ?? 'Conversation'}
+                        src={lead?.user.avatarUrl ?? null}
+                        size="md"
+                      />
+                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                        <span className="flex items-baseline justify-between gap-2">
+                          <span className="truncate text-sm font-medium">
+                            {label || 'Conversation'}
                           </span>
-                        ) : null}
+                          <span className="shrink-0 text-2xs text-fg-tertiary">
+                            {formatRelative(conversation.lastMessageAt)}
+                          </span>
+                        </span>
+                        <span className="flex items-center justify-between gap-2">
+                          <span className="truncate text-xs text-fg-tertiary">
+                            {/*
+                              There is no `lastMessagePreview` on the wire. The
+                              conversation ships the whole last live message
+                              (conversation.ts:30), already filtered for soft deletes by
+                              the server's take-1 window (conversations.service.ts:49-54),
+                              so the preview is just its content.
+                            */}
+                            {conversation.lastMessage?.content ?? 'No messages yet'}
+                          </span>
+                          {conversation.unreadCount > 0 ? (
+                            <span className="grid min-w-5 shrink-0 place-items-center rounded-full bg-brand px-1.5 text-2xs font-bold text-fg-on-brand tabular-nums">
+                              {conversation.unreadCount}
+                            </span>
+                          ) : null}
+                        </span>
                       </span>
-                    </span>
-                  </button>
-                </li>
-              ))}
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </section>
@@ -137,38 +188,120 @@ export function MessagesPage() {
   );
 }
 
+/**
+ * The participants a thread is ABOUT, from the viewer's seat.
+ *
+ * conversation.ts:27 — "Null for a direct thread; the SPA renders the other participant's
+ * name instead." Two facts make `participants[0]` the wrong answer to that: the creator is
+ * always seated (conversations.service.ts:434-436), so the viewer is in the array and is
+ * frequently first; and the array deliberately includes people who have LEFT, because
+ * `participantSchema` carries `leftAt` and the thread keeps its membership history
+ * (conversations.service.ts:36-39).
+ *
+ * So: the other, still-seated members. A thread everyone else has abandoned falls back to
+ * the full roster, which names the people who were there rather than nobody at all.
+ */
+function counterparts(
+  conversation: ConversationDto,
+  viewerId: string | undefined,
+): ParticipantDto[] {
+  const others = conversation.participants.filter(
+    (participant) => participant.user.id !== viewerId && participant.leftAt === null,
+  );
+  return others.length > 0 ? others : conversation.participants;
+}
+
 function Thread({ conversationId, onBack }: { conversationId: string; onBack: () => void }) {
   const { user } = useSession();
   const client = useQueryClient();
   const [draft, setDraft] = useState('');
   const endRef = useRef<HTMLDivElement>(null);
+  /**
+   * The idempotency key for the message being composed — minted once per DRAFT, not once
+   * per attempt.
+   *
+   * message.ts:26-30: `clientMsgId` is UNIQUE per sender in the database, so re-sending
+   * after a timeout returns the original message instead of posting a second copy. A key
+   * minted inside `mutationFn` would be a different key on every attempt and would buy
+   * nothing at all — and mutations do not auto-retry here (query.ts:32-34), so the retry
+   * this protects is the human one: the user pressing send again after an error they were
+   * shown. It is cleared only on success, at which point the next draft gets its own key.
+   */
+  const draftKey = useRef<string | null>(null);
 
   const messages = useQuery({
     queryKey: qk.messages(conversationId),
     queryFn: () =>
-      api.get<{ data: MessageRecord[] }>(`/conversations/${conversationId}/messages`, {
+      api.get<CursorPaginated<MessageDto>>(`/conversations/${conversationId}/messages`, {
         query: { limit: 50 },
       }),
     refetchInterval: 15_000,
   });
 
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ block: 'end' });
+  /**
+   * Oldest first, which is not how the page arrives.
+   *
+   * Without `after`, the endpoint pages BACKWARDS through history — `orderBy: { seq:
+   * 'desc' }` (conversations.service.ts:494-505) — so the newest message is at index 0.
+   * Rendering the array as it comes puts the end of the conversation at the top of a pane
+   * that then scrolls to its bottom.
+   *
+   * `seq` is a Postgres bigint delivered as a STRING (bigIntStringSchema, common.ts:51-53)
+   * and is compared as a BigInt, never coerced to Number: past 2^53 two distinct messages
+   * would round to the same value and the comparison would start tying.
+   */
+  const thread = useMemo(() => {
+    const rows = messages.data?.data ?? [];
+    return [...rows].sort((a, b) => {
+      if (a.seq === b.seq) return 0;
+      return BigInt(a.seq) < BigInt(b.seq) ? -1 : 1;
+    });
   }, [messages.data]);
 
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ block: 'end' });
+  }, [thread]);
+
   const send = useMutation({
-    mutationFn: (content: string) =>
-      api.post<MessageRecord>(`/conversations/${conversationId}/messages`, {
-        content,
-        // ULID-ish idempotency key: a retry after a timeout must not double-post.
-        clientMsgId: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`,
-      }),
-    onSuccess: async () => {
+    // `SendMessageInput` is the server's own body type (message.ts:31-38), so a missing or
+    // misspelled field here is a compile error rather than a 422 discovered by a user.
+    mutationFn: (input: SendMessageInput) =>
+      api.post<MessageDto>(`/conversations/${conversationId}/messages`, input),
+    onSuccess: async (message) => {
+      draftKey.current = null;
       setDraft('');
+      /*
+       * Reconcile on the ECHOED `clientMsgId` (message.ts:18-19), never on content: two
+       * identical lines are an ordinary thing to send, and a replayed send returns the
+       * ORIGINAL message — same key, same id — which must land in the thread exactly once.
+       * Seeding the cache here is what makes the sent line appear immediately instead of
+       * one refetch later.
+       */
+      client.setQueryData<CursorPaginated<MessageDto>>(qk.messages(conversationId), (current) => {
+        if (current === undefined) return current;
+        if (current.data.some((row) => row.clientMsgId === message.clientMsgId)) return current;
+        return { ...current, data: [...current.data, message] };
+      });
       await client.invalidateQueries({ queryKey: qk.messages(conversationId) });
+      // The list row renders `lastMessage` and the unread badge, and sending moved both
+      // (the server advances the sender's own high-water mark, service:596-604).
+      await client.invalidateQueries({ queryKey: qk.conversations });
     },
+    // The draft and its key survive an error on purpose: pressing send again reuses the
+    // key, so an attempt that actually reached the server cannot post a second copy.
     onError: (error) => toast.fromError(error, 'Message not sent'),
   });
+
+  const submit = () => {
+    const content = draft.trim();
+    if (content.length === 0 || send.isPending) return;
+    // `ulid()`, not a home-rolled string. `sendMessageSchema` requires
+    // /^[0-9A-HJKMNP-TV-Z]{26}$/ (message.ts:33-36) — 26 uppercase Crockford characters —
+    // and the ~16 lowercase base36 characters this used to mint were a 422 on every send.
+    const clientMsgId = draftKey.current ?? ulid();
+    draftKey.current = clientMsgId;
+    send.mutate({ content, clientMsgId });
+  };
 
   return (
     <div className="flex flex-col rounded-[var(--card-radius)] border border-[var(--card-border)] bg-[var(--card-bg)]">
@@ -185,7 +318,7 @@ function Thread({ conversationId, onBack }: { conversationId: string; onBack: ()
       <div className="scroll-y flex flex-col gap-2 p-3 [block-size:55dvh] md:[block-size:60dvh]">
         {messages.isPending ? (
           <SkeletonThread />
-        ) : (messages.data?.data.length ?? 0) === 0 ? (
+        ) : thread.length === 0 ? (
           <EmptyState
             variant="empty"
             compact
@@ -193,8 +326,11 @@ function Thread({ conversationId, onBack }: { conversationId: string; onBack: ()
             description="Say something to get this started."
           />
         ) : (
-          messages.data?.data.map((message) => {
-            const mine = message.senderId === user?.id;
+          thread.map((message) => {
+            // `messageSchema` has no `senderId` and no `senderName`; it nests the person
+            // as `sender: UserSummary` (message.ts:14). Reading the flat names left `mine`
+            // false for every row, so the whole thread rendered as somebody else's.
+            const mine = message.sender.id === user?.id;
             return (
               <div
                 key={message.id}
@@ -210,7 +346,7 @@ function Thread({ conversationId, onBack }: { conversationId: string; onBack: ()
                 >
                   {!mine ? (
                     <span className="mb-0.5 block text-2xs font-semibold text-fg-tertiary">
-                      {message.senderName}
+                      {message.sender.name}
                     </span>
                   ) : null}
                   <p className="break-words whitespace-pre-wrap">{message.content}</p>
@@ -229,8 +365,7 @@ function Thread({ conversationId, onBack }: { conversationId: string; onBack: ()
         className="flex items-end gap-2 border-t border-line-subtle p-2"
         onSubmit={(event) => {
           event.preventDefault();
-          const content = draft.trim();
-          if (content) send.mutate(content);
+          submit();
         }}
       >
         <Textarea
@@ -251,8 +386,7 @@ function Thread({ conversationId, onBack }: { conversationId: string; onBack: ()
               window.matchMedia('(pointer: fine)').matches
             ) {
               event.preventDefault();
-              const content = draft.trim();
-              if (content) send.mutate(content);
+              submit();
             }
           }}
         />

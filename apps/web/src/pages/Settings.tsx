@@ -1,12 +1,15 @@
+import { useEffect } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { ShieldCheck, ShieldOff } from 'lucide-react';
+import { phoneSchema, type UpdateUserInput, type UserDetail } from '@skillwright/shared/schema';
 import { api } from '@/lib/api';
 import { qk } from '@/lib/query';
-import { usePolicy } from '@/lib/policy';
+import { subject, usePolicy } from '@/lib/policy';
+import { ApiError } from '@/lib/problem';
 import { useLogout, useSession } from '@/lib/session';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Avatar } from '@/components/ui/Avatar';
@@ -24,13 +27,87 @@ import { toast } from '@/components/ui/Toast';
 import { ROLE_LABEL } from '@/components/layout/nav';
 import { Route } from '@/routes/_app/settings';
 
-const profileSchema = z.object({
-  name: z.string().min(2, 'Enter your full name').max(120),
-  phoneNumber: z.string().max(32).optional(),
-  bio: z.string().max(600, 'Keep it under 600 characters').optional(),
+/**
+ * `GET /users/me` is the only endpoint that serves `phoneNumber` and `bio`
+ * (userDetailSchema, user.ts:52-66). `qk` has no entry for it, so the key borrows
+ * the `users` namespace it belongs to: it still starts with 'users', which keeps it
+ * inside the one invalidation prefix the rest of the app already sweeps.
+ */
+const profileKey = qk.users({ scope: 'me' });
+
+/**
+ * The FORM's shape, which is deliberately NOT the wire shape.
+ *
+ * Every control here is a text input, so an untouched or emptied field is `''` —
+ * never `null`, never `undefined`. The wire shape is `UpdateUserInput`
+ * (user.ts:70-81) and `toUpdate` below is the only place the two meet.
+ *
+ * `phoneNumber` is checked against the SHARED `phoneSchema` (common.ts:60-63)
+ * rather than a regex copied out of it, so the client refuses exactly what the API
+ * refuses — with `''` allowed, because on this side an empty box is how a person
+ * says "I have no phone number".
+ */
+const profileFormSchema = z.object({
+  name: z.string().trim().min(2, 'Enter your full name').max(120),
+  phoneNumber: z
+    .string()
+    .trim()
+    .refine((value) => value === '' || phoneSchema.safeParse(value).success, {
+      message: 'Enter a valid phone number.',
+    }),
+  bio: z.string().trim().max(600, 'Keep it under 600 characters'),
 });
 
-type ProfileValues = z.infer<typeof profileSchema>;
+type ProfileValues = z.infer<typeof profileFormSchema>;
+
+/** What react-hook-form reports as touched-and-changed, for a flat string form. */
+type DirtyProfileFields = { readonly [K in keyof ProfileValues]?: boolean };
+
+const PROFILE_FIELDS = ['name', 'phoneNumber', 'bio'] as const;
+
+/**
+ * Server field errors arrive as dot-joined zod paths (errors.plugin.ts:13-18) and
+ * include `(root)` for whole-body refinements. Only the three that name a control
+ * may be handed to `setError`; the rest belong in the toast.
+ */
+function isProfileField(path: string): path is keyof ProfileValues {
+  return (PROFILE_FIELDS as readonly string[]).includes(path);
+}
+
+/** The served record, flattened into the three controls this form owns. */
+function toFormValues(profile: UserDetail): ProfileValues {
+  return {
+    name: profile.name,
+    phoneNumber: profile.phoneNumber ?? '',
+    bio: profile.bio ?? '',
+  };
+}
+
+/**
+ * The PATCH body: only what the user actually changed, and never an empty string.
+ *
+ * THIS IS THE 422. `updateUserSchema.phoneNumber` is `phoneSchema.nullable()`
+ * (user.ts:73) and phoneSchema refuses `''` (common.ts:60-63), so a form that
+ * PATCHed its seeded `{ phoneNumber: '', bio: '' }` was answered 422 by the
+ * validator BEFORE the policy preHandler ever ran — every "Save changes", for
+ * every role, including one that only edited the name. users.routes.ts:99-110
+ * documents that failure from the server side and declines to loosen the shared
+ * schema for it, because `''` would then be a stored empty phone number for every
+ * other client. So `''` becomes `null` ("clear this field"), and a field the user
+ * never touched is OMITTED — saving a name can never blank a phone number.
+ *
+ * The result is never `{}`: `updateUserSchema` refines that away (user.ts:78-80),
+ * which is why Save stays disabled until something is dirty.
+ */
+function toUpdate(values: ProfileValues, dirty: DirtyProfileFields): UpdateUserInput {
+  return {
+    ...(dirty.name ? { name: values.name } : {}),
+    ...(dirty.phoneNumber
+      ? { phoneNumber: values.phoneNumber === '' ? null : values.phoneNumber }
+      : {}),
+    ...(dirty.bio ? { bio: values.bio === '' ? null : values.bio } : {}),
+  };
+}
 
 export function SettingsPage() {
   const { tab } = Route.useSearch();
@@ -60,7 +137,22 @@ export function SettingsPage() {
         </TabsList>
 
         <TabsContent value="profile">
-          <ProfileTab canEdit={policy.can('user:update')} isDemo={isDemo} />
+          {/*
+            `user:update` is `isSelf` for STUDENT and TEACHER (policy.ts:306-311), and
+            `isSelf` reads `Subject.userId` and DENIES when it is absent rather than
+            defaulting to the actor (combinators.ts:46-49). The subject-free call that
+            used to be here therefore came back false for every student and teacher on
+            their OWN settings page, disabling every field and the Save button; only an
+            admin, whose cell is a bare `allow`, could edit anything.
+
+            The subject exists — `user` is non-null past the guard above — and it is the
+            same one the server builds for PATCH /users/me (`selfSubject`,
+            users.routes.ts:34-36), so the two answers cannot disagree.
+          */}
+          <ProfileTab
+            canEdit={policy.can('user:update', subject({ userId: user.id }))}
+            isDemo={isDemo}
+          />
         </TabsContent>
 
         <TabsContent value="security">
@@ -79,21 +171,74 @@ function ProfileTab({ canEdit, isDemo }: { canEdit: boolean; isDemo: boolean }) 
   const { user } = useSession();
   const client = useQueryClient();
 
-  const form = useForm<ProfileValues>({
-    resolver: zodResolver(profileSchema),
-    defaultValues: { name: user?.name ?? '', phoneNumber: '', bio: '' },
+  /**
+   * No `enabled:` gate on this query, on purpose.
+   *
+   * `user:read` is `isSelf` for STUDENT and TEACHER (policy.ts:297-305), and a
+   * subject-free `can()` runs it against EMPTY_SUBJECT, where `isSelf` is false
+   * (combinators.ts:46-49). Gating on that would disable the query for everyone but
+   * an admin, and a disabled query never leaves `status: 'pending'` — the form would
+   * sit empty forever. The route is scoped to the caller by construction
+   * (users.routes.ts:89-96), so the query just runs.
+   */
+  const profile = useQuery({
+    queryKey: profileKey,
+    queryFn: () => api.get<UserDetail>('/users/me'),
+    staleTime: 60_000,
   });
 
+  const form = useForm<ProfileValues>({
+    resolver: zodResolver(profileFormSchema),
+    defaultValues: { name: user?.name ?? '', phoneNumber: '', bio: '' },
+  });
+  const { reset } = form;
+
+  /**
+   * Seed the controls from the record the server actually holds.
+   *
+   * `SessionUser` (session.ts:55-64) carries neither `phoneNumber` nor `bio` — it is
+   * the session view model, not the profile — which is why this form used to open
+   * with two blanks and then PATCH them straight back over saved values.
+   * `keepDirtyValues` means a refetch landing mid-edit refreshes the fields the user
+   * is not typing in and leaves the ones they are.
+   */
+  useEffect(() => {
+    if (!profile.data) return;
+    reset(toFormValues(profile.data), { keepDirtyValues: true });
+  }, [profile.data, reset]);
+
   const save = useMutation({
-    mutationFn: (values: ProfileValues) => api.patch<void>('/users/me', values),
-    onSuccess: async () => {
+    // The route answers 200 with the updated `userDetailSchema` row
+    // (users.routes.ts:111-118). Typing it `void` threw that away and let the
+    // declared type drift from the served one; the response re-seeds both the cache
+    // and the form, so what is on screen after a save is what the server stored.
+    mutationFn: (body: UpdateUserInput) => api.patch<UserDetail>('/users/me', body),
+    onSuccess: async (updated) => {
+      client.setQueryData(profileKey, updated);
+      // A reset with no `keepDirtyValues` clears the dirty flags, which is what
+      // disables Save again until the next real edit.
+      reset(toFormValues(updated));
       toast.success('Profile saved');
+      // The chrome renders `user.name` from the session, not from this record.
       await client.invalidateQueries({ queryKey: qk.session });
     },
-    onError: (error) => toast.fromError(error, 'Could not save your profile'),
+    onError: (error) => {
+      if (error instanceof ApiError) {
+        for (const [path, message] of Object.entries(error.byField)) {
+          if (isProfileField(path)) form.setError(path, { message });
+        }
+      }
+      toast.fromError(error, 'Could not save your profile');
+    },
   });
 
   if (!user) return null;
+
+  const fieldsDisabled = !canEdit || profile.isPending;
+  // Read DURING RENDER on purpose: `formState` is a proxy, and a key nobody reads
+  // while rendering is neither tracked nor re-rendered on. `dirtyFields` decides
+  // what the PATCH carries, so it has to be subscribed, not sampled in a callback.
+  const { dirtyFields, isDirty } = form.formState;
 
   return (
     <div className="flex flex-col gap-4">
@@ -120,31 +265,43 @@ function ProfileTab({ canEdit, isDemo }: { canEdit: boolean; isDemo: boolean }) 
           </p>
         ) : null}
 
+        {profile.isError ? (
+          <p className="rounded-md border border-danger-line bg-danger-soft px-3 py-2 text-xs text-danger-fg">
+            We could not load your saved details. Anything you type here will still be saved.
+          </p>
+        ) : null}
+
         <form
           className="flex flex-col gap-4"
           noValidate
-          onSubmit={form.handleSubmit((values) => save.mutate(values))}
+          onSubmit={form.handleSubmit((values) => {
+            const body = toUpdate(values, dirtyFields);
+            // `updateUserSchema` refuses an empty body (user.ts:78-80). Save is
+            // already disabled until something is dirty; this is the second lock.
+            if (Object.keys(body).length === 0) return;
+            save.mutate(body);
+          })}
         >
           <FormField label="Full name" required error={form.formState.errors.name?.message}>
-            <Input autoComplete="name" disabled={!canEdit} {...form.register('name')} />
+            <Input autoComplete="name" disabled={fieldsDisabled} {...form.register('name')} />
           </FormField>
 
           <FormField
             label="Phone number"
-            hint="Used only for course-related contact."
+            hint="Used only for course-related contact. Clear it to remove the number we hold."
             error={form.formState.errors.phoneNumber?.message}
           >
             <Input
               type="tel"
               inputMode="tel"
               autoComplete="tel"
-              disabled={!canEdit}
+              disabled={fieldsDisabled}
               {...form.register('phoneNumber')}
             />
           </FormField>
 
           <FormField label="Bio" error={form.formState.errors.bio?.message}>
-            <Textarea autoResize disabled={!canEdit} rows={3} {...form.register('bio')} />
+            <Textarea autoResize disabled={fieldsDisabled} rows={3} {...form.register('bio')} />
           </FormField>
 
           <Button
@@ -152,7 +309,7 @@ function ProfileTab({ canEdit, isDemo }: { canEdit: boolean; isDemo: boolean }) 
             block
             className="sm:w-auto sm:self-start"
             loading={save.isPending}
-            disabled={!canEdit}
+            disabled={fieldsDisabled || !isDirty}
           >
             Save changes
           </Button>

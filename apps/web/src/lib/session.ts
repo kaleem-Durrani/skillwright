@@ -1,56 +1,61 @@
 import { useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Actor, ActorStatus, Provenance, Role } from '@skillwright/shared/policy';
+import type {
+  LoginInput,
+  LoginResponse,
+  MfaVerifyInput,
+  SessionResponse as SessionEnvelope,
+} from '@skillwright/shared/schema';
 import { api } from './api.js';
 import { ApiError } from './problem.js';
 import { qk } from './query.js';
 
 /**
- * The wire shape the API actually serves, matching `sessionResponseSchema` in
- * packages/shared/src/schema/auth.ts.
+ * Every wire shape this module reads or sends, taken from the schemas the API
+ * validates against — `sessionResponseSchema`, `loginResponseSchema`, `loginSchema`
+ * and `mfaVerifySchema` (packages/shared/src/schema/auth.ts:56-101, :191-200).
  *
- * `actor` and `user` are two objects on purpose: `actor` is what the SESSION
- * proves (and the only thing `can()` reads), `user` is the profile record. In
- * particular `provenance` exists ONLY on the actor — it is a property of how you
- * signed in, not of who you are — so a DEMO and a PASSWORD session for the same
- * account differ in `actor` and not in `user`.
+ * They used to be hand-declared here as `SessionEnvelope`, `SessionActorPayload`,
+ * `UserDetailPayload`, `LoginResult`, `LoginInput` and `MfaVerifyInput`, and the
+ * profile copy was wrong in the way a hand-written type is always wrong: it listed
+ * six fields where `userDetailSchema` serves fourteen (user.ts:52-66), so
+ * `phoneNumber`, `bio`, `lastLoginAt`, `createdAt`, `teacherProfile` and
+ * `studentProfile` arrived on every `/auth/me` response while the compiler insisted
+ * they did not exist. CONTRIBUTING.md:51 makes a client-side re-declaration of a
+ * shape the schema already owns an automatic send-back.
+ *
+ * `SessionResponse` is imported under the local name `SessionEnvelope` because this
+ * module already exports a `SessionResponse` of its own — the CACHED shape, below —
+ * and the two are different things: the envelope is what the server sends, the
+ * cached shape is what the query holds. Renaming at the import keeps both honest.
+ *
+ * On the envelope, `actor` and `user` are two objects on purpose: `actor` is what
+ * the SESSION proves (and the only thing `can()` reads), `user` is the profile
+ * record. `provenance` exists ONLY on the actor — it is a property of how you signed
+ * in, not of who you are — so a DEMO and a PASSWORD session for the same account
+ * differ in `actor` and not in `user`.
+ *
+ * `LoginResponse` is a discriminated union, not a session: a password may be correct
+ * and still not finish the login. `MfaVerifyInput` sends exactly one of `code` and
+ * `recoveryCode`; the schema enforces that with a refinement no local interface can
+ * express, and the server rejects a body carrying both.
  */
-interface SessionActorPayload {
-  id: string;
-  role: Role;
-  status: ActorStatus;
-  provenance: Provenance;
-}
-
-interface UserDetailPayload {
-  id: string;
-  email: string;
-  name: string;
-  role: Role;
-  status: ActorStatus;
-  avatarUrl: string | null;
-  /** The server's name for this. Flattened to `totpEnabled` below. */
-  mfaEnabled: boolean;
-}
-
-export interface SessionEnvelope {
-  actor: SessionActorPayload;
-  user: UserDetailPayload;
-  expiresAt: string;
-}
+export type { LoginInput, LoginResponse, MfaVerifyInput, SessionEnvelope };
 
 /**
- * `POST /auth/login` and `POST /auth/demo` return a discriminated union, not a
- * session: a password may be correct and still not finish the login.
- */
-export type LoginResult =
-  | ({ status: 'AUTHENTICATED' } & SessionEnvelope)
-  | { status: 'MFA_REQUIRED'; actor: SessionActorPayload };
-
-/**
- * The flattened view model every screen reads. It is deliberately NOT the wire
- * shape: components should not have to remember which of two objects a field
- * lives on, and `provenance` is needed beside `role` on nearly every render.
+ * SPA-LOCAL VIEW MODEL — deliberately not a wire shape, and so not something
+ * `@skillwright/shared/schema` could own.
+ *
+ * It flattens the envelope's two objects into the one record every screen reads:
+ * components should not have to remember which of the two a field lives on, and
+ * `provenance` (actor) is needed beside `role` and `status` (user) on nearly every
+ * render. It also renames the server's `mfaEnabled` to `totpEnabled`, because TOTP
+ * is the only second factor this app implements.
+ *
+ * It carries the eight fields the chrome actually renders. Anything else on
+ * `userDetailSchema` — the profiles, `phoneNumber`, `bio`, the timestamps — belongs
+ * to a `UserDetail` fetched for a screen that shows it, not to the session.
  */
 export interface SessionUser {
   id: string;
@@ -63,6 +68,12 @@ export interface SessionUser {
   totpEnabled: boolean;
 }
 
+/**
+ * What the session QUERY resolves to — also SPA-local, and not to be confused with
+ * the schema's `SessionResponse` (imported above as `SessionEnvelope`). `user: null`
+ * is the anonymous state, which the wire has no representation for: the server
+ * answers 401 there and never sends an envelope at all.
+ */
 export interface SessionResponse {
   user: SessionUser | null;
 }
@@ -155,11 +166,6 @@ export function useSession(): SessionState {
   };
 }
 
-export interface LoginInput {
-  email: string;
-  password: string;
-}
-
 /**
  * Writes whatever the login endpoints returned into the session cache.
  *
@@ -168,7 +174,7 @@ export interface LoginInput {
  * makes `requireAuth` route the user to the MFA step instead of bouncing them
  * back to a login form they have already completed.
  */
-function cacheLoginResult(client: ReturnType<typeof useQueryClient>, data: LoginResult): void {
+function cacheLoginResult(client: ReturnType<typeof useQueryClient>, data: LoginResponse): void {
   if (data.status === 'AUTHENTICATED') {
     client.setQueryData(qk.session, { user: toSessionUser(data) } satisfies SessionResponse);
     return;
@@ -190,7 +196,7 @@ function cacheLoginResult(client: ReturnType<typeof useQueryClient>, data: Login
 export function useLogin() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (input: LoginInput) => api.post<LoginResult>('/auth/login', input),
+    mutationFn: (input: LoginInput) => api.post<LoginResponse>('/auth/login', input),
     onSuccess: (data) => cacheLoginResult(client, data),
   });
 }
@@ -198,15 +204,9 @@ export function useLogin() {
 export function useDemoLogin() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (role: Role) => api.post<LoginResult>('/auth/demo', { role }),
+    mutationFn: (role: Role) => api.post<LoginResponse>('/auth/demo', { role }),
     onSuccess: (data) => cacheLoginResult(client, data),
   });
-}
-
-export interface MfaVerifyInput {
-  /** Exactly one of these is sent. */
-  code?: string;
-  recoveryCode?: string;
 }
 
 export function useMfaVerify() {

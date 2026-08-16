@@ -1,13 +1,15 @@
 import { useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Download, FileText, Link2, Video } from 'lucide-react';
-import { api } from '@/lib/api';
+import { ArrowLeft, Download, FileText, Link2, Video, type LucideIcon } from 'lucide-react';
+import { rejectEnrollmentSchema } from '@skillwright/shared/schema';
+import { api, type Paginated } from '@/lib/api';
 import { qk } from '@/lib/query';
-import { subject, usePolicy } from '@/lib/policy';
+import { subject, usePolicy, type PolicySubject } from '@/lib/policy';
 import { formatBytes, formatDate, formatDuration, formatRelative } from '@/lib/format';
-import type { CourseSummary, EnrollmentSummary, ResourceSummary } from '@/lib/types';
+import type { CourseDetail, EnrollmentDto, ResourceDto, ResourceTypeValue } from '@/lib/types';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Card, CardTitle } from '@/components/ui/Card';
 import { DataList } from '@/components/ui/DataList';
@@ -20,21 +22,111 @@ import { Textarea } from '@/components/ui/Textarea';
 import { toast } from '@/components/ui/Toast';
 import { Route } from '@/routes/_app/courses.$courseId';
 
-const RESOURCE_ICON = {
+/**
+ * Keyed by `ResourceTypeValue` (resource.ts:11-12), not by whatever the object
+ * literal happens to contain. The key type is what makes `RESOURCE_ICON[resource.type]`
+ * a checked lookup instead of an implicit-any index, and it means adding a fourth
+ * resource type to the schema breaks THIS line rather than rendering `undefined` as a
+ * component at runtime.
+ */
+const RESOURCE_ICON: Record<ResourceTypeValue, LucideIcon> = {
   DOCUMENT: FileText,
   VIDEO: Video,
   LINK: Link2,
-} as const;
+};
+
+/**
+ * The policy Subject for every course-scoped decision on this screen, built to match
+ * the SERVER's loaders field for field — `loadCourseSubject` and
+ * `loadCourseEnrollmentSubject` (courses.service.ts:110-159).
+ *
+ * The key names are the whole point. Every `Subject` field is optional and a rule that
+ * reads an absent field DENIES rather than throws (actor.ts:46-51), so a plausible-looking
+ * wrong key is a silent, permanent denial:
+ *
+ *   - `courseTeacherId`, never `teacherId` — `ownsCourse` reads the former
+ *     (combinators.ts:55-59). With `teacherId` the owning teacher got no "Edit course",
+ *     no Students tab and no Approve button on their own course.
+ *   - `enrollmentStatus`, never `viewerEnrollmentStatus` — `enrolledApproved` reads the
+ *     former (combinators.ts:62-65). With the DTO's name an approved student was denied
+ *     `resource:read`, so the Resources tab never even fetched.
+ *
+ * `capacity` and `approvedCount` are gone because no rule reads them: seats are checked
+ * by the service under SERIALIZABLE, not by the policy, and `isFull` on the DTO is what
+ * the button disables on.
+ *
+ * `studentId` is deliberately NOT set. The server adds it for a STUDENT so
+ * `isEnrolledStudent` passes and the enrollments service then narrows the rows to that
+ * student's own; on the client the same subject would open a "Students" roster that
+ * shows one person their own request, which the header's StatusChip already says. Being
+ * NARROWER than the server hides nothing a student needs and renders no button that
+ * would 403 — the failure this layer exists to prevent.
+ */
+function courseSubject(course: CourseDetail): PolicySubject {
+  return subject({
+    id: course.id,
+    courseId: course.id,
+    courseTeacherId: course.teacher.id,
+    departmentId: course.department.id,
+    publishedAt: course.publishedAt,
+    enrollmentStatus: course.viewerEnrollmentStatus,
+  });
+}
+
+/**
+ * The Subject for ONE resource row. `resource:download` is
+ * `or(isPublic, enrolledApproved)` for a student and `or(isPublic, ownsCourse, isAuthor)`
+ * for a teacher (policy.ts:217-226), so the decision needs three fields the resource
+ * carries plus two only the course knows.
+ *
+ * WHY it is not `subject({ ...resource })`: a spread supplies `isPublic` and `courseId`
+ * and nothing else the rules read. `ResourceDto` nests `author: UserSummary`, so there is
+ * no `authorId` to spread (resource.ts:21), and it carries neither the course's teacher
+ * nor the viewer's enrollment — which left the teacher who wrote the file, and the
+ * student who is enrolled in the course, both unable to see a Download button.
+ */
+function resourceSubject(resource: ResourceDto, course: CourseDetail): PolicySubject {
+  return subject({
+    id: resource.id,
+    courseId: resource.courseId,
+    courseTeacherId: course.teacher.id,
+    authorId: resource.author.id,
+    isPublic: resource.isPublic,
+    enrollmentStatus: course.viewerEnrollmentStatus,
+  });
+}
+
+/**
+ * Approve carries an optional note, reject carries a MANDATORY reason — two different
+ * bodies for two different endpoints (enrollment.ts:39-49), which is why this is a union
+ * and not one optional string. The old single `decisionNote` field matched neither
+ * schema, so every decision this screen sent was answered 422 before the policy gate ran.
+ */
+type Decision =
+  | { id: string; action: 'approve'; note?: string }
+  | { id: string; action: 'reject'; reason: string };
+
+/**
+ * Never bodyless, even when there is nothing to say: Fastify hands a POST with no body
+ * to the validator as `null`, which an all-optional object schema rejects — the failure
+ * `courses.routes.ts:159-165` records from the server side.
+ */
+function decisionBody(decision: Decision): Record<string, string> {
+  if (decision.action === 'reject') return { reason: decision.reason };
+  return decision.note === undefined ? {} : { note: decision.note };
+}
 
 export function CourseDetailPage() {
   const { courseId } = Route.useParams();
   const policy = usePolicy();
   const client = useQueryClient();
-  const [rejecting, setRejecting] = useState<EnrollmentSummary | null>(null);
+  const [rejecting, setRejecting] = useState<EnrollmentDto | null>(null);
 
+  // `GET /courses/:id` serves `courseDetailSchema` (courses.routes.ts:70-79) — the
+  // summary plus the blurb, the dates, the syllabus and the viewer's own enrollment.
   const course = useQuery({
     queryKey: qk.course(courseId),
-    queryFn: () => api.get<CourseSummary>(`/courses/${courseId}`),
+    queryFn: () => api.get<CourseDetail>(`/courses/${courseId}`),
   });
 
   /**
@@ -42,32 +134,24 @@ export function CourseDetailPage() {
    * publication state, the viewer's own enrolment. Nothing is fetched by the
    * policy layer itself; `can()` is a pure function over this bag.
    */
-  const courseSubject = course.data
-    ? subject({
-        id: course.data.id,
-        teacherId: course.data.teacherId,
-        departmentId: course.data.departmentId,
-        publishedAt: course.data.publishedAt,
-        capacity: course.data.capacity,
-        approvedCount: course.data.approvedCount,
-        viewerEnrollmentStatus: course.data.viewerEnrollmentStatus,
-      })
-    : undefined;
+  const viewerSubject = course.data ? courseSubject(course.data) : undefined;
 
   const resources = useQuery({
     queryKey: qk.courseResources(courseId),
-    queryFn: () => api.get<{ data: ResourceSummary[] }>(`/courses/${courseId}/resources`),
-    enabled: policy.can('resource:read', courseSubject),
+    queryFn: () => api.get<Paginated<ResourceDto>>(`/courses/${courseId}/resources`),
+    enabled: policy.can('resource:read', viewerSubject),
   });
 
   const enrollments = useQuery({
     queryKey: qk.courseEnrollments(courseId),
-    queryFn: () => api.get<{ data: EnrollmentSummary[] }>(`/courses/${courseId}/enrollments`),
-    enabled: policy.can('enrollment:read', courseSubject),
+    queryFn: () => api.get<Paginated<EnrollmentDto>>(`/courses/${courseId}/enrollments`),
+    enabled: policy.can('enrollment:read', viewerSubject),
   });
 
+  // The path owns the course, so the body is empty; the route declares it `.nullish()`
+  // for exactly this call (courses.routes.ts:154-167) and answers with the new row.
   const requestEnrollment = useMutation({
-    mutationFn: () => api.post<void>(`/courses/${courseId}/enrollments`),
+    mutationFn: () => api.post<EnrollmentDto>(`/courses/${courseId}/enrollments`),
     onSuccess: async () => {
       toast.success('Request sent', {
         description: 'The teacher will review it. You will be notified either way.',
@@ -78,10 +162,11 @@ export function CourseDetailPage() {
   });
 
   const decide = useMutation({
-    mutationFn: (input: { id: string; action: 'approve' | 'reject'; note?: string }) =>
-      api.post<void>(`/enrollments/${input.id}/${input.action}`, {
-        ...(input.note ? { decisionNote: input.note } : {}),
-      }),
+    mutationFn: (decision: Decision) =>
+      api.post<EnrollmentDto>(
+        `/enrollments/${decision.id}/${decision.action}`,
+        decisionBody(decision),
+      ),
     onSuccess: async () => {
       setRejecting(null);
       await Promise.all([
@@ -112,7 +197,9 @@ export function CourseDetailPage() {
   }
 
   const data = course.data;
-  const isFull = data.approvedCount >= data.capacity;
+  // Derived server-side and shipped on the DTO (course.ts:37-39). The SPA never redoes
+  // capacity arithmetic, because two answers to "is it full" is one answer too many.
+  const isFull = data.isFull;
   const pendingCount =
     enrollments.data?.data.filter((entry) => entry.status === 'PENDING').length ?? 0;
 
@@ -135,7 +222,7 @@ export function CourseDetailPage() {
           <>
             {data.viewerEnrollmentStatus ? (
               <StatusChip status={data.viewerEnrollmentStatus} />
-            ) : policy.can('enrollment:request', courseSubject) ? (
+            ) : policy.can('enrollment:request', viewerSubject) ? (
               <Button
                 block
                 className="sm:w-auto"
@@ -147,7 +234,7 @@ export function CourseDetailPage() {
               </Button>
             ) : null}
 
-            {policy.can('course:update', courseSubject) ? (
+            {policy.can('course:update', viewerSubject) ? (
               <Button variant="secondary" block className="sm:w-auto">
                 Edit course
               </Button>
@@ -158,9 +245,9 @@ export function CourseDetailPage() {
 
       <dl className="grid grid-cols-2 gap-3 pb-6 lg:grid-cols-4">
         <Fact label="Code" value={data.code} />
-        <Fact label="Department" value={data.departmentName} />
-        <Fact label="Teacher" value={data.teacherName} />
-        <Fact label="Duration" value={formatDuration(data.durationValue, data.durationUnit)} />
+        <Fact label="Department" value={data.department.name} />
+        <Fact label="Teacher" value={data.teacher.name} />
+        <Fact label="Duration" value={formatDuration(data.duration.value, data.duration.unit)} />
         <Fact label="Starts" value={formatDate(data.startDate)} />
         <Fact label="Ends" value={formatDate(data.endDate)} />
         <Fact label="Places" value={`${data.approvedCount} / ${data.capacity}`} />
@@ -170,7 +257,7 @@ export function CourseDetailPage() {
       <Tabs defaultValue="resources">
         <TabsList>
           <TabsTrigger value="resources">Resources</TabsTrigger>
-          {policy.can('enrollment:read', courseSubject) ? (
+          {policy.can('enrollment:read', viewerSubject) ? (
             <TabsTrigger value="students" count={pendingCount}>
               Students
             </TabsTrigger>
@@ -178,7 +265,7 @@ export function CourseDetailPage() {
         </TabsList>
 
         <TabsContent value="resources">
-          {!policy.can('resource:read', courseSubject) ? (
+          {!policy.can('resource:read', viewerSubject) ? (
             <EmptyState
               variant="empty"
               title="Resources are for enrolled students"
@@ -201,7 +288,7 @@ export function CourseDetailPage() {
                 {
                   id: 'author',
                   header: 'Added by',
-                  cell: (resource) => resource.authorName,
+                  cell: (resource) => resource.author.name,
                   secondary: true,
                 },
                 {
@@ -234,10 +321,10 @@ export function CourseDetailPage() {
                         </p>
                       ) : null}
                       <p className="text-2xs text-fg-tertiary">
-                        {resource.authorName} · {formatRelative(resource.createdAt)}
+                        {resource.author.name} · {formatRelative(resource.createdAt)}
                         {resource.sizeBytes ? ` · ${formatBytes(resource.sizeBytes)}` : ''}
                       </p>
-                      {policy.can('resource:download', subject({ ...resource })) ? (
+                      {policy.can('resource:download', resourceSubject(resource, data)) ? (
                         <Button
                           variant="secondary"
                           size="sm"
@@ -256,11 +343,11 @@ export function CourseDetailPage() {
                   variant="empty"
                   title="No resources yet"
                   description={
-                    policy.can('resource:create', courseSubject)
+                    policy.can('resource:create', viewerSubject)
                       ? 'Upload a document, link a video, or add an external link.'
                       : 'The teacher has not published anything for this course yet.'
                   }
-                  {...(policy.can('resource:create', courseSubject)
+                  {...(policy.can('resource:create', viewerSubject)
                     ? { actionLabel: 'Add a resource', onAction: () => undefined }
                     : {})}
                 />
@@ -269,7 +356,7 @@ export function CourseDetailPage() {
           )}
         </TabsContent>
 
-        {policy.can('enrollment:read', courseSubject) ? (
+        {policy.can('enrollment:read', viewerSubject) ? (
           <TabsContent value="students">
             <DataList
               items={enrollments.data?.data ?? []}
@@ -280,10 +367,19 @@ export function CourseDetailPage() {
                 {
                   id: 'student',
                   header: 'Student',
+                  /*
+                   * Name and avatar, no email. The old second line read
+                   * `entry.studentEmail`, which no endpoint has ever served:
+                   * `EnrollmentDto.student` is a `UserSummary` — `{ id, name, role,
+                   * avatarUrl }` and nothing else (user.ts:22-27) — because it is embedded
+                   * in payloads other students can read. The email lives on `UserDetail`,
+                   * which this response does not carry and `enrollment:read` does not
+                   * entitle the screen to fetch.
+                   */
                   cell: (entry) => (
-                    <div className="flex flex-col">
-                      <span className="font-medium text-fg">{entry.studentName}</span>
-                      <span className="text-xs text-fg-tertiary">{entry.studentEmail}</span>
+                    <div className="flex items-center gap-2.5">
+                      <Avatar name={entry.student.name} src={entry.student.avatarUrl} size="sm" />
+                      <span className="truncate font-medium text-fg">{entry.student.name}</span>
                     </div>
                   ),
                 },
@@ -308,7 +404,7 @@ export function CourseDetailPage() {
                         onApprove={() => decide.mutate({ id: entry.id, action: 'approve' })}
                         onReject={() => setRejecting(entry)}
                         disabled={
-                          decide.isPending || !policy.can('enrollment:approve', courseSubject)
+                          decide.isPending || !policy.can('enrollment:approve', viewerSubject)
                         }
                       />
                     ) : (
@@ -320,19 +416,20 @@ export function CourseDetailPage() {
               ]}
               renderCard={(entry) => (
                 <Card className="flex flex-col gap-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex min-w-0 flex-col">
-                      <span className="truncate text-sm font-medium">{entry.studentName}</span>
-                      <span className="truncate text-xs text-fg-tertiary">
-                        {entry.studentEmail}
+                  <div className="flex items-start gap-3">
+                    <Avatar name={entry.student.name} src={entry.student.avatarUrl} size="md" />
+                    <div className="flex min-w-0 flex-1 flex-col">
+                      <span className="truncate text-sm font-medium">{entry.student.name}</span>
+                      <span className="truncate text-2xs text-fg-tertiary">
+                        Requested {formatRelative(entry.requestedAt)}
                       </span>
                     </div>
                     <StatusChip status={entry.status} />
                   </div>
-                  <p className="text-2xs text-fg-tertiary">
-                    Requested {formatRelative(entry.requestedAt)}
-                  </p>
-                  {entry.status === 'PENDING' && policy.can('enrollment:approve', courseSubject) ? (
+                  {entry.decisionNote ? (
+                    <p className="text-xs text-fg-secondary">{entry.decisionNote}</p>
+                  ) : null}
+                  {entry.status === 'PENDING' && policy.can('enrollment:approve', viewerSubject) ? (
                     <DecisionButtons
                       block
                       onApprove={() => decide.mutate({ id: entry.id, action: 'approve' })}
@@ -355,11 +452,14 @@ export function CourseDetailPage() {
       </Tabs>
 
       <RejectDialog
+        // Remounts per request, so the reason box never opens holding the text typed
+        // for the previous student.
+        key={rejecting?.id ?? 'none'}
         enrollment={rejecting}
         pending={decide.isPending}
         onClose={() => setRejecting(null)}
-        onConfirm={(note) =>
-          rejecting && decide.mutate({ id: rejecting.id, action: 'reject', note })
+        onConfirm={(reason) =>
+          rejecting && decide.mutate({ id: rejecting.id, action: 'reject', reason })
         }
       />
     </div>
@@ -404,12 +504,21 @@ function RejectDialog({
   onClose,
   onConfirm,
 }: {
-  enrollment: EnrollmentSummary | null;
+  enrollment: EnrollmentDto | null;
   pending: boolean;
   onClose: () => void;
-  onConfirm: (note: string) => void;
+  onConfirm: (reason: string) => void;
 }) {
-  const [note, setNote] = useState('');
+  const [reason, setReason] = useState('');
+
+  /*
+   * The reason is REQUIRED, and the rule is the shared schema's rather than a length
+   * copied out of it: `rejectEnrollmentSchema` is `min(4).max(500)` because the reason is
+   * the only thing the student is ever shown (enrollment.ts:45-49). Checking it here
+   * means the button that would be answered 422 is disabled instead of sent — the same
+   * arrangement `Settings.tsx:52-57` uses for `phoneSchema`.
+   */
+  const isValid = rejectEnrollmentSchema.safeParse({ reason }).success;
 
   return (
     <Dialog open={enrollment !== null} onOpenChange={(open) => !open && onClose()}>
@@ -417,7 +526,7 @@ function RejectDialog({
         title="Reject this request?"
         description={
           enrollment
-            ? `${enrollment.studentName} will be told, and will see whatever you write below.`
+            ? `${enrollment.student.name} will be told, and will see whatever you write below.`
             : undefined
         }
         footer={
@@ -430,7 +539,8 @@ function RejectDialog({
               block
               className="sm:w-auto"
               loading={pending}
-              onClick={() => onConfirm(note)}
+              disabled={!isValid}
+              onClick={() => onConfirm(reason)}
             >
               Reject request
             </Button>
@@ -438,13 +548,16 @@ function RejectDialog({
         }
       >
         <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium">Reason (optional)</span>
+          <span className="text-sm font-medium">Reason</span>
           <Textarea
-            value={note}
-            onChange={(event) => setNote(event.target.value)}
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
             autoResize
             placeholder="This intake is full — apply again for the spring cohort."
           />
+          <span className="text-2xs text-fg-tertiary">
+            Required, and shown to the student. At least four characters.
+          </span>
         </label>
       </DialogContent>
     </Dialog>

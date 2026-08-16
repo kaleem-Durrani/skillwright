@@ -6,7 +6,7 @@ import {
   ShieldCheck,
   type LucideIcon,
 } from 'lucide-react';
-import type { Action, Role } from '@skillwright/shared/policy';
+import type { Role, SubjectIndependentAction } from '@skillwright/shared/policy';
 
 /**
  * The paths the shell can link to. A closed union rather than `string` so a
@@ -21,8 +21,16 @@ export interface NavItem {
   /** Shorter label for the 375px tab bar, where "Conversations" does not fit. */
   shortLabel?: string;
   icon: LucideIcon;
-  /** Additionally gated by the policy layer, not just by role. */
-  action?: Action;
+  /**
+   * Additionally gated by the policy layer, not just by role.
+   *
+   * Deliberately `SubjectIndependentAction`, not `Action`. A nav destination has no
+   * subject, and a rule that reads an absent Subject field must deny — so gating on a
+   * subject-dependent action does not hide the link conditionally, it deletes it for
+   * everyone. `SUBJECT_INDEPENDENT_ACTIONS` is proved against the rules themselves in
+   * policy-matrix.test.ts, so this type cannot drift away from what is actually safe.
+   */
+  action?: SubjectIndependentAction;
   /** Appears in the bottom tab bar. At most five entries may set this. */
   primary?: boolean;
 }
@@ -38,18 +46,29 @@ export interface NavItem {
  */
 const COMMON: NavItem[] = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, primary: true },
+  /**
+   * A nav destination is not a subject, so it can only be gated on an action whose
+   * rule is subject-INDEPENDENT for every role. `course:read` and `conversation:read`
+   * are not: they resolve to `or(isPublished, enrolledApproved)` and `isParticipant`,
+   * which read `subject.publishedAt` / `subject.participantIds`. Asked with no subject
+   * they deny — so gating on them deleted the Courses link for every student and
+   * teacher, and the Messages link for literally everyone including admins.
+   *
+   * Courses carries no action at all: the catalogue is reachable while logged out.
+   * Messages asks `conversation:create`, a bare allow for all three roles, which is
+   * the question a nav entry actually means — may this role use messaging at all.
+   */
   {
     to: '/courses',
     label: 'Courses',
     icon: GraduationCap,
-    action: 'course:read',
     primary: true,
   },
   {
     to: '/messages',
     label: 'Messages',
     icon: MessagesSquare,
-    action: 'conversation:read',
+    action: 'conversation:create',
     primary: true,
   },
 ];

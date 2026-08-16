@@ -5,6 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { z } from 'zod';
 import { Eye, EyeOff } from 'lucide-react';
+import type { DepartmentSummary, Paginated } from '@skillwright/shared/schema';
 import { api } from '@/lib/api';
 import { qk } from '@/lib/query';
 import { ApiError } from '@/lib/problem';
@@ -35,18 +36,26 @@ const schema = z
 
 type RegisterValues = z.infer<typeof schema>;
 
-interface Department {
-  id: string;
-  name: string;
-}
-
 export function RegisterPage() {
   const navigate = useNavigate();
   const [showPassword, setShowPassword] = useState(false);
 
+  /**
+   * `GET /departments` serves the PAGINATED envelope — `{ data, meta }`, built by
+   * `paginated(departmentSummarySchema)` (departments.routes.ts:38) — and a
+   * department is `{ id, name, slug }` (department.ts:5-10). The local
+   * `interface Department { id; name }` that used to stand here type-checked
+   * against neither: it dropped `meta` and `slug`, so a rename on the server
+   * would have been a runtime blank rather than a compile error
+   * (CONTRIBUTING.md:51, lib/types.ts:1-37).
+   *
+   * The route is open to anonymous callers on purpose — this select has to fill
+   * before any session exists — which is why `department:list` is a bare `allow`
+   * for anonymous in the policy table and no `can()` gate belongs here.
+   */
   const departments = useQuery({
     queryKey: qk.departments,
-    queryFn: () => api.get<{ data: Department[] }>('/departments'),
+    queryFn: () => api.get<Paginated<DepartmentSummary>>('/departments'),
     staleTime: 10 * 60_000,
   });
 
@@ -70,11 +79,19 @@ export function RegisterPage() {
         password: values.password,
         departmentId: values.departmentId,
       }),
-    onSuccess: () => {
+    onSuccess: (_data, values) => {
       toast.success('Account created', {
         description: 'Check your inbox for a 6-digit verification code.',
       });
-      void navigate({ to: '/verify-email' });
+      /**
+       * The address has to travel. `POST /auth/register` answers 202 with an ack
+       * and NO session (auth.routes.ts:33-44), and `POST /auth/verify-email`
+       * requires `{ email, code }` — so without this search param the next screen
+       * has no address to verify, and every code the user types 422s.
+       * `VerifyEmailSearch.email` is the declared contract for carrying it
+       * (routes/_public/verify-email.tsx:4-15).
+       */
+      void navigate({ to: '/verify-email', search: { email: values.email } });
     },
     onError: (error) => {
       if (error instanceof ApiError) {

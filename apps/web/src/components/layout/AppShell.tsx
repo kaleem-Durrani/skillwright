@@ -3,11 +3,12 @@ import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'motion/react';
 import { Bell, LogOut, User as UserIcon } from 'lucide-react';
+import { BRAND } from '@skillwright/shared/brand';
 import { cn } from '@/lib/cn';
 import { api } from '@/lib/api';
 import { qk } from '@/lib/query';
 import { useMotionKit } from '@/lib/motion';
-import { usePolicy } from '@/lib/policy';
+import { subject, usePolicy } from '@/lib/policy';
 import { useLogout, useSession } from '@/lib/session';
 import { Avatar } from '@/components/ui/Avatar';
 import { Badge } from '@/components/ui/Badge';
@@ -98,7 +99,11 @@ function TopBar() {
   const navigate = useNavigate();
   const logout = useLogout();
 
-  const canReadNotifications = policy.can('notification:read');
+  // `notification:read` is `isSelf` for every role (policy.ts), so it reads
+  // `subject.userId`. Asked with no subject it denied everyone and hid the bell.
+  const canReadNotifications = user
+    ? policy.can('notification:read', subject({ userId: user.id }))
+    : false;
   const { data: unread } = useQuery({
     queryKey: qk.notifications(true),
     queryFn: () => api.get<{ unread: number }>('/notifications/unread-count'),
@@ -123,7 +128,7 @@ function TopBar() {
           >
             SW
           </span>
-          <span className="font-display text-base font-semibold tracking-tight">Skillwright</span>
+          <span className="font-display text-base font-semibold tracking-tight">{BRAND.name}</span>
         </Link>
 
         {/* The workspace chip states the role in words. It is not a switcher —

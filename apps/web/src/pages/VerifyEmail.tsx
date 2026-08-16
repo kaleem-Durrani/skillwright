@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { MailCheck } from 'lucide-react';
@@ -14,11 +14,23 @@ import { Route } from '@/routes/_public/verify-email';
 
 const RESEND_COOLDOWN_SECONDS = 60;
 
+/**
+ * Shown, and used as the submit guard, when no address is known.
+ *
+ * Both endpoints REQUIRE the address: `verifyEmailSchema` is `{ email, code }` and
+ * `resendVerificationSchema` is `{ email }` (packages/shared/src/schema/auth.ts:113-122),
+ * and `emailSchema` rejects null. Firing either without one is a guaranteed 422,
+ * which the old error branch mistranslated into "That code is not right" — telling
+ * the user their perfectly good code was wrong.
+ */
+const NO_ADDRESS_MESSAGE =
+  'We do not know which address to verify. Open the link from your email, or sign in to start again.';
+
 export function VerifyEmailPage() {
   const search = Route.useSearch();
   const navigate = useNavigate();
   const client = useQueryClient();
-  const { user } = useSession();
+  const { user, isPending: sessionPending } = useSession();
 
   const [code, setCode] = useState(search.code ?? '');
   const [error, setError] = useState<string | null>(null);
@@ -30,13 +42,22 @@ export function VerifyEmailPage() {
     return () => window.clearTimeout(timer);
   }, [cooldown]);
 
-  // No session exists here in the normal flow, so the address comes from the URL.
+  // No session exists here in the normal flow — registration does not sign you in
+  // and login refuses a PENDING_VERIFICATION account — so the address travels in
+  // the URL (`VerifyEmailSearch.email`, routes/_public/verify-email.tsx:4-15).
+  // Register.tsx puts it there; a signed-in visitor's own address wins over it.
   const email = user?.email ?? search.email ?? null;
 
+  // Nothing in the URL and the session still resolving: the address may yet
+  // arrive, so hold the guard rather than accuse the user of a bad link.
+  const addressPending = sessionPending && !search.email;
+
   const verify = useMutation({
-    // `{ email, code }` — the endpoint pairs them deliberately.
-    mutationFn: (value: string) =>
-      api.post<{ ok: true }>('/auth/verify-email', { email, code: value }),
+    // `{ email, code }` — the endpoint pairs them deliberately, so a stolen code
+    // alone is not enough. The address is a mutation VARIABLE rather than a read
+    // of the closure, which is what makes it impossible to fire without one.
+    mutationFn: (variables: { email: string; code: string }) =>
+      api.post<{ ok: true }>('/auth/verify-email', variables),
     onSuccess: async () => {
       // Verification returns an ack, NOT a session: an unauthenticated visitor who
       // verifies from an email link still has to sign in. Refetch rather than
@@ -55,7 +76,9 @@ export function VerifyEmailPage() {
   });
 
   const resend = useMutation({
-    mutationFn: () => api.post<{ ok: true }>('/auth/resend-verification', { email }),
+    // Same rule as above: the address is passed in, never read from the closure.
+    mutationFn: (address: string) =>
+      api.post<{ ok: true }>('/auth/resend-verification', { email: address }),
     onSuccess: () => {
       setCooldown(RESEND_COOLDOWN_SECONDS);
       toast.success('Code sent', { description: 'Check your inbox again.' });
@@ -65,18 +88,36 @@ export function VerifyEmailPage() {
 
   const submit = useCallback(
     (value: string) => {
+      if (!email) {
+        setError(NO_ADDRESS_MESSAGE);
+        return;
+      }
       setError(null);
-      verify.mutate(value);
+      verify.mutate({ email, code: value });
     },
-    [verify],
+    [email, verify],
   );
 
+  const requestNewCode = useCallback(() => {
+    if (!email) {
+      setError(NO_ADDRESS_MESSAGE);
+      return;
+    }
+    resend.mutate(email);
+  }, [email, resend]);
+
   // A code arriving in the URL should just work — the user clicked the link in
-  // the email, and asking them to press a button as well is theatre.
+  // the email, and asking them to press a button as well is theatre. The ref
+  // keeps it to one attempt while letting the effect wait for the address: a
+  // signed-in visitor's email arrives a tick later, when the session resolves.
+  const linkCode = search.code;
+  const autoSubmitted = useRef(false);
   useEffect(() => {
-    if (search.code && search.code.length === 6) submit(search.code);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once for the link
-  }, []);
+    if (autoSubmitted.current || !email) return;
+    if (!linkCode || linkCode.length !== 6) return;
+    autoSubmitted.current = true;
+    submit(linkCode);
+  }, [email, linkCode, submit]);
 
   return (
     <div className="flex flex-col gap-5">
@@ -95,13 +136,24 @@ export function VerifyEmailPage() {
       </div>
 
       <Card variant="raised" className="flex flex-col gap-4">
+        {!email && !addressPending ? (
+          <p
+            role="alert"
+            className="rounded-md border border-warning-line bg-warning-soft px-3 py-2 text-sm text-warning-fg"
+          >
+            {NO_ADDRESS_MESSAGE}
+          </p>
+        ) : null}
+
         <OtpInput
           label="Email verification code"
           value={code}
           onChange={setCode}
           onComplete={submit}
           autoFocus
-          disabled={verify.isPending}
+          // Without an address there is nothing a typed code can be checked
+          // against, so the boxes are inert rather than a trap.
+          disabled={verify.isPending || !email}
           invalid={Boolean(error)}
           describedBy={error ? 'verify-error' : undefined}
         />
@@ -115,7 +167,7 @@ export function VerifyEmailPage() {
         <Button
           block
           loading={verify.isPending}
-          disabled={code.length !== 6}
+          disabled={!email || code.length !== 6}
           onClick={() => submit(code)}
         >
           Verify email
@@ -125,8 +177,8 @@ export function VerifyEmailPage() {
           variant="ghost"
           block
           loading={resend.isPending}
-          disabled={cooldown > 0}
-          onClick={() => resend.mutate()}
+          disabled={!email || cooldown > 0}
+          onClick={requestNewCode}
         >
           {cooldown > 0 ? `Send a new code in ${cooldown}s` : 'Send a new code'}
         </Button>
