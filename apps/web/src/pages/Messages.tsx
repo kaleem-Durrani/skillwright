@@ -120,7 +120,7 @@ export function MessagesPage() {
                       className={cn(
                         'flex tap w-full items-center gap-3 rounded-[var(--card-radius)] border p-3 text-start',
                         'transition-colors duration-[var(--duration-fast)]',
-                        'outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-focus',
+                        'outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-focus',
                         conversation.id === conversationId
                           ? 'border-line-brand bg-selected'
                           : 'border-[var(--card-border)] bg-[var(--card-bg)] hover:bg-hover',

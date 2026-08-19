@@ -114,7 +114,7 @@ export function TabsTrigger({
       className={cn(
         'relative flex tap shrink-0 items-center gap-2 px-3 pb-2.5 pt-2 text-sm font-medium whitespace-nowrap',
         'text-fg-secondary transition-colors duration-[var(--duration-fast)]',
-        'outline-none hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-focus',
+        'outline-none hover:text-fg focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-focus',
         'data-[state=active]:text-fg',
         'md:min-h-10 md:min-w-0',
         className,
@@ -155,7 +155,7 @@ export function TabsContent({
   return (
     <TabsPrimitive.Content
       className={cn(
-        'outline-none focus-visible:outline-2 focus-visible:outline-line-focus',
+        'outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-line-focus',
         className,
       )}
       {...props}

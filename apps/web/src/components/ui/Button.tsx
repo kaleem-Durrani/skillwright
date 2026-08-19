@@ -20,7 +20,7 @@ const buttonVariants = cva(
     'relative inline-flex items-center justify-center gap-2',
     'rounded-md font-medium whitespace-nowrap select-none',
     'transition-[background-color,border-color,color,box-shadow] duration-[var(--duration-fast)] ease-[var(--ease-standard)]',
-    'outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-focus',
+    'outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-focus',
     'disabled:pointer-events-none disabled:opacity-50',
     'aria-busy:pointer-events-none',
     // Touch devices only: kill the 300ms tap highlight without killing focus.

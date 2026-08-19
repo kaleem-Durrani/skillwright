@@ -86,7 +86,7 @@ export function DataList<T>({
               <button
                 type="button"
                 onClick={() => onRowClick(row)}
-                className="w-full rounded-[var(--card-radius)] text-start outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-focus"
+                className="w-full rounded-[var(--card-radius)] text-start outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-focus"
               >
                 {renderCard(row)}
               </button>
