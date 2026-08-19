@@ -9,6 +9,24 @@ This file records **what changed and the state it left the repository in** — n
 
 ---
 
+## 2026-08-17
+
+**The app was rendered in a browser for the first time, and it works.** _(verified — driven with Playwright as a student and an admin, light and dark, 390px and 1280px)_
+Login, dashboard, catalogue, course detail, messages, settings and the admin console all paint against real seeded data. No stuck skeletons anywhere — the subject-free `can()` guards fixed yesterday were the reason two screens would have hung forever. The mobile viewport renders cards with a bottom tab bar and the desktop one renders a table, which is the "table is the enhancement" rule working rather than being asserted. The three mutations that were 422s for every user until yesterday were exercised end to end from the browser: **request enrolment `201`**, **send message `201`**, **save profile `200`** with a "saved" toast. The catalogue shows a `Pending` badge on the course the request had just created.
+
+**The dev proxy pointed at a port nothing listens on.** _(verified — this blocked every screen)_
+`vite.config.ts` proxied `/api` to `localhost:3000` while the API defaults to `PORT=4000` and both `.env` files say 4000. No test could see it: the integration suite calls the API directly and the SPA's tests mock the client, so the dev proxy is exercised only by a human with a browser. It now derives the target from the same `.env` the API boots with.
+
+**The primary button had inverted the design brief's signature decision.** _(verified — zero axe violations after the fix, both themes)_
+`02-design-direction.md` chose Direction A and justified it on one claim: _"the amber-with-dark-text primary button… an 8.5:1 contrast ratio, so it's more accessible than white-on-blue… most education products fight a 3.2:1 white-on-blue button their entire life."_ Its token block says `--text-on-brand: var(--iron-950)`. The implementation shipped `#ffffff`, giving **3.99:1** — the exact failure the direction was chosen to avoid. Restored to dark-on-amber. The first attempt also moved the fill to ember-500 for a better 5.67:1 on the ink — and a reviewer caught that this dropped the button's own edge against the page to 2.98:1, under the 3:1 WCAG 1.4.11 needs for an unbordered filled control. ember-600 is the only shade clearing both at rest (ink 4.54:1, edge 3.72:1), so the fill went back and only the ink changed. Interaction states brighten rather than darken, because under dark ink darkening cuts contrast. `--text-secondary` and `--text-tertiary` each moved down a step so three levels stay distinct and all clear AA, and the dark-mode overlay moved to iron-900 because tertiary text on iron-800 was 4.18:1.
+
+**An honest a11y number required disabling animation.** _(verified)_
+axe first reported ~40 contrast violations including impossible ones — 1.12:1 between colours nobody chose. It was sampling elements mid-fade. Measured with `reducedMotion: 'reduce'` after settle, the real count was **one**, and fixing it took the four main screens to **zero violations in both light and dark**.
+
+**Still open:** the notification bell is a live unread badge on a control with no `onClick` and no link, and there is no notifications route for it to open.
+
+---
+
 ## 2026-08-16
 
 **The API is feature-complete for the SPA's calls, and the SPA now matches it.** _(verified — 816 tests, plus live calls against the seeded database)_

@@ -298,3 +298,73 @@ Because a rule that reads an absent field must deny, a misspelled key and a genu
 **Fix.** Carry a standing "known traps" block into every delegated brief, phrased as rules with the symptom attached, and grow it from what the last round actually got wrong. `docs/LESSONS-LEARNED.md` is that block.
 
 **Rule.** Review output twice: once against the specification, once against the list of things that have already gone wrong here. And when a reviewer reports zero findings on freshly written, never-executed code, disbelieve the report before believing the code — read the raw per-agent results rather than a summary, because a summary can lose them. Nineteen real defects were reported across three rounds while one summary field showed zero.
+
+---
+
+## 20. A dev proxy pointing at a port nothing listens on
+
+**Symptom.** Every screen in the browser is empty or stuck. The API is healthy, `curl` against it returns real data, 815 tests pass, and the SPA's own unit tests are green. Nothing anywhere reports an error.
+
+**Root cause.** `apps/web/vite.config.ts` proxied `/api` to `http://localhost:3000`. The API defaults to `PORT=4000` and both `.env` files say 4000. The number was written twice, in two files, and drifted — and _no test could see it_: the integration suite calls the API directly through `inject()`, and the SPA's unit tests mock the client. The dev proxy is exercised by exactly one thing, a human with a browser, and nobody had opened one.
+
+**Fix.** The proxy now loads the repo-root `.env` and derives the target from `PORT`, so there is one source of truth:
+
+```ts
+if (existsSync(rootEnv)) process.loadEnvFile(rootEnv);
+const API_ORIGIN = `http://localhost:${process.env.PORT ?? '4000'}`;
+```
+
+**Rule.** An address written in two places is a bug with a delay on it. Derive it from the configured value rather than restating it. And note where the gap was: between two well-tested components, in the wiring neither one's tests cover. Ask what your test suite structurally _cannot_ see — for a SPA and an API tested separately, the answer is always the thing that joins them.
+
+---
+
+## 21. Measuring accessibility while the page is still animating
+
+**Symptom.** axe reports roughly forty contrast violations, some absurd — ratios of 1.12 and 1.15, foreground `#e7eaee` on background `#f5f7f9`, colours no designer chose.
+
+**Root cause.** The app fades content in. axe sampled elements mid-transition and measured the _interpolated_ colour against the background. Every one of those impossible ratios was a real element at partial opacity.
+
+**Fix.** Measure with animation disabled and after the page settles:
+
+```js
+const context = await browser.newContext({ reducedMotion: 'reduce' });
+await page.waitForTimeout(2000);
+```
+
+Forty apparent violations became **one** real one.
+
+**Rule.** Never report an a11y number taken from an animating page. Force `reducedMotion: 'reduce'`, wait for settle, then measure. And when a tool reports something physically implausible — a 1.12:1 ratio between two colours nobody picked — distrust the measurement before you distrust the code. Reporting forty violations when there is one destroys the credibility of the one that mattered.
+
+---
+
+## 22. The implementation quietly inverted the brief's signature decision
+
+**Symptom.** The primary button — the most-clicked element in the product — was white text on ember at **3.99:1**, failing WCAG AA. So was the wordmark tile.
+
+**Root cause.** `docs/rebuild/02-design-direction.md` picks Direction A, and lists as its first memorable quality: _"the amber-with-dark-text primary button — `#171412` on `#E88C05`. Nobody in education does this… it happens to be an 8.5:1 contrast ratio, so it's more accessible than white-on-blue."_ It then justifies the whole direction on that basis: _"It solves the accessibility problem instead of fighting it. Most education products fight a 3.2:1 white-on-blue button their entire life."_
+
+The token block spells it out — `--text-on-brand: var(--iron-950)`. The implementation shipped `--text-on-brand: #ffffff`. The single decision the direction was _chosen for_ was reversed in the file that implements it, producing the exact failure it was chosen to avoid.
+
+**Fix.** `--text-on-brand` is the dark ink, the brand fill is `ember-500`, and interaction states go **lighter** rather than darker — with dark ink on the fill, darkening cuts contrast instead of adding it. 5.67:1. `--text-secondary`/`--text-tertiary` moved down a step each so three distinct levels all clear AA. Both themes now report **zero** axe violations across four screens.
+
+**Rule.** When a brief names a specific value as the reason for a decision, that value is a requirement, not an illustration — assert it in a test or a token comment rather than re-deriving it from taste later. And a design system's own tokens deserve the same "does it match the spec" review as code: nothing failed, nothing warned, and the claim quietly became false.
+
+---
+
+## 23. Fixing one contrast axis can break the other
+
+**Symptom.** A primary button was changed from white-on-ember to dark-on-ember to fix a 3.99:1 text failure. Text contrast went to 5.67:1 and axe reported zero violations. A reviewer then measured the button's **fill against the page** and found 2.98:1 — under the 3:1 that WCAG 1.4.11 requires for an unbordered filled control to be identifiable at all.
+
+**Root cause.** Two different requirements point in opposite directions on the same ramp. Darkening a fill raises white-text contrast and lowers dark-ink contrast; lightening it does the reverse — and the fill's contrast against the surrounding surface moves with it. Optimising for the ratio the tool reports is not the same as satisfying the standard.
+
+Worse, **axe did not catch the second failure**: it evaluates text contrast (1.4.3), not the non-text contrast of a component boundary (1.4.11), and it only sees the states actually rendered — never a hover tint, a highlighted row, or a panel that was closed when the scan ran.
+
+**Fix.** Tabulate the whole ramp against every constraint at once before picking. Here exactly one shade satisfied both:
+
+| fill          | ink on fill (≥4.5) | fill vs canvas (≥3.0) |
+| ------------- | ------------------ | --------------------- |
+| ember-500     | 5.67               | **2.98**              |
+| **ember-600** | **4.54**           | **3.72**              |
+| ember-700     | **3.19**           | 5.30                  |
+
+**Rule.** A colour decision has at least two contrast constraints — text on the fill, and the fill against what surrounds it — plus one per interaction state. Compute the table; do not pick by improving the number you happened to measure. And treat a green axe run as evidence about rendered text only: closed overlays, hover states and component boundaries are outside what it checks, so "zero violations" is a floor, not a result.
