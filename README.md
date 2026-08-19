@@ -68,7 +68,7 @@ docker compose up -d --wait && pnpm db:migrate && pnpm db:seed
 pnpm dev
 ```
 
-The API is on `http://localhost:3000`, the SPA on `http://localhost:5173`, MinIO's console on `:9001`, and every outbound email lands in Mailpit at `http://localhost:8025`. The seed is deterministic and creates one demo account per role.
+The API is on `http://localhost:4000`, the SPA on `http://localhost:5173`, MinIO's console on `:9001`, and every outbound email lands in Mailpit at `http://localhost:8025`. The seed is deterministic and creates one demo account per role.
 
 There is no step four.
 
