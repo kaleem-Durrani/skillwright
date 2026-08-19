@@ -167,12 +167,21 @@ export type {
 /**
  * The payload is denormalised on write, so rendering a notification never joins to
  * a row that may since have been deleted. `payload.title` and `payload.body` are
- * guaranteed; everything else on it is type-specific and typed `unknown`.
+ * the ONLY two keys on it: `notificationPayloadSchema` is a closed object and the
+ * API strips anything else a producer wrote into the `Json` column, so a screen
+ * that wants an actor's name or an avatar is asking for something no endpoint
+ * serves (notification.ts:17-32).
+ *
+ * `UnreadCountResponse` is `{ unread: number }` — the body of
+ * `GET /notifications/unread-count` AND of `POST /notifications/read`, which
+ * answers with the recomputed count rather than 204 so the badge updates from the
+ * mutation the SPA already awaited.
  */
 export type {
   NotificationDto,
   NotificationPayload,
   NotificationTypeValue,
+  UnreadCountResponse,
 } from '@skillwright/shared/schema';
 
 // ---------------------------------------------------------------------------

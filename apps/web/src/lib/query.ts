@@ -42,7 +42,21 @@ export function createQueryClient(): QueryClient {
  */
 export const qk = {
   session: ['session'] as QueryKey,
+  /*
+   * TWO key spaces under `notifications`, because there are two SHAPES.
+   *
+   * `notifications(unreadOnly)` is the LIST — `Paginated<NotificationDto>` under a
+   * filter. `notificationsUnread` is the scalar `{ unread: number }` counter behind
+   * the badge. These used to share a slot: `notifications(true)` was read as "the
+   * list, filtered to unread" by its own type parameter and WRITTEN as the count by
+   * the mark-read mutation, so one key held two incompatible shapes and the first
+   * component to actually request unread-only rows would have got a number back.
+   *
+   * The count key deliberately still starts with 'notifications', so a future
+   * blanket `invalidateQueries({ queryKey: ['notifications'] })` reaches both.
+   */
   notifications: (unreadOnly = false) => ['notifications', { unreadOnly }] as QueryKey,
+  notificationsUnread: ['notifications', 'unread-count'] as QueryKey,
   courses: (params: Record<string, unknown> = {}) => ['courses', params] as QueryKey,
   course: (courseId: string) => ['courses', courseId] as QueryKey,
   courseResources: (courseId: string) => ['courses', courseId, 'resources'] as QueryKey,
