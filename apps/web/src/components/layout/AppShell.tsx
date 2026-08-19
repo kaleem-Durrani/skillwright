@@ -2,7 +2,7 @@ import { useMemo, type ReactNode } from 'react';
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'motion/react';
-import { Bell, LogOut, User as UserIcon } from 'lucide-react';
+import { LogOut, User as UserIcon } from 'lucide-react';
 import { BRAND } from '@skillwright/shared/brand';
 import { cn } from '@/lib/cn';
 import { api } from '@/lib/api';
@@ -10,9 +10,9 @@ import { qk } from '@/lib/query';
 import { useMotionKit } from '@/lib/motion';
 import { subject, usePolicy } from '@/lib/policy';
 import { useLogout, useSession } from '@/lib/session';
+import type { UnreadCountResponse } from '@/lib/types';
 import { Avatar } from '@/components/ui/Avatar';
 import { Badge } from '@/components/ui/Badge';
-import { IconButton } from '@/components/ui/Button';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/DropdownMenu';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { NAV_BY_ROLE, ROLE_LABEL, WORKSPACE_LABEL, primaryNav, type NavItem } from './nav.js';
+import { NotificationBell } from './NotificationBell.js';
 
 function useActivePath(): string {
   return useRouterState({ select: (state) => state.location.pathname });
@@ -104,9 +105,11 @@ function TopBar() {
   const canReadNotifications = user
     ? policy.can('notification:read', subject({ userId: user.id }))
     : false;
+  // `notificationsUnread`, not `notifications(true)`: the count is a scalar with
+  // its own key, not the unread-filtered LIST. See qk in lib/query.ts.
   const { data: unread } = useQuery({
-    queryKey: qk.notifications(true),
-    queryFn: () => api.get<{ unread: number }>('/notifications/unread-count'),
+    queryKey: qk.notificationsUnread,
+    queryFn: () => api.get<UnreadCountResponse>('/notifications/unread-count'),
     enabled: canReadNotifications,
     staleTime: 60_000,
   });
@@ -120,7 +123,7 @@ function TopBar() {
       <div className="gutter-safe flex h-[var(--shell-topbar-h)] items-center gap-2">
         <Link
           to="/dashboard"
-          className="flex items-center gap-2 rounded-md outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-focus"
+          className="flex items-center gap-2 rounded-md outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-focus"
         >
           <span
             aria-hidden="true"
@@ -128,7 +131,14 @@ function TopBar() {
           >
             SW
           </span>
-          <span className="font-display text-base font-semibold tracking-tight">{BRAND.name}</span>
+          {/* `min-w-0 truncate` so the brand name is what gives way when the bar
+              runs out of room. It is a single unbreakable word, so without this it
+              holds its full intrinsic width and the squeeze lands on the controls
+              at the other end instead — at 375px with the "Demo" badge showing,
+              that is the notification bell. */}
+          <span className="min-w-0 truncate font-display text-base font-semibold tracking-tight">
+            {BRAND.name}
+          </span>
         </Link>
 
         {/* The workspace chip states the role in words. It is not a switcher —
@@ -151,24 +161,7 @@ function TopBar() {
 
         <div className="flex-1" />
 
-        {canReadNotifications ? (
-          <div className="relative">
-            <IconButton
-              aria-label={
-                unreadCount > 0 ? `Notifications, ${unreadCount} unread` : 'Notifications'
-              }
-              icon={<Bell className="size-5" />}
-            />
-            {unreadCount > 0 ? (
-              <span
-                aria-hidden="true"
-                className="pointer-events-none absolute end-1.5 top-1.5 grid min-w-4 place-items-center rounded-full bg-brand px-1 text-2xs font-bold text-fg-on-brand tabular-nums"
-              >
-                {unreadCount > 9 ? '9+' : unreadCount}
-              </span>
-            ) : null}
-          </div>
-        ) : null}
+        {canReadNotifications ? <NotificationBell unreadCount={unreadCount} /> : null}
 
         <ThemeToggle />
 
@@ -177,7 +170,7 @@ function TopBar() {
             <button
               type="button"
               aria-label={`Account menu for ${user.name}`}
-              className="tap grid shrink-0 place-items-center rounded-full outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-focus md:size-9 md:min-h-0 md:min-w-0"
+              className="tap grid shrink-0 place-items-center rounded-full outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-focus md:size-9 md:min-h-0 md:min-w-0"
             >
               <Avatar name={user.name} src={user.avatarUrl} size="sm" />
             </button>
@@ -240,7 +233,7 @@ function Sidebar({ items, pathname }: { items: NavItem[]; pathname: string }) {
                 className={cn(
                   'relative flex min-h-10 items-center gap-3 rounded-md px-3 text-sm font-medium',
                   'transition-colors duration-[var(--duration-fast)]',
-                  'outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-focus',
+                  'outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-focus',
                   active ? 'text-fg-brand' : 'text-fg-secondary hover:bg-hover hover:text-fg',
                 )}
               >
@@ -284,7 +277,7 @@ function BottomTabs({ items, pathname }: { items: NavItem[]; pathname: string })
                 className={cn(
                   'relative flex min-h-[var(--shell-tabbar-h)] flex-col items-center justify-center gap-1 px-1',
                   'text-2xs font-medium transition-colors duration-[var(--duration-fast)]',
-                  'outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-line-focus',
+                  'outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-line-focus',
                   active ? 'text-fg-brand' : 'text-fg-tertiary',
                 )}
               >
