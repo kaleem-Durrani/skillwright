@@ -51,6 +51,39 @@ const itemBase = cn(
   'relative flex tap w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-sm',
   'outline-none select-none',
   'focus:bg-hover data-[highlighted]:bg-hover',
+  /*
+   * THE keyboard focus indicator for every menu row in the app.
+   *
+   * The ring is gated on `focus-visible`, NOT on `data-[highlighted]`. Radix
+   * focuses an item on pointermove, and it sets data-highlighted from that focus —
+   * so keying the outline off the attribute paints a 2px ring on every row a mouse
+   * crosses. `:focus-visible` does not match a programmatic focus whose last input
+   * modality was the pointer, but does match arrow-key navigation, which is exactly
+   * the distinction wanted here. `bg-hover` remains the pointer affordance.
+   *
+   * Suppressing the outline left `bg-hover` as the ONLY
+   * highlight, and that tint is 1.04:1 on the light overlay (iron-100 on white)
+   * and 1.20:1 on the dark one (6% white on iron-900) — nowhere near the 3:1 that
+   * WCAG 1.4.11/2.4.11 require of a focus indicator. A sighted keyboard user could
+   * not see which row they were on.
+   *
+   * `outline-solid` is load-bearing and NOT redundant. Tailwind v4 compiles
+   * `outline-2` to `outline-style: var(--tw-outline-style); outline-width: 2px`,
+   * and `outline-none` sets `--tw-outline-style: none` on this same element —
+   * custom properties resolve per element, not per rule, so width alone paints
+   * NOTHING no matter which rule wins. `outline-solid` re-declares the variable
+   * under the `focus-visible` variant, whose pseudo-class also out-specifies the
+   * bare `.outline-none` class.
+   *
+   * Inset (`-outline-offset-2`) because the content is `overflow-hidden`; an
+   * outward ring on the first and last row would be clipped.
+   *
+   * --border-focus measures 4.69:1 on the light overlay and 6.43:1 on the dark
+   * one, and stays above 3:1 over both the hover tint and the destructive
+   * `bg-danger-soft` row in both themes.
+   */
+  'focus-visible:outline-solid focus-visible:outline-2',
+  'focus-visible:-outline-offset-2 focus-visible:outline-line-focus',
   'data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
   // Pointer devices get a tighter row; touch keeps the 44px target.
   'md:min-h-9 md:min-w-0 md:py-1.5',
