@@ -191,13 +191,21 @@
 
   /* text */
   --text-primary: var(--color-iron-900);
-  --text-secondary: var(--color-iron-600);
-  --text-tertiary: var(--color-iron-500);
+  /* Secondary steps down to iron-700 so tertiary can rise to iron-600 without the
+     two collapsing into one another: iron-500 measured 4.36:1 on --surface, under
+     AA for the 11-13px sizes tertiary is actually used at (footer, field hints,
+     section eyebrows). Three levels, all >= 6:1, still visibly distinct. */
+  --text-secondary: var(--color-iron-700);
+  --text-tertiary: var(--color-iron-600);
   --text-disabled: var(--color-iron-400);
   --text-inverse: var(--color-iron-50);
   --text-brand: var(--color-ember-700);
   --text-link: var(--color-blueprint-700);
-  --text-on-brand: #ffffff;
+  /* Dark-on-amber, per the design direction: "it happens to be an 8.5:1 contrast
+     ratio, so it's *more* accessible than white-on-blue". White here inverted that
+     decision and produced 3.99:1 — the exact failure the direction was chosen to
+     avoid. Dark ink on ember-500 is 5.67:1. */
+  --text-on-brand: var(--color-iron-950);
   --text-on-status: #ffffff;
 
   /* borders */
@@ -209,9 +217,18 @@
   --border-danger: var(--color-oxide-500);
 
   /* brand */
+  /* ember-600 is the only shade that clears BOTH constraints at rest: dark ink on
+     it is 4.54:1 (AA text) and the fill itself is 3.72:1 against --surface-canvas,
+     which WCAG 1.4.11 requires so an unbordered filled button is identifiable at
+     all. ember-500 reads better as text (5.67:1) but drops the fill's own edge to
+     2.98:1 — optimising the ink and losing the button.
+     Interaction states brighten rather than darken, because under dark ink
+     darkening cuts contrast instead of adding it; their boundary contrast is
+     lower, which is acceptable for transient states once the resting one is
+     identifiable. */
   --brand-solid: var(--color-ember-600);
-  --brand-solid-hover: var(--color-ember-700);
-  --brand-solid-active: var(--color-ember-800);
+  --brand-solid-hover: var(--color-ember-500);
+  --brand-solid-active: var(--color-ember-400);
   --brand-soft: var(--color-ember-100);
   --brand-soft-hover: var(--color-ember-200);
   --brand-on-soft: var(--color-ember-800);
@@ -270,7 +287,11 @@
     --surface-base: var(--color-iron-900);
     --surface-raised: var(--color-iron-800);
     --surface-sunken: #0c0f14;
-    --surface-overlay: var(--color-iron-800);
+    /* iron-900, not iron-800: --text-tertiary (iron-400) measures 4.18:1 on an
+       iron-800 overlay, under AA for the 11-12px timestamps and labels that every
+       dropdown puts there. On iron-900 it is 5.12:1, and --text-secondary stays a
+       clearly distinct 8.07:1. */
+    --surface-overlay: var(--color-iron-900);
     --surface-inverse: var(--color-iron-50);
     --surface-hover: rgb(255 255 255 / 0.06);
     --surface-active: rgb(255 255 255 / 0.11);
@@ -285,7 +306,11 @@
     --text-inverse: var(--color-iron-900);
     --text-brand: var(--color-ember-300);
     --text-link: var(--color-blueprint-300);
-    --text-on-brand: #ffffff;
+    /* Dark-on-amber, per the design direction: "it happens to be an 8.5:1 contrast
+     ratio, so it's *more* accessible than white-on-blue". White here inverted that
+     decision and produced 3.99:1 — the exact failure the direction was chosen to
+     avoid. Dark ink on ember-500 is 5.67:1. */
+    --text-on-brand: var(--color-iron-950);
     --text-on-status: var(--color-iron-950);
 
     --border-subtle: rgb(255 255 255 / 0.09);
@@ -350,7 +375,8 @@
   --surface-base: var(--color-iron-900);
   --surface-raised: var(--color-iron-800);
   --surface-sunken: #0c0f14;
-  --surface-overlay: var(--color-iron-800);
+  /* See the note in the prefers-color-scheme block above. */
+  --surface-overlay: var(--color-iron-900);
   --surface-inverse: var(--color-iron-50);
   --surface-hover: rgb(255 255 255 / 0.06);
   --surface-active: rgb(255 255 255 / 0.11);
@@ -365,7 +391,11 @@
   --text-inverse: var(--color-iron-900);
   --text-brand: var(--color-ember-300);
   --text-link: var(--color-blueprint-300);
-  --text-on-brand: #ffffff;
+  /* Dark-on-amber, per the design direction: "it happens to be an 8.5:1 contrast
+     ratio, so it's *more* accessible than white-on-blue". White here inverted that
+     decision and produced 3.99:1 — the exact failure the direction was chosen to
+     avoid. Dark ink on ember-500 is 5.67:1. */
+  --text-on-brand: var(--color-iron-950);
   --text-on-status: var(--color-iron-950);
 
   --border-subtle: rgb(255 255 255 / 0.09);
