@@ -136,10 +136,30 @@ export function CourseDetailPage() {
    */
   const viewerSubject = course.data ? courseSubject(course.data) : undefined;
 
+  /*
+   * No `enabled` gate, deliberately — and it used to have one.
+   *
+   * `resource:read` is decided PER ROW: its anonymous rule is `isPublic` and its
+   * STUDENT rule is `or(isPublic, enrolledApproved)` (policy.ts:191-196). The gate here
+   * asked that question with `viewerSubject`, which is a COURSE — and a course has no
+   * `isPublic`, only `publishedAt`. So the `isPublic` disjunct could never fire and the
+   * tab was closed to every signed-in non-admin who was not enrolled, while the API
+   * served those same public rows to anyone including logged-out visitors. Driven in a
+   * browser on 2026-08-23: four public resources, visible to `curl`, invisible to a
+   * teacher looking at a colleague's course.
+   *
+   * This is the shape of mistake LESSONS-LEARNED #15 describes, one step along: not a
+   * `can()` with NO subject, but a `can()` with the wrong KIND of subject. Both fail
+   * silently and both deny.
+   *
+   * A list has no single subject, so it does not get a subject gate. The server scopes
+   * the rows — `visibilityWhere` in resources.service.ts mirrors the same policy rows
+   * as SQL, and the route's own gate is `course:read`, which being on this page already
+   * satisfies. What comes back is what this viewer may see.
+   */
   const resources = useQuery({
     queryKey: qk.courseResources(courseId),
     queryFn: () => api.get<Paginated<ResourceDto>>(`/courses/${courseId}/resources`),
-    enabled: policy.can('resource:read', viewerSubject),
   });
 
   const enrollments = useQuery({
@@ -265,13 +285,7 @@ export function CourseDetailPage() {
         </TabsList>
 
         <TabsContent value="resources">
-          {!policy.can('resource:read', viewerSubject) ? (
-            <EmptyState
-              variant="empty"
-              title="Resources are for enrolled students"
-              description="Request enrolment above. Once a teacher approves it, everything here opens up."
-            />
-          ) : resources.isPending ? (
+          {resources.isPending ? (
             <SkeletonList rows={3} />
           ) : (
             <DataList
@@ -339,17 +353,32 @@ export function CourseDetailPage() {
                 );
               }}
               empty={
+                /*
+                 * Three descriptions, because an empty list means three different
+                 * things and only one of them used to be said.
+                 *
+                 * "The teacher has not published anything" is a claim about the whole
+                 * course, and a viewer without an approved enrolment cannot know that:
+                 * the list they were served is the PUBLIC slice, so private material
+                 * may well exist. Saying it anyway was a guess dressed as a fact. The
+                 * middle branch says only what is true from where they stand, and
+                 * still does not confirm that anything private is there.
+                 *
+                 * There is no "Add a resource" action any more. It called
+                 * `() => undefined`. `POST /resources` exists now, but no screen builds
+                 * that form yet, and a button that does nothing is worse than no button
+                 * — the same call as the suspend dialog's reinstatement promise.
+                 */
                 <EmptyState
                   variant="empty"
                   title="No resources yet"
                   description={
                     policy.can('resource:create', viewerSubject)
-                      ? 'Upload a document, link a video, or add an external link.'
-                      : 'The teacher has not published anything for this course yet.'
+                      ? 'Nothing has been added to this course yet.'
+                      : data.viewerEnrollmentStatus === 'APPROVED'
+                        ? 'The teacher has not published anything for this course yet.'
+                        : 'Nothing public has been published here. Enrolled students may see more.'
                   }
-                  {...(policy.can('resource:create', viewerSubject)
-                    ? { actionLabel: 'Add a resource', onAction: () => undefined }
-                    : {})}
                 />
               }
             />
