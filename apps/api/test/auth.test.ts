@@ -178,6 +178,28 @@ describe('account lifecycle', () => {
     expect((await me(first)).statusCode).toBe(401);
     expect((await me(second)).statusCode).toBe(401);
   });
+
+  /**
+   * The CODE, not the detail. The SPA renders errors by code (web problem.ts:104-106)
+   * because policy details carry rule names like `TEACHER:ownsCourse` and are not user
+   * copy — so a generic FORBIDDEN here reached a suspended person as "You don't have
+   * access to that." while `ERROR_COPY.ACCOUNT_SUSPENDED`, the sentence written for
+   * this exact case, was never once rendered. Observed in a browser on 2026-08-22.
+   */
+  it('refuses a suspended account at login, naming ACCOUNT_SUSPENDED', async () => {
+    const email = 'suspended-login@example.com';
+    await registerAndVerify(email);
+    const live = await loginOk(email);
+
+    await prisma.user.update({ where: { email }, data: { status: 'SUSPENDED' } });
+
+    const response = await post('/login', { email, password: PASSWORD });
+    expect(response.statusCode).toBe(403);
+    expect(response.json().code).toBe('ACCOUNT_SUSPENDED');
+
+    // The live session dies on the attempt, not merely on the next request.
+    expect((await me(live)).statusCode).toBe(401);
+  });
 });
 
 describe('user enumeration', () => {

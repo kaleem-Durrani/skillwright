@@ -14,6 +14,7 @@ import { env, isProduction } from '../../env.js';
 import {
   conflict,
   emailNotVerified,
+  accountSuspended,
   forbidden,
   notFound,
   unauthenticated,
@@ -223,7 +224,7 @@ export async function verifyEmail(input: VerifyEmailInput): Promise<void> {
   const user = await findByEmail(input.email);
   if (!user) throw validationFailed([{ path: 'code', message: 'Invalid or expired code' }]);
 
-  if (user.status === 'SUSPENDED') throw forbidden('This account has been suspended');
+  if (user.status === 'SUSPENDED') throw accountSuspended();
   if (user.status === 'ACTIVE') return; // Idempotent: a double-submitted code is not an error.
 
   const { outcome } = await consumeCode(user.id, 'EMAIL_VERIFY', input.code);
@@ -264,7 +265,15 @@ export async function login(
 
   if (user.status === 'SUSPENDED') {
     await destroyAllSessions(user.id);
-    throw forbidden('This account has been suspended');
+    /*
+     * `accountSuspended()`, not `forbidden()`. The SPA renders errors from the CODE,
+     * never the detail (problem.ts:104-106) — policy details carry rule names like
+     * `TEACHER:ownsCourse` and are not user copy. A generic FORBIDDEN therefore reached
+     * a suspended person as "You don't have access to that.", while the sentence written
+     * for exactly this case, ERROR_COPY.ACCOUNT_SUSPENDED (problem.ts:75), was dead.
+     * auth.plugin.ts:66 already throws this for a live session; login now matches.
+     */
+    throw accountSuspended();
   }
   if (user.status === 'PENDING_VERIFICATION') {
     await issueAndSendCode(user, 'EMAIL_VERIFY');
