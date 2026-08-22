@@ -420,3 +420,84 @@ The live region exists — `span[aria-live="assertive"][role="status"]` — but 
 **Fix.** A `QueryCache`/`MutationCache` `onError` that recognises `UNAUTHENTICATED` and `ACCOUNT_SUSPENDED`, drops the session entry and everything fetched under it, and re-runs the router's guards. It decides nothing about where a dead session goes — the guard still does. The guard against loops is that it only fires while the cache still believes someone is signed in, and the first thing it does is stop believing that.
 
 **Rule.** Any server-side authority that can change **retroactively** — suspension, a role change, a revoked grant, a logout in another tab — needs a client-side listener, because a guard is only as fresh as the data it reads. Having the right redirect logic is not the same as it running. And when testing revocation, navigate to a screen that makes an **authenticated** request: a public endpoint answers `200` to an anonymous caller, so the app looks fine while being signed out.
+
+---
+
+## 28. A comment cannot hold an invariant. Only a shared function or a test can
+
+**Symptom.** The dashboard's `resources` tile counted 24 while the resources list served 4 — the "tile reads 23 above a list of 4" failure three other counters in the same file are written to avoid.
+
+**Root cause.** The `resource:read` visibility rules existed as a WHERE clause in two places. That was foreseen: `dashboard.service.ts` carried an explicit instruction to whoever would build the module —
+
+> `TODO(resources): when the resources module lands it owns this mirror. Move this function into resources.service.ts as its visibilityWhere and IMPORT it here — do not leave a second copy behind, or a policy change fixes the list and silently misses the tile.`
+
+The module landed with a second copy, and the two had drifted **inside the same change**: the new one excluded resources whose COURSE was soft-deleted, the old one did not. Nobody had ignored the instruction on purpose; the module was written by someone reading the module's own contract, and the TODO was in a file they had no reason to open.
+
+The test that should have caught it was there too, and was named `drops a soft-deleted course out of every counter that reaches it`. It asserted two of the four counters. Not the one that was wrong.
+
+**Fix.** `visibilityWhere` is exported from `resources.service.ts` and imported by the dashboard, which now has no clause of its own — one mirror, structurally. Plus a test that pins the tile to the list: for a teacher, a student and an admin, `stats().resources === GET /resources meta.total`, with a soft-deleted course AND a soft-deleted resource in the fixture so the equality cannot pass as `0 === 0`.
+
+**Rule.** When you notice an invariant spanning two files, a comment asking the next person to fix it is a wish. Make it structural (one exported function) or make it fail (a test that compares the two). And a test whose name promises "every X" must assert every X — the gap between the name and the body is where this hid.
+
+---
+
+## 29. An object literal used as a whitelist is not a whitelist
+
+**Symptom.** `GET /resources?sort=toString` — unauthenticated — answered 500.
+
+**Root cause.** The sort whitelist was an object literal, so it inherits from `Object.prototype`:
+
+```ts
+const ORDER_BY: Record<string, (order) => OrderBy> = { createdAt: …, title: … };
+const build = query.sort === undefined ? undefined : ORDER_BY[query.sort];
+return (build ?? DEFAULT_ORDER)(query.order);
+```
+
+`ORDER_BY['toString']` is not `undefined` — it is `Object.prototype.toString`, a **function**, so it sails past the `??` and gets called. It returns a **string**, Prisma is handed `orderBy: '[object Undefined]'`, and the request dies. `?sort=valueOf` throws outright; `?sort=constructor` returns a boxed object.
+
+The code was already careful in the way people remember to be careful — the value was matched against a table rather than interpolated into a key, and a comment said so. The hole is not the interpolation, it is the lookup.
+
+**Fix.** `Object.prototype.hasOwnProperty.call(ORDER_BY, query.sort)` before the index. `__proto__: null` on the table also works, but not while it is typed `Record<string, Fn>` — `null` is not assignable to the value type, so the guard goes at the lookup.
+
+**Rule.** Any time a user-controlled string indexes an object, the prototype chain is part of the input space. Use a `Map`, a null-prototype object, or an explicit `hasOwnProperty` — and test the lookup with `toString`, `valueOf` and `constructor`, not just with a nonsense key, which correctly returns `undefined` and proves nothing.
+
+---
+
+## 30. Parallel agents cannot share one test database
+
+**Symptom.** A build agent reported that the API suite had collapsed: `172 of 241 tests failing across 10 of 11 files`, including files nothing had touched. Every failure was a `409` or `422` at `signIn`. Re-running by hand on the same tree: all green.
+
+**Root cause.** Two agents working in parallel each ran `vitest` against `skillwright_test`. `apps/api/vitest.config.ts` sets `poolOptions: { forks: { singleFork: true } }` precisely so files cannot truncate each other's rows — but that guarantees serialisation **within one vitest process**, and says nothing about two processes. One run's `resetDatabase()` deleted users the other had just created; the survivor's `StudentProfile` then blocked `department.deleteMany` on a Restrict FK, `createDepartment` collided on the unique slug, and every subsequent `signIn` failed. The suite was not broken. The database was.
+
+**Fix.** One database per agent. `test/setup.ts` already reads `TEST_DATABASE_URL` ahead of `DATABASE_URL`, so:
+
+```
+createdb skillwright_a_test && prisma migrate deploy   # per agent
+TEST_DATABASE_URL=…/skillwright_a_test npx vitest run test/<file>
+```
+
+The name **must** end in `_test` — `setup.ts` refuses anything else, because `resetDatabase()` deletes every user. `skillwright_test_a` is rejected; `skillwright_a_test` is not.
+
+**Rule.** Before fanning agents out, list the singletons they will contend for — the database, a port, a lockfile, a generated client — and give each agent its own or serialise that step. And when an agent reports a catastrophic failure in code nobody touched, suspect the shared resource before the code: re-run it alone first.
+
+---
+
+## 31. A `can()` with the wrong SHAPE of subject denies exactly like one with no subject
+
+**Symptom.** Four public course resources were served to `curl` with no session at all, and were invisible in the UI to every signed-in user except an admin — including the teacher who owned the course next door and a student browsing the catalogue.
+
+**Root cause.** The Resources tab gated its fetch on `policy.can('resource:read', viewerSubject)`, and `viewerSubject` is a **course**:
+
+```ts
+function courseSubject(course: CourseDetail): PolicySubject {
+  return subject({ id, courseId, courseTeacherId, departmentId, publishedAt, enrollmentStatus });
+}
+```
+
+`resource:read` is `or(isPublic, enrolledApproved)` for a student and `or(isPublic, ownsCourse, isAuthor)` for a teacher. A course has no `isPublic` — it has `publishedAt` — so that disjunct could never fire, whatever the data said. Every `Subject` field is optional, so nothing complained: not the type system, not a runtime error, not a log line.
+
+This is [15] one step along. There the subject was **missing**; here it is **present, well-formed, and about the wrong kind of thing** — which is harder to see, because the call site looks correct and the subject is genuinely needed by the tab's other gates.
+
+**Fix.** The list stopped asking. `resource:read` is decided per row, and a list has no single subject — so the server scopes the rows (`visibilityWhere` mirrors the same policy rows as SQL) and the client renders what it is given. The route's own gate is `course:read`, which being on the page already satisfies.
+
+**Rule.** Before passing a subject to `can()`, check that the action's rules read fields that this kind of subject actually has. If the action is decided per row and you are gating a list, that is a category error and the answer is a WHERE clause, not a better subject. Ask what the rule reads, then ask whether the thing in your hand carries it.

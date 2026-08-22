@@ -9,6 +9,35 @@ This file records **what changed and the state it left the repository in** — n
 
 ---
 
+## 2026-08-23
+
+**The resources module is built, registered and driven in a browser.** _(verified — six endpoints, plus the nested list the SPA had been calling since before it existed)_
+`GET /resources`, `GET /resources/:id`, `POST`, `PATCH`, `DELETE` (soft), and `GET /courses/:courseId/resources`. The nested list is gated on `course:read` rather than `resource:read`, because a non-enrolled student is still entitled to a course's PUBLIC resources and a resource-shaped gate would 403 a caller who should get a filtered list — the rows are narrowed by `visibilityWhere`, which mirrors the `resource:read` policy rows as SQL. `GET /resources` carries no subject gate at all, for the reason lesson 15 records: a subject-free `can()` would deny every caller including admins. Download stays unbuilt on purpose; it needs MinIO presigning and collides with the `Resource.uploadId` SetNull-vs-CHECK conflict.
+
+Written by a multi-agent workflow — three builders on disjoint files, then four review lenses each piped into a verifier whose job was to refute. **24 findings survived refutation, 15 did not.**
+
+**The dashboard tile and the resources list had already drifted apart, inside one change.** _(verified — 24 vs 4, now 24 = 24)_
+`dashboard.service.ts` carried an explicit instruction to whoever would build this module: move the visibility mirror into `resources.service.ts` and import it back, _"do not leave a second copy behind, or a policy change fixes the list and silently misses the tile."_ The module landed with a second copy, and the two disagreed immediately: the new one excludes resources whose COURSE is soft-deleted, the old one did not, so the tile counted rows no list would ever return. `visibilityWhere` is now exported and imported, and a test pins `stats().resources` to `GET /resources` `meta.total` for three roles with both a soft-deleted course and a soft-deleted resource in the fixture, so the equality cannot pass as `0 === 0`. The test that should have caught it was already there, named _"drops a soft-deleted course out of every counter that reaches it"_ — it asserted two counters of four, and not the one that was wrong.
+
+**An anonymous caller could 500 the list with `?sort=toString`.** _(verified — reproduced by reading the lookup, then fixed and pinned)_
+The sort whitelist was an object literal, so `ORDER_BY['toString']` is not `undefined` — it is `Object.prototype.toString`, a function, which passes the `?? DEFAULT` guard, gets called, returns a **string**, and hands Prisma `orderBy: '[object Undefined]'`. `?sort=valueOf` throws outright. Guarded with `hasOwnProperty`; three regression cases assert the resulting **order**, not merely a 200, because a fallback that ordered by nothing would answer 200 too.
+
+**Public resources were served to `curl` and hidden from the UI.** _(verified — four rows, invisible to every signed-in non-admin, now visible to all)_
+`CourseDetail.tsx` gated the Resources tab on `policy.can('resource:read', viewerSubject)` where `viewerSubject` is a **course** — and a course has no `isPublic`, only `publishedAt`, so that disjunct could never fire. A teacher looking at a colleague's course, and any student not enrolled, saw "Resources are for enrolled students" over a list the API would have served them anonymously. The tab no longer asks: the server scopes the rows and the client renders what it is given. The empty state stopped claiming "the teacher has not published anything", which a viewer seeing only the public slice cannot know, and lost an "Add a resource" button that called `() => undefined`.
+
+**The `(root)` field-error path was unreachable.** _(verified against a running server, then fixed)_
+`errors.plugin.ts` tested `instancePath.length > 0` **before** stripping the leading slash. A whole-body refinement has an empty zod path, which arrives as `'/'` — length 1 — so it took the first branch and stripped it to `''`. `PATCH /resources/:id` with `{}` answered `errors: [{ path: '', … }]`, while the identical refinement thrown from service code reported `(root)`. `Settings.tsx:67-70` is written against `(root)`.
+
+**Five citations in the new comments pointed at the wrong lines.** _(verified line by line)_ In a codebase that navigates by `file:line`, a confident wrong anchor is worse than none. A sixth proposed correction was itself wrong and was dropped rather than applied.
+
+**Two false alarms of my own, both stopped before damage.** _(recorded because the near-miss is the useful part)_ I fanned two agents out to run `vitest` against the one shared test database — the exact collision that had wedged it during the first workflow and produced a report of "172 of 241 failing" in files nothing had touched. Stopped it, gave each agent its own migrated database, and relaunched — then noticed I had relaunched the script before wiring the databases into it, and stopped it again.
+
+**Green — observed on 2026-08-23:** **863 tests** (592 policy + 262 API + 9 web) · typecheck 5/5 · lint 3/3 · build 3/3 · `format:check` · `check:brand` · `check:mobile-first` · `docs:permissions --check`. In a browser, against seeded data, the Resources tab now serves an approved student 4/4, a non-enrolled student 0/4 with honest copy, the owning teacher 4/4 and an admin 4/4 across a private and a public course; anonymously the API answers 4 public, 0 private, and a 20-row global shelf that matches the database exactly. **axe: zero violations** on the Resources tab, which has never before had data to render.
+
+**Still open:** there is no UI for creating, editing or deleting a resource — `POST`, `PATCH` and `DELETE` are reachable only by an API client. Download is unbuilt.
+
+---
+
 ## 2026-08-22
 
 **The last two golden paths were driven, and both work.** _(verified — Playwright against the compose stack, seeded data)_
