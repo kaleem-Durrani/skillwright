@@ -241,6 +241,20 @@ describe('approval and capacity', () => {
     expect(await approvedCountOf(courseId)).toBe(1);
   });
 
+  /** The other half of the bodyless case: the owner sends no note, and is seated. */
+  it('approves with no body at all, from the person entitled to', async () => {
+    const teacher = await signIn('t12z@example.com', 'TEACHER');
+    const student = await signIn('s12z@example.com', 'STUDENT');
+    const courseId = await makeCourse(teacher.id, { capacity: 5 });
+    const requested = await post('/', { courseId }, student.token);
+
+    const approved = await post(`/${requested.json().id}/approve`, undefined, teacher.token);
+    expect(approved.statusCode).toBe(200);
+    expect(approved.json().status).toBe('APPROVED');
+    expect(approved.json().decisionNote).toBeNull();
+    expect(await approvedCountOf(courseId)).toBe(1);
+  });
+
   it('is idempotent: approving twice never oversells by one', async () => {
     const teacher = await signIn('t7@example.com', 'TEACHER');
     const student = await signIn('s7@example.com', 'STUDENT');
@@ -423,6 +437,38 @@ describe('authorization', () => {
     expect(await approvedCountOf(courseId)).toBe(0);
     expect(
       (await prisma.enrollment.findUniqueOrThrow({ where: { id: requested.json().id } })).status,
+    ).toBe('PENDING');
+  });
+
+  /**
+   * Regression, found in a browser on 2026-08-22: a stranger POSTing approve with NO
+   * BODY was answered 422, not 403. Fastify hands a bodyless POST to the validator as
+   * `null`, the validator runs BEFORE the preHandler, and an all-optional object
+   * rejects null — so the caller learned "malformed" about an enrolment they were
+   * never entitled to, and the same call with `{}` was correctly refused.
+   *
+   * The test sends no body deliberately. `{}` is already covered above and passes
+   * either way, which is exactly why this went unnoticed.
+   */
+  it('refuses a bodyless approve or withdraw with 403, not 422', async () => {
+    const owner = await signIn('t14c@example.com', 'TEACHER');
+    const stranger = await signIn('t14d@example.com', 'TEACHER');
+    const student = await signIn('s14c@example.com', 'STUDENT');
+    const courseId = await makeCourse(owner.id);
+    const requested = await post('/', { courseId }, student.token);
+    const enrollmentId = requested.json().id;
+
+    const approve = await post(`/${enrollmentId}/approve`, undefined, stranger.token);
+    expect(approve.statusCode).toBe(403);
+    expect(approve.json().code).toBe('FORBIDDEN');
+    expect(approve.json().detail).toContain('TEACHER:ownsCourse');
+
+    const withdraw = await post(`/${enrollmentId}/withdraw`, undefined, stranger.token);
+    expect(withdraw.statusCode).toBe(403);
+    expect(withdraw.json().code).toBe('FORBIDDEN');
+
+    expect(
+      (await prisma.enrollment.findUniqueOrThrow({ where: { id: enrollmentId } })).status,
     ).toBe('PENDING');
   });
 

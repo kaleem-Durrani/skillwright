@@ -377,7 +377,7 @@ export function requestForCourse(
 export async function approve(
   actor: Actor,
   enrollmentId: string,
-  input: ApproveEnrollmentInput,
+  input?: ApproveEnrollmentInput,
 ): Promise<EnrollmentDto> {
   return prisma.$transaction(async (tx) => {
     const current = await tx.enrollment.findUniqueOrThrow({
@@ -430,7 +430,7 @@ export async function approve(
         decidedById: actor.id,
         // exactOptionalPropertyTypes: `{ decisionNote: undefined }` is not assignable
         // to an optional field, so the key is spread in or left out entirely.
-        ...(input.note ? { decisionNote: input.note } : {}),
+        ...(input?.note ? { decisionNote: input.note } : {}),
       },
       include: ENROLLMENT_INCLUDE,
     });
@@ -511,7 +511,7 @@ export function reject(
 export function withdraw(
   actor: Actor,
   enrollmentId: string,
-  input: WithdrawEnrollmentInput,
+  input?: WithdrawEnrollmentInput,
 ): Promise<EnrollmentDto> {
-  return settle(actor, enrollmentId, 'WITHDRAWN', input.reason ?? null);
+  return settle(actor, enrollmentId, 'WITHDRAWN', input?.reason ?? null);
 }

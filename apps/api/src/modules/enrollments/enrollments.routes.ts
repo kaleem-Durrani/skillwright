@@ -81,7 +81,12 @@ const enrollmentsRoutes: FastifyPluginAsync = async (fastify) => {
     {
       schema: {
         params: idParamSchema,
-        body: approveEnrollmentSchema,
+        // `.nullish()`, not the bare schema: Fastify hands a POST sent with no body
+        // to the validator as `null`, and an all-optional object rejects it — so a
+        // bodyless approve answered 422 before `authorize` ran, and a caller who was
+        // never entitled to this enrolment learned "malformed" instead of "forbidden".
+        // Same reason as courses.routes.ts:165 and users.routes.ts:151.
+        body: approveEnrollmentSchema.nullish(),
         response: { 200: enrollmentSchema },
       },
       preHandler: authorize('enrollment:approve', (request) =>
@@ -89,7 +94,11 @@ const enrollmentsRoutes: FastifyPluginAsync = async (fastify) => {
       ),
     },
     async (request) =>
-      enrollmentService.approve(requireActor(request), request.params.id, request.body),
+      enrollmentService.approve(
+        requireActor(request),
+        request.params.id,
+        request.body ?? undefined,
+      ),
   );
 
   app.post(
@@ -114,7 +123,9 @@ const enrollmentsRoutes: FastifyPluginAsync = async (fastify) => {
     {
       schema: {
         params: idParamSchema,
-        body: withdrawEnrollmentSchema,
+        // `.nullish()` for the same reason as approve above: the reason is optional,
+        // so a student who withdraws without giving one sends no body at all.
+        body: withdrawEnrollmentSchema.nullish(),
         response: { 200: enrollmentSchema },
       },
       preHandler: authorize('enrollment:withdraw', (request) =>
@@ -122,7 +133,11 @@ const enrollmentsRoutes: FastifyPluginAsync = async (fastify) => {
       ),
     },
     async (request) =>
-      enrollmentService.withdraw(requireActor(request), request.params.id, request.body),
+      enrollmentService.withdraw(
+        requireActor(request),
+        request.params.id,
+        request.body ?? undefined,
+      ),
   );
 };
 
