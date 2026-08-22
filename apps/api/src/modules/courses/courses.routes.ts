@@ -1,11 +1,20 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
+// The resource shapes are bound straight from the shared package, not aliased through
+// `./courses.schema.js` — that file names the wire surface the COURSES module owns, and
+// a second name for another module's response shape is a second thing to keep in step.
+// Five other route files import from shared for the same reason (enrollments.routes.ts:3).
+import { listResourcesQuerySchema, resourceSchema } from '@skillwright/shared';
 import { authorize, requireActor } from '../../plugins/auth.plugin.js';
 // The two enrollment routes below live under the /courses prefix because that is the
 // URL the SPA calls (CourseDetail.tsx:65,70). A URL prefix is not a module boundary:
 // they are declared here and served by the enrollments module, which stays the single
 // owner of enrollment logic. The plugin itself is registered once, under /enrollments.
 import * as enrollmentsService from '../enrollments/enrollments.service.js';
+// Same arrangement for the resource list: CourseDetail.tsx:141 fetches
+// /courses/:courseId/resources, but the rows and the visibility WHERE clause that
+// narrows them stay in the resources module, registered once under /resources.
+import * as resourcesService from '../resources/resources.service.js';
 import {
   courseIdParamSchema,
   courseDetailSchema,
@@ -181,6 +190,43 @@ const coursesRoutes: FastifyPluginAsync = async (fastify) => {
             request.body ?? undefined,
           ),
         ),
+  );
+
+  // --- Resources under a course ---------------------------------------------
+
+  /*
+   * The gate is `course:read`, NOT `resource:read`, and that is deliberate.
+   *
+   * A resource subject here would be wrong twice over. There is no single resource to
+   * build one from — the route returns a page of them — and the anonymous row of
+   * `resource:read` is `isPublic` (policy.ts:191-196), so a caller who is merely not
+   * enrolled is still entitled to this course's PUBLIC resources. Gating on a resource
+   * subject would answer 403 to someone who should have received a shorter list.
+   *
+   * Being allowed to read the COURSE (policy.ts:119-125) is the honest precondition for
+   * asking what is in it; the resources service then narrows the ROWS, mirroring the
+   * `resource:read` rows in a WHERE clause. Same shape as the enrollments list above.
+   */
+  app.get(
+    '/:courseId/resources',
+    {
+      schema: {
+        params: courseIdParamSchema,
+        // The path owns the course; a client-supplied `courseId` is dropped rather
+        // than allowed to disagree with the one that was just authorized.
+        querystring: listResourcesQuerySchema.omit({ courseId: true }),
+        response: { 200: paginated(resourceSchema) },
+      },
+      preHandler: authorize('course:read', (request) =>
+        courseService.loadCourseSubjectForActor(courseIdOf(request), request.actor),
+      ),
+    },
+    // `request.actor`, not `requireActor(request)`: an anonymous visitor reaches this
+    // route for a published course and is entitled to its public resources, so a null
+    // actor is a legitimate caller here rather than a 401. The service reads the null
+    // as "anonymous" and applies the `isPublic` row.
+    async (request) =>
+      resourcesService.listForCourse(request.actor, request.params.courseId, request.query),
   );
 };
 
