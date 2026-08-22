@@ -99,10 +99,26 @@ function getStats(cookie?: string) {
   });
 }
 
-async function statsFor(person: Person): Promise<Record<string, number>> {
+/**
+ * The four tiles, named rather than `Record<string, number>`: under
+ * `noUncheckedIndexedAccess` an index signature makes every counter `number |
+ * undefined`, so `before.resources - n` does not compile — and the drop assertions
+ * below are arithmetic on a counter. Declared here from the SPA's own view of the
+ * response (apps/web/src/lib/types.ts:120-125) rather than imported from
+ * dashboard.schema.ts, so the wire shape stays something this suite asserts instead of
+ * something it inherits.
+ */
+interface Stats {
+  courses: number;
+  pendingEnrollments: number;
+  unreadMessages: number;
+  resources: number;
+}
+
+async function statsFor(person: Person): Promise<Stats> {
   const response = await getStats(person.token);
   expect(response.statusCode).toBe(200);
-  return response.json() as Record<string, number>;
+  return response.json<Stats>();
 }
 
 async function makeCourse(teacherId: string, published: boolean): Promise<string> {
@@ -134,10 +150,17 @@ async function enrol(
 /**
  * `type: 'LINK'` with an `externalUrl` and no upload: migration 0002 CHECKs that
  * exactly one of `uploadId` / `externalUrl` is set (schema.prisma:433).
+ *
+ * Returns the id so a caller can soft-delete the exact row it made; every existing
+ * caller ignores it.
  */
-async function makeResource(courseId: string, authorId: string, isPublic: boolean): Promise<void> {
+async function makeResource(
+  courseId: string,
+  authorId: string,
+  isPublic: boolean,
+): Promise<string> {
   sequence += 1;
-  await prisma.resource.create({
+  const resource = await prisma.resource.create({
     data: {
       title: `Resource ${sequence}`,
       type: 'LINK',
@@ -147,6 +170,7 @@ async function makeResource(courseId: string, authorId: string, isPublic: boolea
       isPublic,
     },
   });
+  return resource.id;
 }
 
 interface World {
@@ -158,6 +182,12 @@ interface World {
   courseA1: string;
   courseA2: string;
   courseB1: string;
+  /**
+   * The one resource id this world names. It is the PUBLIC row on B1 — the only
+   * resource every actor below can see — so soft-deleting it moves the teacher's, the
+   * student's and the admin's number at once, which is what the tile-vs-list test needs.
+   */
+  publicResourceB1: string;
 }
 
 /**
@@ -182,10 +212,37 @@ async function seedWorld(): Promise<World> {
   await enrol(studentB.id, courseA1, 'PENDING');
 
   await makeResource(courseA1, teacherA.id, false);
-  await makeResource(courseB1, teacherB.id, true);
+  const publicResourceB1 = await makeResource(courseB1, teacherB.id, true);
   await makeResource(courseB1, teacherB.id, false);
 
-  return { teacherA, teacherB, studentA, studentB, admin, courseA1, courseA2, courseB1 };
+  return {
+    teacherA,
+    teacherB,
+    studentA,
+    studentB,
+    admin,
+    courseA1,
+    courseA2,
+    courseB1,
+    publicResourceB1,
+  };
+}
+
+/**
+ * `meta.total` of `GET /resources` — the number the `resources` tile has to equal.
+ *
+ * The TOTAL and not `data.length`: the list pages at 20 by default (pagination.ts:5),
+ * so comparing page lengths would agree by accident on any fixture smaller than a page
+ * and stop agreeing the moment one is not.
+ */
+async function listedResources(person: Person): Promise<number> {
+  const response = await app.inject({
+    method: 'GET',
+    url: '/api/v1/resources',
+    headers: { cookie: cookieHeader(person.token) },
+  });
+  expect(response.statusCode).toBe(200);
+  return response.json<{ meta: { total: number } }>().meta.total;
 }
 
 /** A conversation with the two given users seated in it. Returns its id. */
@@ -322,17 +379,86 @@ describe('the counters', () => {
 
   it('drops a soft-deleted course out of every counter that reaches it', async () => {
     const world = await seedWorld();
+    // seedWorld files one PRIVATE resource on A1 (line 214). This second one is PUBLIC
+    // on purpose: `or(isPublic, ...)` (policy.ts:193-194) never looks at the course, so
+    // a public row on a dead course is the row a clause missing the course-level
+    // soft-delete term keeps visible to every role at once.
+    await makeResource(world.courseA1, world.teacherA.id, true);
+    const onDeadCourse = await prisma.resource.count({ where: { courseId: world.courseA1 } });
+
+    const teacherBefore = await statsFor(world.teacherA);
+    const adminBefore = await statsFor(world.admin);
+
     await prisma.course.update({ where: { id: world.courseA1 }, data: { deletedAt: new Date() } });
 
     // Soft delete is not enforced by the ORM (schema.prisma:344), so this is asserting
     // the hand-written `deletedAt: null` in each clause rather than an ORM behaviour.
+    //
+    // Whole objects, not three of the four keys: this test's NAME says every counter,
+    // and it previously asserted `courses` and `pendingEnrollments` only. `resources`
+    // was the one it skipped, and skipping it is exactly how the dashboard's own copy
+    // of the resource clause kept filtering only `Resource.deletedAt` while the list
+    // also excluded resources whose COURSE was deleted — so the tile counted rows no
+    // list would ever return.
     const teacher = await statsFor(world.teacherA);
-    expect(teacher.courses).toBe(1);
-    // The pending row still exists; it is hidden because its course is gone, which is
-    // what `/enrollments?status=PENDING` does too (enrollments.service.ts:232-234).
-    expect(teacher.pendingEnrollments).toBe(0);
+    expect(teacher).toEqual({
+      courses: 1,
+      // The pending row still exists; it is hidden because its course is gone, which is
+      // what `/enrollments?status=PENDING` does too (enrollments.service.ts:232-234).
+      pendingEnrollments: 0,
+      unreadMessages: 0,
+      // Only B1's public resource survives: both of A1's died with the course.
+      resources: 1,
+    });
 
-    expect((await statsFor(world.admin)).courses).toBe(2);
+    const admin = await statsFor(world.admin);
+    expect(admin).toEqual({ courses: 2, pendingEnrollments: 1, unreadMessages: 0, resources: 2 });
+
+    // Stated as the drop, because the drop is the claim: both actors could see every
+    // resource on A1 before it died — the teacher through `ownsCourse`, the admin
+    // through `allow` — so each must lose exactly that many and no fewer. Under the old
+    // clause both numbers are unchanged by the delete, which is what fails here.
+    expect(teacher.resources).toBe(teacherBefore.resources - onDeadCourse);
+    expect(admin.resources).toBe(adminBefore.resources - onDeadCourse);
+  });
+
+  /*
+   * The tile's whole contract, and the one this suite did not state: `stats().resources`
+   * is a COUNT of the clause `GET /resources` lists with, so the two numbers are the
+   * same number or the SPA shows "3" above a shelf of one (Dashboard.tsx:66).
+   *
+   * dashboard.service.ts imports `visibilityWhere` from resources.service.ts to make
+   * that true by construction; this test is what would notice a second copy appearing
+   * again, for any policy row rather than only the soft-delete one that drifted.
+   */
+  it('counts exactly what GET /resources lists, for teacher, student and admin', async () => {
+    const world = await seedWorld();
+
+    // Two live resources on A2, then A2 is soft-deleted: the dead COURSE term. One of
+    // them is public, so it is invisible to every role only because of that term.
+    await makeResource(world.courseA2, world.teacherA.id, true);
+    await makeResource(world.courseA2, world.teacherA.id, false);
+    await prisma.course.update({ where: { id: world.courseA2 }, data: { deletedAt: new Date() } });
+    // And one soft-deleted resource on a LIVE course: the row-level term. Both halves of
+    // the two-level filter are therefore load-bearing on both sides of the equality.
+    await prisma.resource.update({
+      where: { id: world.publicResourceB1 },
+      data: { deletedAt: new Date() },
+    });
+
+    const teacher = await statsFor(world.teacherA);
+    const student = await statsFor(world.studentA);
+    const admin = await statsFor(world.admin);
+
+    // Pinned before they are compared, so the equality below cannot pass as 0 === 0.
+    // A1's private resource is all the first two can see — the teacher owns it, the
+    // student is APPROVED on A1 — and the admin also has B1's private row, which no
+    // other actor's policy row reaches (student A is only PENDING on B1).
+    expect([teacher.resources, student.resources, admin.resources]).toEqual([1, 1, 2]);
+
+    expect(await listedResources(world.teacherA)).toBe(teacher.resources);
+    expect(await listedResources(world.studentA)).toBe(student.resources);
+    expect(await listedResources(world.admin)).toBe(admin.resources);
   });
 
   it('serves exactly the four keys the SPA reads, as JSON numbers', async () => {
@@ -348,7 +474,15 @@ describe('the counters', () => {
     ]);
     // The `::int` cast in the raw count. Without it Postgres returns bigint and the
     // response is a 500 from serialisation, not a number in a string.
-    expect(typeof response.json().unreadMessages).toBe('number');
+    //
+    // All four are typed, not just that one. The other three are Prisma `count()`s and
+    // cannot arrive as bigint today, but the name of this test promises four JSON
+    // numbers, and a name that promises more than the body checks is precisely how the
+    // resources tile carried a stale clause through review.
+    const body = response.json<Record<string, unknown>>();
+    for (const key of Object.keys(body)) {
+      expect(typeof body[key], key).toBe('number');
+    }
   });
 });
 

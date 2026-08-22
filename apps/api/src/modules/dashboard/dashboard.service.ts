@@ -1,5 +1,9 @@
 import { prisma, type Prisma } from '@skillwright/db';
 import type { Actor } from '@skillwright/shared';
+// The resources tile counts what the resources LIST serves, so it asks that module
+// for the clause rather than keeping a second copy — see the block above
+// `stats()`'s resource count for what the second copy cost.
+import { visibilityWhere as visibleResourcesWhere } from '../resources/resources.service.js';
 import type { DashboardStats } from './dashboard.schema.js';
 
 /**
@@ -97,44 +101,22 @@ function pendingEnrollmentsWhere(actor: Actor): Prisma.EnrollmentWhereInput {
   return { AND: [scope, { status: 'PENDING' }, { course: { deletedAt: null } }] };
 }
 
-/**
- * Counter 4, `resources` (Dashboard.tsx:66).
+/*
+ * Counter 4, `resources` (Dashboard.tsx:66), has NO clause of its own.
  *
- * `resource:read` (policy.ts:191-196) mirrored row for row:
- *   ADMIN   -> allow                                    -> every live resource
- *   TEACHER -> or(isPublic, ownsCourse, isAuthor)       -> policy.ts:113,194
- *   STUDENT -> or(isPublic, enrolledApproved)           -> policy.ts:112,193
+ * It used to. The comment that stood here instructed whoever built the resources
+ * module to move the mirror into `resources.service.ts` and import it back —
+ * "do not leave a second copy behind, or a policy change fixes the list and
+ * silently misses the tile". The module landed with a second copy, and the two had
+ * already drifted before anyone ran them side by side: this one filtered only the
+ * resource's own `deletedAt`, while the list also excludes resources whose COURSE is
+ * soft-deleted. So the tile counted rows no list would ever return, which is the
+ * "tile reads 23 above a list of 4" failure the other three counters are written to
+ * avoid.
  *
- * The anonymous row (`isPublic`) has no branch because the route requires a session.
- *
- * The resources MODULE does not exist yet, but the Resource TABLE does (schema.prisma:
- * 421-453), so this counts real rows rather than shipping a hard-coded 0 that nobody
- * would remember to replace.
- *
- * TODO(resources): when the resources module lands it owns this mirror. Move this
- * function into `resources.service.ts` as its `visibilityWhere` and IMPORT it here —
- * do not leave a second copy behind, or a policy change fixes the list and silently
- * misses the tile. If this function and policy.ts disagree, this function is the bug.
+ * `visibilityWhere` (resources.service.ts) is now the only mirror of the
+ * `resource:read` rows, and it is imported at the top of this file.
  */
-function visibleResourcesWhere(actor: Actor): Prisma.ResourceWhereInput {
-  switch (actor.role) {
-    case 'ADMIN':
-      return { deletedAt: null };
-    case 'TEACHER':
-      return {
-        deletedAt: null,
-        OR: [{ isPublic: true }, { course: { teacherId: actor.id } }, { authorId: actor.id }],
-      };
-    case 'STUDENT':
-      return {
-        deletedAt: null,
-        OR: [
-          { isPublic: true },
-          { course: { enrollments: { some: { studentId: actor.id, status: 'APPROVED' } } } },
-        ],
-      };
-  }
-}
 
 /**
  * Counter 3, `unreadMessages` (Dashboard.tsx:63).
