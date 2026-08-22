@@ -368,3 +368,55 @@ Worse, **axe did not catch the second failure**: it evaluates text contrast (1.4
 | ember-700     | **3.19**           | 5.30                  |
 
 **Rule.** A colour decision has at least two contrast constraints — text on the fill, and the fill against what surrounds it — plus one per interaction state. Compute the table; do not pick by improving the number you happened to measure. And treat a green axe run as evidence about rendered text only: closed overlays, hover states and component boundaries are outside what it checks, so "zero violations" is a floor, not a result.
+
+---
+
+## 24. A platform-behaviour fix belongs to the class, not the site
+
+**Symptom.** A teacher who had never been entitled to an enrolment POSTed `/enrollments/:id/approve` with no body and got **`422 VALIDATION_FAILED`** instead of `403`. The same call carrying `{}` was refused correctly, with the rule named. Two other routes had been fixed for exactly this three weeks earlier, with a comment explaining it.
+
+**Root cause.** Fastify hands a POST sent with no body to the validator as `null`, and an all-optional Zod object rejects `null`. Body validation runs **before** the policy `preHandler`, so the caller learns "malformed" about a resource they were never allowed to touch. When this first bit, it was fixed on the three routes where it had been observed — `requestEnrollment`, `markNotificationsRead`, `suspendUser` — and `approve` and `withdraw`, which have the same all-optional shape, were left alone because nothing had complained about them yet. The SPA sends `{}` on both, so no client and no test ever exercised the broken path.
+
+**Fix.** `body: approveEnrollmentSchema.nullish()` and the same for `withdraw`, handler taking `request.body ?? undefined`. Two regression tests that send **no body deliberately**, one for the 403 and one for the owner's 200.
+
+**Rule.** When the cause of a bug is a platform behaviour rather than a typo, the fix is not done until you have grepped for every site with the same shape and either fixed or consciously excluded each one. `grep -rn "body: \w*Schema" apps/api/src/modules/*/*.routes.ts` was a five-second query that would have found both. A test that exercises the working spelling (`{}`) passes either way, which is why the broken spelling has to be the thing the test sends.
+
+---
+
+## 25. An error code the client renders by is the only part of the error that exists
+
+**Symptom.** A suspended person tried to sign in and was told **"You don't have access to that."** The API's response carried `"detail": "This account has been suspended"`, and the SPA had a sentence written for this exact case — `ERROR_COPY.ACCOUNT_SUSPENDED`, "This account has been suspended." — which had never once been rendered.
+
+**Root cause.** The SPA renders errors from `problem.code`, never `problem.detail`, and deliberately: policy details carry rule names like `TEACHER:ownsCourse` and are diagnostics, not user copy. The API had a dedicated `accountSuspended()` helper producing code `ACCOUNT_SUSPENDED` — the auth plugin used it, but `auth.service.login` reached for the generic `forbidden('This account has been suspended')`. The right sentence in the wrong field is invisible.
+
+**Fix.** Throw `accountSuspended()` from login and verify-email. One assertion on the **code**, not the message.
+
+**Rule.** When a client maps code to copy, the code is the whole contract and a hand-written `detail` is a comment for developers. Reaching for the generic 403/404/409 helper silently discards the message. Before adding a `detail` that reads like something a user should see, check whether a dedicated code exists — and if you add one, add its copy in the same change, or you have shipped a string nothing can reach.
+
+---
+
+## 26. Driving a browser will invent defects that are not there
+
+**Symptom.** Two findings written up and withdrawn in one session. A dashboard tile appeared to read "Pending requests **0**" above a queue listing four pending requests — a contradiction the service's own comment says "is a bug report". And every toast appeared to render with no live region, making every status message in the app unannounceable.
+
+**Root cause.** Neither was real.
+
+The tile reads **4**. The measurement was `document.body.innerText.match(/Pending requests[^A-Z]*\d+/i)` — but the tile puts the **value before the label**, so the regex ran past the label and captured the _next_ tile's value. The API, queried directly, said `pendingEnrollments: 4` all along.
+
+The live region exists — `span[aria-live="assertive"][role="status"]` — but Radix unmounts it about a second after the toast opens, once it has been announced. The sample was taken at 1.3s. A `MutationObserver` plus samples at 80/200/400/700ms found it on every one.
+
+**Fix.** For values: read the specific element, not a regex over `innerText`. For anything transient: observe the window, do not sample an instant.
+
+**Rule.** A browser assertion is code, and it fails the same way the app does. Before reporting a UI defect, confirm it from a second, independent direction — query the API, read the element, watch the DOM over time. See also [21], which is the same mistake with animation as the cause. The cost of the check is a minute; the cost of skipping it is a fix to something that was never broken.
+
+---
+
+## 27. A cached identity outlives the server's revocation of it
+
+**Symptom.** An admin suspends someone who is mid-session. The API destroys every session row immediately and answers their next authenticated request `401`. In the browser, the suspended student's Settings screen showed an inline "we could not load you" **under a shell still reading "Student workspace", beside a profile card still reading "Active"** — and clicking Dashboard from there issued **no requests at all** and painted a full dashboard from cache. They could keep browsing indefinitely.
+
+**Root cause.** The route guard already handled this: `requireAuth` redirects a null session to `/login`, and has a `status === 'SUSPENDED'` branch besides. But it reads the session through `ensureQueryData`, and that cache entry was still present and still inside its `staleTime` — so the guard re-ran on every navigation and kept answering with the user it had been told about before the suspension. Nothing in the client treated a `401` as news. The server was correct throughout; the client simply never asked again.
+
+**Fix.** A `QueryCache`/`MutationCache` `onError` that recognises `UNAUTHENTICATED` and `ACCOUNT_SUSPENDED`, drops the session entry and everything fetched under it, and re-runs the router's guards. It decides nothing about where a dead session goes — the guard still does. The guard against loops is that it only fires while the cache still believes someone is signed in, and the first thing it does is stop believing that.
+
+**Rule.** Any server-side authority that can change **retroactively** — suspension, a role change, a revoked grant, a logout in another tab — needs a client-side listener, because a guard is only as fresh as the data it reads. Having the right redirect logic is not the same as it running. And when testing revocation, navigate to a screen that makes an **authenticated** request: a public endpoint answers `200` to an anonymous caller, so the app looks fine while being signed out.

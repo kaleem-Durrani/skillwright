@@ -9,6 +9,35 @@ This file records **what changed and the state it left the repository in** — n
 
 ---
 
+## 2026-08-22
+
+**The last two golden paths were driven, and both work.** _(verified — Playwright against the compose stack, seeded data)_
+A teacher signed in, opened the enrolment queue from their dashboard, and **approved one request (`200`) and rejected another with a mandatory reason (`200`)**. The roster rows flipped to Approved and Rejected with today's date, the course header moved from 13/20 places to 14/20, and the queue on the dashboard shrank by two. The reject dialog's `min(4)` gate holds from the UI side: the confirm button is disabled on an empty box and still disabled at three characters. axe on the teacher-only Students tab — a screen no previous run could reach — reports **zero violations**. Then an admin suspended a live student: `200`, the row flipped to Suspended, the audit log carries a `SUSPEND` event against the admin's name, and every session row for that account was destroyed.
+
+**The ownership boundary was probed directly and holds.** _(verified — from inside a second teacher's authenticated session)_
+Teacher B against teacher A's course: approve, reject, update, delete and list-enrolments were all refused **403 with `TEACHER:ownsCourse`** named in the detail; reading the published course is `200`, which is the `isPublished` row doing its job rather than a leak. Teacher B's view of that course carries no Students tab and no Approve button. This is golden path 4's rule — the path as written in Appendix D needs the resources module, which does not exist yet.
+
+**A suspended session kept browsing a fully-populated app.** _(verified — reproduced, fixed, re-driven)_
+Revocation is retroactive on the server and was invisible on the client. The suspended student's Settings screen `401`d and rendered an inline "we could not load you" **under a shell that still said "Student workspace", beside a profile card that still said "Active"** — and clicking Dashboard from there issued **no requests at all** and painted a complete dashboard from cache. `requireAuth` already knew how to bounce a dead session, but it reads the session through `ensureQueryData` and that entry was still cached and still fresh, so the guard kept re-answering with the old user. The query client now watches every query and mutation for `UNAUTHENTICATED` / `ACCOUNT_SUSPENDED`, drops the session entry and everything fetched under it, and re-runs the router's guards — no second opinion about where a dead session belongs. Re-driven: the next navigation lands on `/login?redirect=%2Fsettings` with the shell gone.
+
+**A suspended person was told "You don't have access to that."** _(verified — now reads "This account has been suspended.")_
+The SPA renders errors from the **code**, never the detail, because policy details carry rule names like `TEACHER:ownsCourse` and are not user copy. Login threw the generic `forbidden()` with the right sentence in the wrong field, so `ERROR_COPY.ACCOUNT_SUSPENDED` — written for exactly this case — had never once been rendered. `auth.plugin.ts` was already throwing `accountSuspended()`; login and verify-email now match it.
+
+**The bodyless-POST trap was still live on two routes.** _(verified — 422 reproduced, then 403)_
+Fastify hands a POST with no body to the validator as `null`, and an all-optional object schema rejects it — so a teacher who was never entitled to an enrolment got `422 VALIDATION_FAILED` from `/enrollments/:id/approve` instead of `403`, because validation runs before the policy preHandler. The same call carrying `{}` was correctly refused, which is exactly why no test caught it. `approve` and `withdraw` now bind `.nullish()`, matching the three routes where this was already fixed. Two regression tests send **no body deliberately**.
+
+**The suspend dialog promised something the system cannot do.** _(verified against the route file)_
+It read "This is reversible — an administrator can reinstate the account later." There is no `user:reinstate` action and no endpoint; `users.routes.ts` records the omission as deliberate. Building one costs a policy action, its matrix rows including the denials, and a regenerated `docs/permissions.md`, so the dialog now says what is true: undoing it takes a database change.
+
+**Two defects I reported to myself and withdrew.** _(verified — both were my measurement, not the app)_
+The dashboard appeared to show "Pending requests 0" above a queue of four; the tile actually reads **4**, and my regex over `innerText` had walked past the label into the _next_ tile's value. And toasts appeared to have no live region — there is one, `span[aria-live="assertive"][role="status"]`, but Radix unmounts it about a second after the toast opens and I sampled at 1.3s. Sampling across the whole window found it every time.
+
+**Green — observed on 2026-08-22:** **819 tests** (592 policy + 218 API + 9 web) · typecheck 5/5 · lint 3/3 · build 3/3 · `format:check` · `check:brand` · `check:mobile-first` · `docs:permissions --check`.
+
+**Still open:** `GET /courses/:id/resources` 404s on every course-detail view because the resources module does not exist, so a normal navigation logs console errors and the Resources tab falls back to the not-enrolled empty state — which tells a _teacher_ looking at a colleague's course to "request enrolment above", next to a button their role can never have. The dashboard meanwhile counts 23 resources for that same teacher.
+
+---
+
 ## 2026-08-17
 
 **The app was rendered in a browser for the first time, and it works.** _(verified — driven with Playwright as a student and an admin, light and dark, 390px and 1280px)_
