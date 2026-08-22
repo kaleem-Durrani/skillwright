@@ -23,13 +23,37 @@ function zodFieldErrors(error: ZodError): FieldError[] {
  */
 function fastifyValidationErrors(error: FastifyError): FieldError[] {
   const validation = error.validation ?? [];
-  return validation.map((item) => ({
-    path:
-      typeof item.instancePath === 'string' && item.instancePath.length > 0
+  return validation.map((item) => {
+    /*
+     * Strip FIRST, then decide whether anything is left — the two used to happen in
+     * the other order, and it made the `(root)` fallback unreachable.
+     *
+     * A whole-body refinement (`updateResourceSchema`'s "provide at least one field",
+     * `updateUserSchema`'s empty-body refusal) has an empty zod path, which
+     * fastify-type-provider-zod renders as the instancePath `'/'` — length 1, so the
+     * old `instancePath.length > 0` test took the first branch and stripped it to the
+     * empty string. `PATCH /resources/:id` with `{}` answered
+     * `errors: [{ path: '', … }]`, verified against a running server on 2026-08-23.
+     *
+     * That made the same failure report two different paths depending on where it was
+     * raised: `zodFieldErrors` above says `(root)` for a service-thrown ZodError, this
+     * said `''` for the identical refinement on a route schema. Settings.tsx:67-70 is
+     * written against `(root)`.
+     *
+     * The AJV shape is unaffected: a missing required property carries instancePath
+     * `''` and the name in `params.missingProperty`, which is still what it falls to.
+     */
+    const dotted =
+      typeof item.instancePath === 'string'
         ? item.instancePath.replace(/^\//, '').replaceAll('/', '.')
-        : ((item.params?.['missingProperty'] as string | undefined) ?? '(root)'),
-    message: item.message ?? 'Invalid value',
-  }));
+        : '';
+    const missing = item.params?.['missingProperty'] as string | undefined;
+
+    return {
+      path: dotted !== '' ? dotted : (missing ?? '(root)'),
+      message: item.message ?? 'Invalid value',
+    };
+  });
 }
 
 function translate(error: unknown): AppError {
