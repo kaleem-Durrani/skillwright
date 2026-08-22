@@ -8,7 +8,22 @@ import { createAppRouter } from './router.js';
 import { logger } from './lib/logger.js';
 import './styles/globals.css';
 
-const queryClient = createQueryClient();
+/**
+ * The two are mutually dependent for exactly one callback: the client needs to
+ * re-run the router's guards when a request proves the session is gone, and the
+ * router is built from the client. A closure breaks the cycle — it is created here
+ * and called much later, by which time both bindings exist.
+ */
+const queryClient = createQueryClient(() => {
+  // `invalidate()` re-runs `beforeLoad` for the current match, and `requireAuth`
+  // has already been handed a null session — so the redirect is the guard's,
+  // not a second opinion about where a dead session belongs.
+  //
+  // `router` is referenced above its own declaration on purpose: this closure can
+  // only run from a failed request, which cannot happen before the line below.
+  void router.invalidate();
+});
+
 const router = createAppRouter(queryClient);
 
 const container = document.getElementById('root');
