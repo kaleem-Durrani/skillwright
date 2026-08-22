@@ -289,9 +289,18 @@ export function AdminUsersPage() {
             </>
           }
         >
+          {/*
+            This used to promise "an administrator can reinstate the account later".
+            Nothing in the system can: there is no `user:reinstate` action in the Action
+            union and no endpoint behind it — users.routes.ts:169-176 records the
+            omission as deliberate. Adding one is not a copy change; it costs a policy
+            action, its matrix rows including the denials, and a regenerated
+            docs/permissions.md (CONTRIBUTING.md:40-46). Until someone spends that, the
+            dialog says what is true.
+          */}
           <p className="text-fg-secondary">
-            This is reversible — an administrator can reinstate the account later. The action is
-            written to the audit log with your name against it.
+            There is no way to undo this from the app — reinstating the account takes a database
+            change. The action is written to the audit log with your name against it.
           </p>
         </DialogContent>
       </Dialog>
