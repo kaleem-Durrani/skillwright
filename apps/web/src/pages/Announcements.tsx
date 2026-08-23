@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
-import { Plus } from 'lucide-react';
+import { Plus, Search } from 'lucide-react';
 /*
  * The page envelope comes from the package that DEFINES it, on the same reasoning as
  * `Courses.tsx`'s identical import: `@/lib/api` keeps a hand-written copy of
@@ -26,6 +26,7 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardTitle } from '@/components/ui/Card';
 import { DataList } from '@/components/ui/DataList';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { Input } from '@/components/ui/Input';
 import { Pagination } from '@/components/ui/Pagination';
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/Select';
 import { StatusChip } from '@/components/ui/StatusChip';
@@ -74,18 +75,45 @@ export function AnnouncementsPage() {
   const policy = usePolicy();
   const [creating, setCreating] = useState(false);
 
+  // Local mirror of the URL query so typing does not push a history entry per
+  // keystroke; the URL is updated on a debounce below (Courses.tsx's pattern).
+  // The route's validateSearch already carried `q`; the API's list handler has
+  // ranked matching since Phase 3 slice 1 — only this input was missing.
+  const [term, setTerm] = useState(search.q ?? '');
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if ((search.q ?? '') === term) return;
+      void navigate({
+        search: (previous) => ({ ...previous, q: term || undefined, page: 1 }),
+        replace: true,
+      });
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [term, search.q, navigate]);
+
   const announcements = useQuery({
     queryKey: qk.announcements(search),
     queryFn: () =>
       api.get<Paginated<AnnouncementSummary>>('/announcements', {
-        query: { page: search.page, limit: 20, type: search.type },
+        query: { page: search.page, limit: 20, q: search.q, type: search.type },
       }),
     // Keeps the previous page on screen while the next one loads instead of
     // collapsing the list back to a skeleton on every page or filter change.
     placeholderData: (previous) => previous,
   });
 
-  const isFiltered = Boolean(search.type);
+  const isFiltered = Boolean(search.type || search.q);
+  /*
+   * Same ceiling as the API's own `listAnnouncementsQuerySchema` (`q.max(120)`),
+   * so a longer term is refused at the keystroke instead of answered with a 422.
+   */
+  const maxQueryLength = 120;
+
+  function clearFilters() {
+    setTerm('');
+    void navigate({ search: { page: 1 } });
+  }
   const canCreate = policy.can('announcement:create');
 
   return (
@@ -108,6 +136,16 @@ export function AnnouncementsPage() {
       />
 
       <div className="flex flex-col gap-3 pb-5 md:flex-row md:items-center">
+        <Input
+          type="search"
+          value={term}
+          onChange={(event) => setTerm(event.target.value)}
+          placeholder="Search announcements"
+          aria-label="Search announcements"
+          leading={<Search aria-hidden="true" className="size-4" />}
+          maxLength={maxQueryLength}
+          className="md:w-80"
+        />
         <Select
           value={search.type ?? 'ALL'}
           onValueChange={(next) =>
@@ -129,7 +167,7 @@ export function AnnouncementsPage() {
           </SelectContent>
         </Select>
         {isFiltered ? (
-          <Button variant="ghost" size="sm" onClick={() => void navigate({ search: { page: 1 } })}>
+          <Button variant="ghost" size="sm" onClick={clearFilters}>
             Clear filters
           </Button>
         ) : null}
@@ -202,9 +240,9 @@ export function AnnouncementsPage() {
           isFiltered ? (
             <EmptyState
               variant="no-results"
-              description="No announcement matched that filter. Try a different type, or clear it."
+              description="No announcement matched that search or filter. Try fewer words, or clear them."
               actionLabel="Clear filters"
-              onAction={() => void navigate({ search: { page: 1 } })}
+              onAction={clearFilters}
             />
           ) : (
             <EmptyState

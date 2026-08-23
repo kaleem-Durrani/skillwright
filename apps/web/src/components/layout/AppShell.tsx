@@ -22,6 +22,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/DropdownMenu';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import { ShellSearch } from './ShellSearch.js';
 import { NAV_BY_ROLE, ROLE_LABEL, WORKSPACE_LABEL, primaryNav, type NavItem } from './nav.js';
 import { NotificationBell } from './NotificationBell.js';
 
@@ -159,7 +160,16 @@ function TopBar() {
           </Badge>
         ) : null}
 
-        <div className="flex-1" />
+        {/*
+         * The search affordance: an inline field from md up, an icon button
+         * beside the bell below it (ShellSearch's header comment records why it
+         * is neither a primary-nav entry nor an account-menu item).
+         */}
+        <ShellSearch />
+
+        {/* Desktop spacing is ShellSearch's form's job (`flex-1` from md up);
+            this spacer only serves the narrow layout. */}
+        <div className="flex-1 md:hidden" />
 
         {canReadNotifications ? <NotificationBell unreadCount={unreadCount} /> : null}
 

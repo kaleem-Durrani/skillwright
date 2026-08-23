@@ -247,3 +247,67 @@ export interface DashboardStats {
   unreadMessages: number;
   resources: number;
 }
+
+// ---------------------------------------------------------------------------
+// SPA-local — the cross-entity search response
+// ---------------------------------------------------------------------------
+
+/**
+ * The body of `GET /search` — the SECOND hand-written shape in this file, and for
+ * the same reason as `DashboardStats`: the wire shapes are DECLARED in
+ * `apps/api/src/modules/search/search.schema.ts` (which explains why they live
+ * there and not in shared), `packages/**` is out of bounds for this slice, so
+ * they are mirrored here. The API-side comment names the obligation this copy
+ * repeats: the moment `@skillwright/shared` grows a search schema, delete these
+ * interfaces and re-export the zod-inferred types instead.
+ *
+ * Field notes from that schema: `headline` is `ts_headline` output whose `<b>`
+ * markers must go through `lib/headline.ts`, never `dangerouslySetInnerHTML`;
+ * `linkPath` is a server-built app path shaped like the notification payloads'
+ * — it drives `navigate({ href })`, not a router literal. Deliberately ABSENT
+ * from every hit: timestamps, counts and author summaries.
+ */
+
+/*
+ * The two type unions the hit shapes reference. The file already re-exports them
+ * (see Resources, announcements above), but a re-export does not bring the name
+ * into local scope — this import is for THIS module's own use.
+ */
+import type { AnnouncementTypeValue, ResourceTypeValue } from '@skillwright/shared/schema';
+
+export interface CourseHit {
+  id: string;
+  code: string;
+  name: string;
+  headline: string;
+  linkPath: string;
+}
+
+export interface ResourceHit {
+  id: string;
+  title: string;
+  type: ResourceTypeValue;
+  /** The owning course's name — resources have no global list page to otherwise show it. */
+  courseName: string;
+  headline: string;
+  linkPath: string;
+}
+
+export interface AnnouncementHit {
+  id: string;
+  title: string;
+  type: AnnouncementTypeValue;
+  headline: string;
+  linkPath: string;
+}
+
+export interface SearchGroup<T> {
+  hits: T[];
+  total: number;
+}
+
+export interface SearchResult {
+  courses: SearchGroup<CourseHit>;
+  resources: SearchGroup<ResourceHit>;
+  announcements: SearchGroup<AnnouncementHit>;
+}
