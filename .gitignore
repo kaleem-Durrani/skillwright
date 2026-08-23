@@ -43,6 +43,10 @@ docs/*
 !docs/permissions.md
 !docs/PROGRESS.md
 !docs/LESSONS-LEARNED.md
+# The README's hero image and gallery live here. `docs/*` above would have swallowed
+# them, and a screenshot that is not committed is a broken image on the one page a
+# stranger actually reads — the same shape of miss as the anchored `/uploads/` rule.
+!docs/screenshots/
 
 # editor & os
 .DS_Store
