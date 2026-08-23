@@ -12,6 +12,9 @@ import {
   type CourseWithSummaryRelations,
 } from '../../lib/dto.js';
 import { notFound, validationFailed } from '../../lib/errors.js';
+// The Upload row belongs to the uploads module, and so does the question of whether
+// this actor may claim it. Before this, `syllabusUploadId` was written unchecked.
+import { assertUploadClaimable } from '../uploads/uploads.service.js';
 import type {
   CourseDetail,
   CourseListItem,
@@ -386,6 +389,13 @@ async function assertTeacherExists(teacherId: string): Promise<void> {
 
 export async function create(actor: Actor, input: CreateCourseInput): Promise<CourseDetail> {
   await assertDepartmentExists(input.departmentId);
+  // `syllabusUploadId` used to go from the body straight into the row. Nothing checked
+  // that the Upload existed, belonged to this actor, had been committed, or was not
+  // already somebody else's syllabus — so a teacher could bind a colleague's private
+  // file to their own course by guessing an id.
+  if (input.syllabusUploadId) {
+    await assertUploadClaimable(input.syllabusUploadId, actor, 'syllabusUploadId');
+  }
 
   // Data shaping, not authorization: `course:create` was already decided by
   // authorize() at the route. course.ts:86 — teacherId is an admin-only field, and a
@@ -423,6 +433,12 @@ export async function update(
   id: string,
   input: UpdateCourseInput,
 ): Promise<CourseDetail> {
+  // Same check as create(): an update is the other way to claim someone else's upload.
+  // `null` clears the syllabus and needs no check; only a non-null id claims anything.
+  if (input.syllabusUploadId) {
+    await assertUploadClaimable(input.syllabusUploadId, actor, 'syllabusUploadId');
+  }
+
   const current = await prisma.course.findFirst({
     where: { id, deletedAt: null },
     select: { id: true, approvedCount: true, startDate: true, endDate: true },
