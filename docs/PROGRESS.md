@@ -11,6 +11,18 @@ This file records **what changed and the state it left the repository in** — n
 
 ## 2026-08-23
 
+**Announcements and comments are built, and the resource detail screen exists.** _(verified — driven in a browser as a student, a teacher and an admin)_
+Seven agents in parallel, one file each. The announcements module serves list / read / create / update / publish / soft-delete with visibility as a WHERE clause mirroring the policy rows. The comments module threads one level and — the part that mattered — scopes every comment to its **parent's** visibility, importing the resources module's `visibilityWhere` rather than writing a second copy of it. `/resources/:id` is screen 5 of the six the plan names and did not exist at all; a comment was posted through it live (`201 POST /comments`). Messages and the admin overview gained pagination, and the overview now shows recent audit events instead of four counters. **axe clean** on all three new screens. **977 tests** (600 policy + 350 API + 27 web).
+
+**The danger button failed AA on every destructive action in the app.** _(verified — axe caught it, the ramp was tabulated before choosing)_
+`variant="danger"` used `text-fg-on-brand`, which is the dark ink the design direction chose for the **amber** brand fill. On oxide red that is **3.91:1**. The two themes needed different answers because the solid differs between them, so the ramp was measured rather than guessed: light gets white on oxide-600 (4.65), dark gets iron-950 on oxide-500 (5.06), and the fill still clears 3:1 against its own page in both. `--text-on-danger` is now its own token.
+
+**The new screens shipped with no way to reach them.** _(verified — no nav entry existed)_
+Routes and pages landed; the nav did not. Added ungated, deliberately: `announcement:read` is `isPublished`-based, so gating on it denies everyone and deletes the link (#15), and `announcement:create` is TEACHER/ADMIN-only, which would hide the board from the students it is for. Adding a sixth primary entry would also have pushed an admin's bottom bar past the five-target limit, where `primaryNav` silently slices the last one off — so Settings yielded its slot, since the account menu carries it at every viewport.
+
+**A defect I reported that did not exist.** _(recorded because the withdrawal is the useful part)_
+I claimed the announcement and course cards had no keyboard focus indicator, called it pre-existing, and changed both files to add one. The premise was false. My probe read the anchor's `::after` and reported the anchor as 0×0; measured properly — tab until the link IS `activeElement`, then walk the ancestor chain reporting every element that paints an outline and its box size — the anchor is **607×20 and paints a `solid 3px` ring**. Both files are reverted; `Courses.tsx` is byte-identical to its committed state. Four wrong measurements of the same thing before the fifth was right, which is [26] exactly, and the cost was entirely avoidable.
+
 **A teacher can now add course material without an API client.** _(verified — a real PDF, through the form, in a browser)_
 The Resources tab has an "Add a resource" affordance and a per-row Edit/Delete menu, and the dialog serves both create and edit. Driven end to end: **`201 POST /uploads/presign` → `200 POST /uploads/commit` → `201 POST /resources`**, the new row at the top of the list, no console errors, and **axe clean on the open dialog**. A student sees no Add button and no row menu. The accepted types and the size limit are on screen before the picker rather than after a 422, and a file that breaks them is refused on selection.
 
