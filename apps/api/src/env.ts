@@ -82,6 +82,23 @@ const envSchema = z.object({
   SMTP_PASS: z.string().default(''),
   MAIL_FROM: z.string().min(1),
 
+  /**
+   * Where the built SPA lives, when this process is also serving it.
+   *
+   * Set only in the production image, which copies apps/web/dist to /app/public and
+   * runs one process on one origin — which is not a packaging convenience but the
+   * reason the session cookie can be `__Host-` with `SameSite=Lax` and no CORS surface
+   * at all (docs/adr/0004-same-origin-sessions-and-csrf.md).
+   *
+   * Unset in development, where Vite serves the SPA on :5173 and proxies /api to this
+   * process. Absent means "do not serve static files", not "serve from the default" —
+   * a wrong default here would shadow the API with a 404 page.
+   *
+   * The Dockerfile has set this since it was written; nothing read it until now, so
+   * the image built the SPA, copied it in, and answered `/` with a 404.
+   */
+  WEB_DIST_DIR: z.string().min(1).optional(),
+
   /** Enables POST /auth/demo. Hard-refused when DEPLOY_ENV === 'production'. */
   DEMO_MODE: bool.default('false'),
 

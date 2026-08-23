@@ -128,6 +128,91 @@ export async function buildApp(): Promise<AppInstance> {
   // `audit-events`, not `audit`: that is the path AdminOverview.tsx already calls.
   await app.register(auditRoutes, { prefix: `${API_PREFIX}/audit-events` });
 
+  /*
+   * The SPA, served by this same process — LAST, and only when WEB_DIST_DIR is set.
+   *
+   * Order is the whole design. Every API route above is registered first, so a request
+   * for /api/v1/anything is matched by a real handler and never by the catch-all below.
+   * The catch-all exists because a client-side router owns paths this server has never
+   * heard of: a browser asked for /courses/01J… directly — a refresh, a bookmark, a
+   * pasted link — must receive index.html and let the router resolve it, not a 404.
+   *
+   * Absent WEB_DIST_DIR this registers nothing at all. In development Vite serves the
+   * SPA on :5173 and proxies /api here, so a static handler in this process would only
+   * be able to serve a stale build.
+   *
+   * This is why the image built the SPA, copied it to /app/public, set WEB_DIST_DIR,
+   * and still answered `/` with a 404: nothing had ever read the variable.
+   */
+  if (env.WEB_DIST_DIR) {
+    const { default: fastifyStatic } = await import('@fastify/static');
+    await app.register(fastifyStatic, {
+      root: env.WEB_DIST_DIR,
+      // The SPA's asset URLs are absolute already; a prefix would double them.
+      prefix: '/',
+      /*
+       * `index: false` so this plugin NEVER serves index.html — not at `/`, not
+       * anywhere. Every HTML response then comes from the one handler below, which is
+       * what lets the caching rule be stated once instead of split between a plugin
+       * option and a fallback.
+       *
+       * Vite fingerprints everything it emits under /assets, so those are safe to cache
+       * for a year. The HTML must not be, or a deploy leaves browsers holding a document
+       * that references chunks which no longer exist.
+       */
+      index: false,
+      /*
+       * `redirect: false` with `index: false`, or `/` is a 500 dressed as something
+       * else. With index serving off, the plugin treats a bare `/` as a DIRECTORY and
+       * tries to redirect to a trailing slash; @fastify/send refuses that and throws a
+       * ForbiddenError from inside the send stream, which the error translator then
+       * reported as a 422. Measured: `/courses` served index.html correctly while `/`
+       * — the one URL everybody types — answered
+       * `{"code":"VALIDATION_FAILED","status":422}`.
+       *
+       * With redirects off, `/` simply does not match a file, falls through to the
+       * not-found handler, and gets the SPA shell like every other client-router path.
+       */
+      redirect: false,
+      maxAge: '1y',
+      immutable: true,
+    });
+    /*
+     * `/` gets its own route, because the static plugin cannot serve it.
+     *
+     * With `index: false` the bare root is a DIRECTORY as far as @fastify/send is
+     * concerned, and it refuses to serve one: `redirect: false` stops the
+     * trailing-slash redirect but the request still ends in a thrown Forbidden. So the
+     * one URL everybody types answered 403 while `/courses` and `/login` were already
+     * serving the shell correctly.
+     *
+     * A declared route matches before the plugin's wildcard, so this takes `/` out of
+     * the directory path entirely and states the root's meaning once: it is the SPA
+     * shell, uncached, exactly like every other client-router path.
+     */
+    app.get('/', (_request, reply) =>
+      /*
+       * `cacheControl: false` per call, or the plugin wins.
+       *
+       * `maxAge: '1y', immutable: true` are set on the registration for the
+       * fingerprinted assets, and `sendFile` applies those same options — so a
+       * `.header('cache-control', …)` set beforehand was overwritten and the SHELL went
+       * out with `max-age=31536000, immutable`. Measured on the running image: `/`
+       * answered 200 with a one-year immutable cache, which is the exact failure the
+       * split exists to avoid — a deploy would leave browsers holding a document
+       * pointing at chunks that no longer exist, with no way to recover but a hard
+       * refresh most people do not know about.
+       */
+      reply
+        .type('text/html; charset=utf-8')
+        .header('cache-control', 'no-cache')
+        .sendFile('index.html', { cacheControl: false }),
+    );
+
+    // Every OTHER client-router path reaches the shell through the not-found handler in
+    // errors.plugin.ts: Fastify permits one per prefix and that plugin already owns it.
+  }
+
   await app.ready();
   return app;
 }
