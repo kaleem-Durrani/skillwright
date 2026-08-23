@@ -1,6 +1,7 @@
 import {
   GraduationCap,
   LayoutDashboard,
+  Megaphone,
   MessagesSquare,
   Settings,
   ShieldCheck,
@@ -13,7 +14,8 @@ import type { Role, SubjectIndependentAction } from '@skillwright/shared/policy'
  * typo becomes a compile error instead of a 404 nobody notices until a user
  * finds it.
  */
-export type NavPath = '/dashboard' | '/courses' | '/messages' | '/settings' | '/admin';
+export type NavPath =
+  '/dashboard' | '/courses' | '/announcements' | '/messages' | '/settings' | '/admin';
 
 export interface NavItem {
   to: NavPath;
@@ -64,6 +66,23 @@ const COMMON: NavItem[] = [
     icon: GraduationCap,
     primary: true,
   },
+  /*
+   * UNGATED, for the same reason Courses is.
+   *
+   * `announcement:read` is `isPublished` for anonymous and STUDENT — subject-dependent,
+   * so asking it with no subject denies everyone and deletes the link, which is the
+   * trap this whole comment block exists about. `announcement:create` IS
+   * subject-independent, but it is TEACHER/ADMIN only, and gating on it would hide the
+   * board from the students it is written for. Neither question is the one a nav entry
+   * means, so it asks none.
+   */
+  {
+    to: '/announcements',
+    label: 'Announcements',
+    shortLabel: 'News',
+    icon: Megaphone,
+    primary: true,
+  },
   {
     to: '/messages',
     label: 'Messages',
@@ -73,11 +92,20 @@ const COMMON: NavItem[] = [
   },
 ];
 
+/*
+ * NOT primary, and that is a trade rather than an oversight.
+ *
+ * The bottom bar holds five targets. With Announcements added, an admin's list would
+ * be six and `primaryNav` would silently slice the last one off — Settings — leaving a
+ * destination that looks configured and is unreachable. Settings is the one entry that
+ * is already reachable everywhere else: the account menu carries "Profile and
+ * settings" at every viewport (AppShell's `AccountMenu`). So it yields the slot, and
+ * every role's tab bar stays within five with nothing dropped.
+ */
 const SETTINGS: NavItem = {
   to: '/settings',
   label: 'Settings',
   icon: Settings,
-  primary: true,
 };
 
 const ADMIN: NavItem = {
