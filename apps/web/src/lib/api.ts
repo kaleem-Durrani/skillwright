@@ -12,9 +12,20 @@ export interface RequestOptions {
   query?: Record<string, string | number | boolean | undefined | null>;
   signal?: AbortSignal;
   headers?: Record<string, string>;
-  /** Bypass JSON encoding — used only by the direct-to-object-store upload PUT. */
-  raw?: boolean;
 }
+
+/*
+ * There was a `raw?: boolean` here, whose comment read "used only by the
+ * direct-to-object-store upload PUT". It was written in anticipation of uploads, and
+ * when uploads arrived they correctly did not use it — `lib/uploads.ts` PUTs with a
+ * plain `fetch`.
+ *
+ * They could not have used it. Every request through this client sets
+ * `credentials: 'include'` and prefixes `API_BASE`, and the signed URL is a different
+ * origin: routing the upload through here would have sent the `__Host-sw_session`
+ * cookie to the object store. So the option was not merely dead, it was an invitation
+ * to leak the session, and it needed an `as BodyInit` cast to work at all.
+ */
 
 function buildUrl(path: string, query: RequestOptions['query']): string {
   const url = `${API_BASE}${path.startsWith('/') ? path : `/${path}`}`;
@@ -58,15 +69,13 @@ async function request<T>(
     credentials: 'include',
     headers: {
       Accept: 'application/json, application/problem+json',
-      ...(body !== undefined && !options.raw ? { 'Content-Type': 'application/json' } : {}),
+      ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
       ...options.headers,
     },
     ...(options.signal ? { signal: options.signal } : {}),
   };
 
-  if (body !== undefined) {
-    init.body = options.raw ? (body as BodyInit) : JSON.stringify(body);
-  }
+  if (body !== undefined) init.body = JSON.stringify(body);
 
   let response: Response;
   try {
