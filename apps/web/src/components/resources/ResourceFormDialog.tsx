@@ -35,7 +35,7 @@ import { formatBytes } from '@/lib/format';
 import { ApiError } from '@/lib/problem';
 import { qk } from '@/lib/query';
 import type { ResourceDto, ResourceTypeValue } from '@/lib/types';
-import { describeFileProblem, uploadFile, UploadError, type UploadedFile } from '@/lib/uploads';
+import { describeFileProblem, isUploadFailure, uploadFile, type UploadedFile } from '@/lib/uploads';
 import { Button } from '@/components/ui/Button';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { Dialog, DialogContent } from '@/components/ui/Dialog';
@@ -466,14 +466,14 @@ export function ResourceFormDialog({
       const fallback = isEditing ? 'Could not save those changes' : 'Could not add that resource';
 
       /*
-       * An `UploadError` carries a sentence written for this user — "that link has
+       * An upload failure carries a sentence written for this user — "that link has
        * expired", "the file could not be sent" — and `toast.fromError` would have
        * replaced every one of them with the generic fallback above, because it only
        * trusts `ApiError.userMessage` and is right not to trust an arbitrary
        * `Error.message`. So the one error type whose message IS user copy is shown
        * directly, and everything else keeps the safe path.
        */
-      if (error instanceof UploadError) {
+      if (isUploadFailure(error)) {
         toast(error.message, { tone: 'danger' });
         return;
       }

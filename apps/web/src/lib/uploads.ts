@@ -22,10 +22,10 @@ import {
   type PresignUploadResponse,
   type UploadDto,
 } from '@skillwright/shared/schema';
-import { api } from './api.js';
-import { formatBytes } from './format.js';
-import { logger } from './logger.js';
-import type { UploadPurpose } from './types.js';
+import { api } from '@/lib/api';
+import { formatBytes } from '@/lib/format';
+import { logger } from '@/lib/logger';
+import type { UploadPurpose } from '@/lib/types';
 
 /** What a caller needs about a committed upload in order to attach it to a row. */
 /**
@@ -39,11 +39,30 @@ import type { UploadPurpose } from './types.js';
  * could be a TypeError from a bug — and every message this module composes is replaced
  * by the caller's generic fallback, which is what was happening.
  */
-export class UploadError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'UploadError';
-  }
+/**
+ * A tag, not a subclass.
+ *
+ * The dialog has to tell "this message was written for a human" from "something
+ * unexpected threw": `toast.fromError` shows `ApiError.userMessage` and otherwise falls
+ * back to the caller's generic copy, correctly refusing to put an arbitrary
+ * `Error.message` on screen — it could be a TypeError from a bug. Without a way to opt
+ * in, every sentence composed here was replaced by that fallback.
+ *
+ * A `class UploadFailure extends Error` would read better and buys nothing: subclassing
+ * a built-in survives neither downlevelling nor every matcher, and a boolean answers
+ * the only question the caller actually asks.
+ */
+export interface UploadFailure extends Error {
+  readonly isUploadFailure: true;
+}
+
+function uploadFailure(message: string): UploadFailure {
+  return Object.assign(new Error(message), { isUploadFailure: true as const });
+}
+
+/** True when the message was composed for a user and is safe to show verbatim. */
+export function isUploadFailure(error: unknown): error is UploadFailure {
+  return error instanceof Error && (error as Partial<UploadFailure>).isUploadFailure === true;
 }
 
 export interface UploadedFile {
@@ -150,7 +169,7 @@ export async function uploadFile(file: File, purpose: UploadPurpose): Promise<Up
   // any form, and a file the limits already refuse should not cost a presign — which
   // writes a PENDING row that nothing currently sweeps.
   const problem = describeFileProblem(file, purpose);
-  if (problem !== null) throw new UploadError(problem);
+  if (problem !== null) throw uploadFailure(problem);
 
   const presigned = await api.post<PresignUploadResponse>('/uploads/presign', {
     purpose,
@@ -180,7 +199,7 @@ export async function uploadFile(file: File, purpose: UploadPurpose): Promise<Up
     // A DNS failure, an offline device, or a CORS rule on the bucket that does not
     // allow PUT from this origin. None of them reached the store.
     logger.error('Upload PUT could not be sent', { uploadId: presigned.uploadId, cause });
-    throw new UploadError(
+    throw uploadFailure(
       'The file could not be sent. Check your connection and try again — nothing was uploaded.',
     );
   }
@@ -199,7 +218,7 @@ export async function uploadFile(file: File, purpose: UploadPurpose): Promise<Up
       status: stored.status,
       detail,
     });
-    throw new UploadError(describePutFailure(stored.status));
+    throw uploadFailure(describePutFailure(stored.status));
   }
 
   const committed = await api.post<UploadDto>('/uploads/commit', {

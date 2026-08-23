@@ -4,7 +4,7 @@ import {
   type PresignUploadResponse,
   type UploadDto,
 } from '@skillwright/shared/schema';
-import { api } from './api.js';
+import { api } from '@/lib/api';
 import { describeFileProblem, uploadFile } from './uploads.js';
 
 /**
@@ -12,6 +12,10 @@ import { describeFileProblem, uploadFile } from './uploads.js';
  * whole point is WHICH of its two round trips happen and in what order — and a real
  * `api.post` would try to reach the network to answer that.
  */
+// Mocked by the SAME specifier the module under test imports. When these two drift
+// — the module on './api.js', the mock on '@/lib/api' — the mock silently does not
+// apply and the real client is used, which shows up as assertions failing on error
+// messages that were never produced.
 vi.mock('@/lib/api', () => ({ api: { post: vi.fn() } }));
 
 /** Silenced, not asserted: the failure paths log the store's XML on purpose. */
@@ -122,6 +126,27 @@ describe('describeFileProblem', () => {
   });
 });
 
+/*
+ * `rejects.toMatchObject({ message })`, not `rejects.toThrow(/regex/)`.
+ *
+ * `rejects.toThrow` with a regex or a string is BROKEN in this workspace: it reads the
+ * rejection's `.message` as undefined and reports `Received: ''`. Reproduced on a
+ * plain, freshly-constructed Error with nothing of ours involved —
+ *
+ *   expect(fn).toThrow(/needle/)                                   -> passes
+ *   await expect(Promise.reject(new Error('needle')))
+ *     .rejects.toThrow(/needle/)                                   -> "but got ''"
+ *   the same rejection via .rejects.toMatchObject / .toHaveProperty -> passes
+ *
+ * So the synchronous matcher is fine and only the `.rejects` path loses the message.
+ * It started when the root gained `@playwright/test` and `esbuild`; @playwright/test
+ * ships its own `expect`, which is the likeliest collision. Ruled out first, in this
+ * order: our error type (a subclass, then a plain Error, then a tagged Error — all
+ * three behave identically), the import specifiers, and the mock specifiers.
+ *
+ * The forms below read the same message through a matcher that works, so nothing is
+ * asserted more weakly. NEXT.md carries the open question.
+ */
 describe('uploadFile', () => {
   it('presigns, PUTs, then commits, and resolves with the committed row', async () => {
     vi.mocked(api.post).mockResolvedValueOnce(PRESIGN).mockResolvedValueOnce(COMMITTED);
@@ -177,7 +202,9 @@ describe('uploadFile', () => {
     );
 
     const file = fileOfSize(4096, 'application/pdf');
-    await expect(uploadFile(file, 'RESOURCE')).rejects.toThrow(/upload link was refused/i);
+    await expect(uploadFile(file, 'RESOURCE')).rejects.toMatchObject({
+      message: expect.stringContaining('upload link was refused'),
+    });
 
     expect(api.post).toHaveBeenCalledTimes(1);
     expect(api.post).not.toHaveBeenCalledWith('/uploads/commit', expect.anything());
@@ -188,7 +215,9 @@ describe('uploadFile', () => {
     stubFetch(() => Promise.reject(new TypeError('Failed to fetch')));
 
     const file = fileOfSize(4096, 'application/pdf');
-    await expect(uploadFile(file, 'RESOURCE')).rejects.toThrow(/could not be sent/i);
+    await expect(uploadFile(file, 'RESOURCE')).rejects.toMatchObject({
+      message: expect.stringContaining('could not be sent'),
+    });
 
     expect(api.post).toHaveBeenCalledTimes(1);
   });
@@ -197,7 +226,9 @@ describe('uploadFile', () => {
     const file = fileOfSize(UPLOAD_LIMITS.RESOURCE.maxBytes + 1, 'application/pdf');
     stubFetch(() => Promise.resolve(new Response('', { status: 200 })));
 
-    await expect(uploadFile(file, 'RESOURCE')).rejects.toThrow(/512 MB/);
+    await expect(uploadFile(file, 'RESOURCE')).rejects.toMatchObject({
+      message: expect.stringContaining('512 MB'),
+    });
 
     // No presign, so no PENDING row for a file that was never going to be accepted.
     expect(api.post).not.toHaveBeenCalled();
