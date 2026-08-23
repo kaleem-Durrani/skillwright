@@ -16,7 +16,6 @@ import { Avatar } from '@/components/ui/Avatar';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardTitle } from '@/components/ui/Card';
-import { Checkbox } from '@/components/ui/Checkbox';
 import { FormField } from '@/components/ui/FormField';
 import { Input } from '@/components/ui/Input';
 import { Separator } from '@/components/ui/Separator';
@@ -119,21 +118,17 @@ export function SettingsPage() {
 
   return (
     <div className="flex flex-col">
-      <PageHeader
-        title="Settings"
-        description="Your profile, your credentials, and what we are allowed to email you about."
-      />
+      <PageHeader title="Settings" description="Your profile and your credentials." />
 
       <Tabs
         value={tab ?? 'profile'}
         onValueChange={(value) =>
-          void navigate({ search: { tab: value as 'profile' | 'security' | 'notifications' } })
+          void navigate({ search: { tab: value as 'profile' | 'security' } })
         }
       >
         <TabsList>
           <TabsTrigger value="profile">Profile</TabsTrigger>
           <TabsTrigger value="security">Security</TabsTrigger>
-          <TabsTrigger value="notifications">Notifications</TabsTrigger>
         </TabsList>
 
         <TabsContent value="profile">
@@ -157,10 +152,6 @@ export function SettingsPage() {
 
         <TabsContent value="security">
           <SecurityTab />
-        </TabsContent>
-
-        <TabsContent value="notifications">
-          <NotificationsTab />
         </TabsContent>
       </Tabs>
     </div>
@@ -422,33 +413,5 @@ function SecurityTab() {
         </Button>
       </Card>
     </div>
-  );
-}
-
-function NotificationsTab() {
-  return (
-    <Card className="flex flex-col gap-4">
-      <CardTitle>Email notifications</CardTitle>
-      <p className="text-sm text-fg-secondary">
-        In-app notifications are always on. These control what also reaches your inbox.
-      </p>
-      <div className="flex flex-col divide-y divide-line-subtle">
-        <Checkbox
-          defaultChecked
-          label="Enrolment decisions"
-          hint="When a request of yours is approved or rejected."
-        />
-        <Checkbox
-          defaultChecked
-          label="New resources"
-          hint="When a teacher publishes something on a course you are enrolled in."
-        />
-        <Checkbox label="Announcements" hint="News and events posted by the institution." />
-        <Checkbox label="Direct messages" hint="When someone messages you." />
-      </div>
-      <Button block className="sm:w-auto sm:self-start">
-        Save preferences
-      </Button>
-    </Card>
   );
 }

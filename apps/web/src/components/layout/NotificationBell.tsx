@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bell, CheckCheck, RotateCcw } from 'lucide-react';
+import { Bell, CheckCheck, Inbox, RotateCcw } from 'lucide-react';
 /*
  * The page envelope comes from the package that DEFINES it, not from `@/lib/api`'s
  * hand-written copy of it (Courses.tsx:5-13 argues this at length). Type-only, so
@@ -317,6 +317,30 @@ export function NotificationBell({ unreadCount }: { unreadCount: number }) {
             }}
           >
             Mark all read
+          </DropdownMenuItem>
+
+          {/*
+           * The door to the full archive at /notifications. The panel stays the
+           * QUICK view — ten recent rows, triaged in place — because a menu is a
+           * bad place to page through history or filter by read state; that is the
+           * page's job. An item here rather than the bell navigating directly: a
+           * tap on the bell should still open the quick glance it has always
+           * opened, not strand the user in a full screen when all they wanted was
+           * to see what arrived.
+           *
+           * It is also the ONLY entry point, deliberately: `primaryNav` slices the
+           * bottom bar to five targets and Settings already yielded its slot once
+           * (nav.ts:95-104), so /notifications must stay out of primary nav. Every
+           * signed-in user who can see this bell can reach the archive.
+           *
+           * No `preventDefault` — selecting it CLOSES the panel, because the whole
+           * point is to leave for the page.
+           */}
+          <DropdownMenuItem
+            icon={<Inbox aria-hidden="true" className="size-4" />}
+            onSelect={() => void navigate({ to: '/notifications', search: { page: 1 } })}
+          >
+            View all notifications
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

@@ -123,10 +123,18 @@ export const qk = {
    * the mark-read mutation, so one key held two incompatible shapes and the first
    * component to actually request unread-only rows would have got a number back.
    *
+   * `page` is the archive page's slot (`/notifications`, offset-paginated), and it
+   * is a separate SEGMENT rather than a field inside the filter object so the
+   * bell's key — `notifications(false)`, no page — stays exactly what it always
+   * was. TanStack matches keys structurally, so invalidating the two-element
+   * prefix `qk.notifications(true)` reaches EVERY page of the unread-filtered
+   * list without anyone enumerating pages.
+   *
    * The count key deliberately still starts with 'notifications', so a future
    * blanket `invalidateQueries({ queryKey: ['notifications'] })` reaches both.
    */
-  notifications: (unreadOnly = false) => ['notifications', { unreadOnly }] as QueryKey,
+  notifications: (unreadOnly = false, page?: number) =>
+    ['notifications', { unreadOnly }, ...(page === undefined ? [] : [page])] as QueryKey,
   notificationsUnread: ['notifications', 'unread-count'] as QueryKey,
   courses: (params: Record<string, unknown> = {}) => ['courses', params] as QueryKey,
   course: (courseId: string) => ['courses', courseId] as QueryKey,
