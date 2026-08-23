@@ -560,3 +560,23 @@ Nothing about this was visible until the resources module existed. The rule had 
 **Fix.** `/uploads/` — anchored to the root, which is what it always meant.
 
 **Rule.** Anchor any `.gitignore` entry that names a directory you mean at one specific place: `/dist/`, `/uploads/`, `/tmp/`. And after creating a new directory of source files, look at `git status` before believing the work exists — `git check-ignore -v <path>` names the offending pattern and line when it does not.
+
+---
+
+## 36. In Tailwind v4, `outline-none` and `outline-2` on the same element cancel each other
+
+**Symptom.** Keyboard focus rings did not render anywhere in the application. Not faintly, not in one theme — at all. The class lists looked right, the tokens were defined, and axe reported nothing, because axe does not evaluate `:focus-visible`.
+
+**Root cause.** Tailwind v4 compiles `outline-2` to `outline-width: 2px; outline-style: var(--tw-outline-style)`, and `outline-none` sets that same variable to `none` **on the element**. The pattern that reads naturally —
+
+```
+outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-focus
+```
+
+— therefore paints a width and a colour over a style of `none`, which is nothing. It is not a specificity problem and no `!important` fixes it; the variable was set by the class sitting right beside it.
+
+Confirmed by reading the computed style at every tab stop rather than by reasoning: every one reported `outlineStyle: "none"` with `outlineWidth: "2px"`.
+
+**Fix.** Name the style explicitly in the same variant: `focus-visible:outline-solid` alongside the width, offset and colour. And gate on `focus-visible`, not on a `data-highlighted` attribute — Radix sets `data-highlighted` on mouse hover too, which paints a keyboard ring under the pointer.
+
+**Rule.** A focus ring is invisible to every automated check this repository runs: axe does not evaluate `:focus-visible`, the mobile-first script does not look at outlines, and nothing type-checks a class string. So the ring is verified the only way it can be — by driving the page and reading `getComputedStyle(el).outlineStyle` at each tab stop, under the keyboard AND under the mouse. When adding a focusable control, copy the class list from a control that has been verified (`Input`'s `controlBase`, `DropdownMenu`'s `itemBase`) rather than assembling `outline-*` utilities by hand.

@@ -11,6 +11,30 @@ This file records **what changed and the state it left the repository in** — n
 
 ## 2026-08-23
 
+**A teacher can now add course material without an API client.** _(verified — a real PDF, through the form, in a browser)_
+The Resources tab has an "Add a resource" affordance and a per-row Edit/Delete menu, and the dialog serves both create and edit. Driven end to end: **`201 POST /uploads/presign` → `200 POST /uploads/commit` → `201 POST /resources`**, the new row at the top of the list, no console errors, and **axe clean on the open dialog**. A student sees no Add button and no row menu. The accepted types and the size limit are on screen before the picker rather than after a 422, and a file that breaks them is refused on selection.
+
+An edit changes metadata only. `updateResourceSchema` has no `uploadId`, so the file behind a row cannot be swapped, and the dialog says so rather than offering a control the API would refuse.
+
+**Every message the upload client wrote for the user was being thrown away.** _(verified — the whole translation layer was dead)_
+`uploadFile` turns the object store's failures into sentences a person can act on — "that link has expired, or the file changed since you chose it". `toast.fromError` replaced all of them with "Could not add that resource", because it trusts only `ApiError.userMessage` and is right not to trust an arbitrary `Error.message`: that could be a `TypeError` from a bug. The fix is a distinct `UploadError` class, so the one error type whose message IS user copy is shown directly and everything else keeps the safe path.
+
+**A failed save after a successful commit orphaned the bytes, once per retry.** _(verified by reading the flow)_
+A 409 on the POST — or a session that expired during a long PUT — left a COMMITTED upload with nothing pointing at it, and pressing the button again uploaded the file a second time. The committed upload is now remembered across retries, keyed on the `File` object itself, so a retry reuses it and choosing a _different_ file still uploads the new one. Nothing sweeps orphans; that is why this mattered.
+
+**Two accessibility defects in shared components, not in the new screen.** _(verified in the browser's own accessibility tree)_
+`Checkbox` rendered its label and its hint inside the wrapping `<label>`, and everything inside a label is the control's accessible NAME — so a checkbox whose hint explained a policy in two sentences announced as a **57-word name with no description at all**. And `Button` set the native `disabled` attribute while `loading`, which removes it from the tab order: in a dialog whose every field is disabled during a save, that left **zero focusable elements**, the focus trap had nothing to hold, and focus escaped to the document body for the whole request — minutes, on a large upload. The checkbox's hint is now a description (`name` 5 words, `description` the policy text, confirmed live) and a busy button stays focusable with `aria-disabled` + `aria-busy`, its click intercepted so Enter cannot double-submit.
+
+**`api.ts` carried an option that invited a session leak.** _(verified — zero callers)_
+`raw?: boolean`, commented "used only by the direct-to-object-store upload PUT". Uploads arrived and did not use it. They could not have: every request through that client sets `credentials: 'include'` and prefixes `API_BASE`, so routing the PUT through it would have sent the `__Host-sw_session` cookie to the object store. It also needed an `as BodyInit` cast, which this repo forbids. Deleted.
+
+**A citation pointed at a lesson that had never been written.** _(verified — the document contained no mention of "outline")_
+Two reviewers flagged that the new code cited `docs/LESSONS-LEARNED.md` for the Tailwind v4 `outline-none`/`outline-2` behaviour. They were right: those focus rings were fixed in an earlier session and recorded only in commit messages. Rather than re-anchor the citation, the lesson is now written — #36 — which makes it true and records a trap every new focusable control in this repo has to know.
+
+**Green — observed on 2026-08-23:** **921 tests** (600 policy + 294 API + **27 web**, up from 9) · typecheck 5/5 · lint 3/3 · build 3/3 · `format:check` · `check:brand` · `check:mobile-first` · `docs:permissions --check`.
+
+**Still open:** no byte-level upload progress — `fetch` exposes no upload-progress event, and moving the PUT onto XHR is its own change. Nothing sweeps abandoned uploads.
+
 **Golden path 3 is driven, and the object store itself refuses an unauthorised read.** _(verified — a real file, through a browser, end to end)_
 A teacher signed in, presigned an upload, PUT a genuinely valid PDF, committed it and filed it as a course resource; the Download button — which had rendered with no `onClick` since the day it was written — fetched a signed URL and returned **the exact 69 bytes that went in**, under the original filename rather than the ULID key. Then, against a public and a private resource in turn: the owning teacher and an approved student pull the bytes; a non-enrolled student is **403** on the private one; an anonymous caller is **401 on download while still 200 on read**, which is the narrowing `resource:download` exists to draw; and **the raw unsigned object URL answers 403**. That last one is the only assertion in this repository that proves the bucket refuses an unauthorised read rather than the policy layer refusing on its behalf. **axe: zero violations** on the tab with the new controls. All five golden paths have now been driven.
 
