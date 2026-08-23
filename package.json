@@ -28,13 +28,16 @@
     "db:studio": "pnpm --filter @skillwright/db run studio",
     "db:generate": "pnpm --filter @skillwright/db run generate",
     "docs:permissions": "tsx scripts/generate-permissions-doc.ts",
+    "screenshots": "tsx scripts/screenshots.ts",
     "infra:up": "docker compose up -d minio-init && docker compose up -d --wait postgres redis minio mailpit",
     "infra:down": "docker compose down",
     "infra:nuke": "docker compose down -v"
   },
   "devDependencies": {
+    "@playwright/test": "^1.54.2",
     "@skillwright/shared": "workspace:*",
     "@types/node": "^22.10.5",
+    "esbuild": "^0.28.2",
     "prettier": "^3.4.2",
     "tsx": "^4.19.2",
     "turbo": "^2.3.3",
