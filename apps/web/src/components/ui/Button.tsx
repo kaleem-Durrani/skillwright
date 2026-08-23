@@ -60,7 +60,17 @@ export interface ButtonProps
   extends ButtonHTMLAttributes<HTMLButtonElement>, VariantProps<typeof buttonVariants> {
   /** Render as the single child element (a router Link, usually). */
   asChild?: boolean;
-  /** Swaps the leading slot for a spinner and blocks interaction. */
+  /**
+   * Swaps the leading slot for a spinner and blocks interaction.
+   *
+   * Blocked with `aria-disabled`, NOT the native `disabled` attribute: a natively
+   * disabled button is removed from the tab order, and the busy button is very often
+   * the last focusable thing left on screen. A dialog whose fields are all disabled
+   * during a save then contains nothing focusable at all, its focus trap has nothing
+   * to hold, and focus escapes to the document body for the whole request — minutes,
+   * on a large upload. Staying focusable also means the state can be heard: `disabled`
+   * suppresses the announcement that `aria-busy` exists to make.
+   */
   loading?: boolean;
   leadingIcon?: ReactNode;
   trailingIcon?: ReactNode;
@@ -79,11 +89,13 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     children,
     disabled,
     type,
+    onClick,
     ...props
   },
   ref,
 ) {
   const Comp = asChild ? Slot : 'button';
+  const busy = loading && !asChild;
   return (
     <Comp
       ref={ref}
@@ -91,8 +103,24 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       // caused more accidental submits than it has ever saved keystrokes.
       type={asChild ? undefined : (type ?? 'button')}
       className={cn(buttonVariants({ variant, size, block }), className)}
-      disabled={asChild ? undefined : disabled || loading}
-      aria-busy={loading || undefined}
+      disabled={asChild ? undefined : disabled}
+      aria-disabled={busy || undefined}
+      aria-busy={busy || undefined}
+      /*
+       * `aria-disabled` is advisory — it stops nothing on its own. The pointer is
+       * already handled by `aria-busy:pointer-events-none` in the variant classes, but
+       * a focused submit button still fires a click on Enter or Space, and that click
+       * is what submits the form. So the handler is intercepted here rather than the
+       * button being removed from the tab order, which is the whole point.
+       */
+      onClick={
+        busy
+          ? (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }
+          : onClick
+      }
       {...props}
     >
       {/* Slot demands EXACTLY ONE child, so `asChild` passes the caller's
