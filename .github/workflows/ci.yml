@@ -207,7 +207,35 @@ jobs:
       - name: Apply migrations
         run: pnpm --filter @skillwright/db exec prisma migrate deploy
 
-      # apps/api's suite talks to the real Postgres and the real Redis above. No
+      # test/uploads.test.ts signs a PUT with storage.ts and then actually fetch()es
+      # it — a real object store, not a mock. `services:` cannot run this image: the
+      # official minio/minio container needs `server /data` as its command and
+      # GitHub Actions service containers cannot override a service's command, only
+      # its env/ports/health-check. So MinIO runs as a plain container instead,
+      # started the same way docker-compose.yml runs it (minio service + minio-init
+      # commands, docker-compose.yml:39-63) but as workflow steps.
+      - name: Start MinIO
+        run: |
+          docker network create minio-net
+          docker run -d --name minio --network minio-net -p 9000:9000 \
+            -e MINIO_ROOT_USER=skillwright \
+            -e MINIO_ROOT_PASSWORD=skillwright-dev-secret \
+            minio/minio:latest server /data
+
+      # Credentials, bucket name and port match the S3_* fallbacks setup.ts:68-73
+      # supplies, so the API under test needs no extra env here. The bucket is
+      # created over the docker network by name (not "localhost") because this step
+      # itself runs inside a throwaway mc container, not on the runner directly.
+      - name: Wait for MinIO and create the uploads bucket
+        run: |
+          timeout 60 sh -c 'until curl -sf http://localhost:9000/minio/health/live; do sleep 2; done'
+          docker run --rm --network minio-net --entrypoint /bin/sh minio/mc:latest -c "
+            mc alias set local http://minio:9000 skillwright skillwright-dev-secret &&
+            mc mb --ignore-existing local/skillwright-uploads &&
+            mc anonymous set none local/skillwright-uploads
+          "
+
+      # apps/api's suite talks to the real Postgres, Redis and MinIO above. No
       # mocks: a test that mocks the database cannot catch a broken migration, a
       # missing index, or a CHECK constraint that does not hold.
       - name: Integration tests
@@ -246,6 +274,25 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # The Dockerfile has never been built anywhere — not in CI, not by hand. This job
+  # is the first place that happens: build only, no push, no registry credentials.
+  # A broken image build has to fail CI exactly like a broken test would, instead
+  # of being discovered the day someone tries to deploy.
+  docker:
+    name: docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          tags: skillwright:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   # docs/permissions.md is generated from the policy. If the two disagree, the
   # documentation is wrong and this build is wrong with it.
   permissions-doc:
@@ -279,6 +326,7 @@ jobs:
       - unit
       - integration
       - build
+      - docker
       - permissions-doc
     runs-on: ubuntu-latest
     steps:
