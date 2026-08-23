@@ -25,7 +25,10 @@ blob-report/
 .playwright/
 
 # runtime & uploads
-uploads/
+# ANCHORED. A bare `uploads/` matches a directory of that name at ANY depth, which
+# silently swallowed apps/api/src/modules/uploads/ — the module was on disk, compiled,
+# and invisible to git. Only the runtime directory at the repository root is meant.
+/uploads/
 tmp/
 *.log
 npm-debug.log*
