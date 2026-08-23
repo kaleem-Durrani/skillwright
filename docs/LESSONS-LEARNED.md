@@ -580,3 +580,26 @@ Confirmed by reading the computed style at every tab stop rather than by reasoni
 **Fix.** Name the style explicitly in the same variant: `focus-visible:outline-solid` alongside the width, offset and colour. And gate on `focus-visible`, not on a `data-highlighted` attribute — Radix sets `data-highlighted` on mouse hover too, which paints a keyboard ring under the pointer.
 
 **Rule.** A focus ring is invisible to every automated check this repository runs: axe does not evaluate `:focus-visible`, the mobile-first script does not look at outlines, and nothing type-checks a class string. So the ring is verified the only way it can be — by driving the page and reading `getComputedStyle(el).outlineStyle` at each tab stop, under the keyboard AND under the mouse. When adding a focusable control, copy the class list from a control that has been verified (`Input`'s `controlBase`, `DropdownMenu`'s `itemBase`) rather than assembling `outline-*` utilities by hand.
+
+---
+
+## 37. A `$` in a path is a shell variable, and `git add` fails all-or-nothing
+
+**Symptom.** A commit plan of five commits ran, four landed, and the fifth left eleven files uncommitted. No error was noticed at the time, because the failing command was one line in a run of ten.
+
+**Root cause.** TanStack Router names dynamic segments with a `$`, so route files are literally called `announcements.$announcementId.tsx`. Pasted into a shell unquoted:
+
+```
+$ echo apps/web/src/routes/_app/announcements.$announcementId.tsx
+apps/web/src/routes/_app/announcements..tsx
+```
+
+`$announcementId` is an unset variable and expands to nothing. `git add` then reports `fatal: pathspec '…announcements..tsx' did not match any files` — and, crucially, **stages nothing at all**: it validates every pathspec before adding any of them, so one bad path discards the whole command. The following `git commit` had an empty index and refused, and the pair looked like it had simply produced no output.
+
+**Fix.** Single-quote any path containing `$`:
+
+```
+git add 'apps/web/src/routes/_app/announcements.$announcementId.tsx'
+```
+
+**Rule.** When writing a command someone will paste into a shell, quote every path that contains `$`, a space, `*`, `?`, `[`, `~` or a backtick — and check the plan mechanically for them, which is one `grep -n '\$' COMMIT-PLAN*.md`. Two habits make the failure loud instead of silent: `git add --dry-run` first, which prints exactly what will be staged, and reading `git log --oneline` against the plan's commit count afterwards. The all-or-nothing behaviour is the trap — a partially-staged commit would have been obvious; an empty one is not.
