@@ -1,13 +1,27 @@
 import { useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Download, FileText, Link2, Video, type LucideIcon } from 'lucide-react';
+import {
+  ArrowLeft,
+  Download,
+  ExternalLink,
+  FileText,
+  Link2,
+  Video,
+  type LucideIcon,
+} from 'lucide-react';
 import { rejectEnrollmentSchema } from '@skillwright/shared/schema';
 import { api, type Paginated } from '@/lib/api';
 import { qk } from '@/lib/query';
 import { subject, usePolicy, type PolicySubject } from '@/lib/policy';
 import { formatBytes, formatDate, formatDuration, formatRelative } from '@/lib/format';
-import type { CourseDetail, EnrollmentDto, ResourceDto, ResourceTypeValue } from '@/lib/types';
+import type {
+  CourseDetail,
+  DownloadUrlResponse,
+  EnrollmentDto,
+  ResourceDto,
+  ResourceTypeValue,
+} from '@/lib/types';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
@@ -92,6 +106,12 @@ function resourceSubject(resource: ResourceDto, course: CourseDetail): PolicySub
     courseTeacherId: course.teacher.id,
     authorId: resource.author.id,
     isPublic: resource.isPublic,
+    // The COURSE's publication state. Both read rules' public branch is
+    // `and(isPublic, isPublished)`, so a resource in a draft course is not public to
+    // anyone but its teacher, its author, an approved student and an admin. Omitting it
+    // here would hide the Download button from people the API would serve — the
+    // client-side half of LESSONS-LEARNED #31.
+    publishedAt: course.publishedAt,
     enrollmentStatus: course.viewerEnrollmentStatus,
   });
 }
@@ -195,6 +215,38 @@ export function CourseDetailPage() {
       ]);
     },
     onError: (error) => toast.fromError(error, 'Could not record that decision'),
+  });
+
+  /*
+   * `GET /resources/:id/download` answers `{ url, expiresAt, filename }`
+   * (upload.ts:108-113) — a URL signed for five minutes against a PRIVATE bucket,
+   * never a path. The gate is `resource:download`, which is strictly narrower than
+   * the `resource:read` that got the row onto this screen: anonymous is `deny`
+   * (policy.ts:217-226), so a logged-out visitor sees the row and is answered 401
+   * for the bytes.
+   *
+   * `window.location.assign`, not an `<a download>`: the signed GET carries
+   * `ResponseContentDisposition: attachment` (storage.ts:178-196), so the
+   * browser saves the file and this page stays put — no navigation, no lost query
+   * cache. The `download` attribute would have been the obvious alternative and is
+   * ignored on a cross-origin href by every browser, which is exactly why the server
+   * puts the name in the disposition header. The response's `filename` is therefore
+   * for display, not for wiring, and nothing here needs it.
+   *
+   * ONE mutation for the whole list, not one per row — hooks cannot be called from
+   * inside `renderCard`. `variables` holds the id it was called with while the
+   * request is in flight, which is how only the clicked row shows a spinner.
+   */
+  const download = useMutation({
+    mutationFn: (resourceId: string) =>
+      api.get<DownloadUrlResponse>(`/resources/${resourceId}/download`),
+    onSuccess: (result) => window.location.assign(result.url),
+    // A 409 lands here too — the row's upload was presigned but never committed, so
+    // there are no bytes (resources.service.ts:439-441). It renders as the generic
+    // CONFLICT copy, because the SPA renders errors by `code` and never by `detail`
+    // (LESSONS-LEARNED #25); the fallback below is only for a transport failure,
+    // which carries no code at all.
+    onError: (error) => toast.fromError(error, 'Could not start that download'),
   });
 
   if (course.isPending) {
@@ -319,6 +371,28 @@ export function CourseDetailPage() {
                     <StatusChip status={resource.isPublic ? 'PUBLIC' : 'PRIVATE'} />
                   ),
                 },
+                /*
+                 * The affordance has to be in BOTH renderings, because they are not a
+                 * fallback and a primary: `DataList` puts the card list and the table in
+                 * the DOM together and switches them with `display` at `md`
+                 * (DataList.tsx:75-101). Wiring only `renderCard` would have shipped a
+                 * download button that no desktop viewport can ever show — the tab has
+                 * looked complete on a phone and had no way to fetch a file on a laptop
+                 * for as long as the dead button existed.
+                 */
+                {
+                  id: 'open',
+                  header: 'Open',
+                  align: 'end',
+                  cell: (resource) =>
+                    policy.can('resource:download', resourceSubject(resource, data)) ? (
+                      <ResourceAccess
+                        resource={resource}
+                        pending={download.isPending && download.variables === resource.id}
+                        onDownload={() => download.mutate(resource.id)}
+                      />
+                    ) : null,
+                },
               ]}
               renderCard={(resource) => {
                 const Icon = RESOURCE_ICON[resource.type];
@@ -339,14 +413,12 @@ export function CourseDetailPage() {
                         {resource.sizeBytes ? ` · ${formatBytes(resource.sizeBytes)}` : ''}
                       </p>
                       {policy.can('resource:download', resourceSubject(resource, data)) ? (
-                        <Button
-                          variant="secondary"
-                          size="sm"
+                        <ResourceAccess
+                          resource={resource}
                           className="mt-1 self-start"
-                          leadingIcon={<Download aria-hidden="true" className="size-4" />}
-                        >
-                          Download
-                        </Button>
+                          pending={download.isPending && download.variables === resource.id}
+                          onDownload={() => download.mutate(resource.id)}
+                        />
                       ) : null}
                     </div>
                   </Card>
@@ -501,6 +573,72 @@ function Fact({ label, value }: { label: string; value: string }) {
       <dt className="text-2xs tracking-wide text-fg-tertiary uppercase">{label}</dt>
       <dd className="text-sm font-medium text-fg">{value}</dd>
     </div>
+  );
+}
+
+/**
+ * The one thing a viewer can do with a resource row, rendered identically by the card
+ * list and by the table so the two cannot drift.
+ *
+ * The branch is on `uploadId`, NOT on `type === 'LINK'`, and mirrors the server's
+ * (resources.service.ts:420-424, :436): `type` is a label the creator picks (resource.ts:11)
+ * while the CHECK from migration 0002 is what actually guarantees one source per row.
+ * `createResourceSchema` forbids only the other pairing — a LINK may not carry an upload
+ * (resource.ts:56-62) — so a row typed DOCUMENT and backed by an `externalUrl` is legal,
+ * and branching on the label would offer it a Download button the API answers 409.
+ *
+ * Neither affordance styles itself. `Button` carries the focus ring the whole app uses
+ * (Button.tsx:23), and `asChild` hands those same classes to the anchor through Radix's
+ * Slot — which matters more than tidiness here: Tailwind v4 compiles `outline-2` to
+ * `outline-style: var(--tw-outline-style)`, and the `outline-none` sitting on the same
+ * element sets that variable to `none`. A ring hand-written without `outline-solid`
+ * paints a width and a colour over a style of `none` and renders nothing at all, and
+ * neither axe nor the mobile-first lint evaluates `:focus-visible`, so it fails silently.
+ */
+function ResourceAccess({
+  resource,
+  pending,
+  onDownload,
+  className,
+}: {
+  resource: ResourceDto;
+  pending: boolean;
+  onDownload: () => void;
+  className?: string;
+}) {
+  if (resource.uploadId === null) {
+    // No upload and no URL cannot happen — the CHECK forbids it — but the DTO types both
+    // as nullable, so the impossible row renders nothing rather than a dead anchor.
+    if (resource.externalUrl === null) return null;
+    return (
+      <Button asChild variant="secondary" size="sm" className={className}>
+        {/*
+         * `target="_blank"` needs `rel="noreferrer noopener"`: `noopener` denies the new
+         * document a handle on this one via `window.opener`, and `noreferrer` withholds
+         * the referrer, which for a course page leaks the course id to a third party.
+         * The visible label plus the arrow say "you are leaving"; the sr-only tail says
+         * it to a screen reader, which cannot see the arrow.
+         */}
+        <a href={resource.externalUrl} target="_blank" rel="noreferrer noopener">
+          <ExternalLink aria-hidden="true" className="size-4" />
+          Open link
+          <span className="sr-only"> (opens in a new tab)</span>
+        </a>
+      </Button>
+    );
+  }
+
+  return (
+    <Button
+      variant="secondary"
+      size="sm"
+      className={className}
+      loading={pending}
+      leadingIcon={<Download aria-hidden="true" className="size-4" />}
+      onClick={onDownload}
+    >
+      Download
+    </Button>
   );
 }
 

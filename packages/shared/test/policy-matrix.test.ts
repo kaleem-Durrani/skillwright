@@ -105,12 +105,19 @@ const ENROLLMENT_S2_IN_B: Subject = {
   enrollmentStatus: 'PENDING',
 };
 
+/*
+ * `publishedAt` is the COURSE's, carried on the resource subject: a resource is never
+ * more visible than the course it hangs off, so the public branch of `resource:read`
+ * and `resource:download` is `and(isPublic, isPublished)`. A fixture that omits it is
+ * a resource on a DRAFT course, which is what RESOURCE_A_PUBLIC_DRAFT below is for.
+ */
 const RESOURCE_A_PUBLIC: Subject = {
   id: 'r_pub',
   courseId: 'c_a',
   courseTeacherId: TEACHER_A.id,
   authorId: TEACHER_A.id,
   isPublic: true,
+  publishedAt: T0,
 };
 const RESOURCE_A_PRIVATE: Subject = { ...RESOURCE_A_PUBLIC, id: 'r_priv', isPublic: false };
 const RESOURCE_A_PRIVATE_APPROVED: Subject = {
@@ -118,12 +125,33 @@ const RESOURCE_A_PRIVATE_APPROVED: Subject = {
   enrollmentStatus: 'APPROVED',
 };
 const RESOURCE_A_PRIVATE_PENDING: Subject = { ...RESOURCE_A_PRIVATE, enrollmentStatus: 'PENDING' };
+/** Flagged public, but its course was never published. The leak this pair closes. */
+const RESOURCE_A_PUBLIC_DRAFT: Subject = {
+  ...RESOURCE_A_PUBLIC,
+  id: 'r_pub_draft',
+  publishedAt: null,
+};
+/** The same draft resource, seen by a student who is approved on that course. */
+const RESOURCE_A_PUBLIC_DRAFT_APPROVED: Subject = {
+  ...RESOURCE_A_PUBLIC_DRAFT,
+  enrollmentStatus: 'APPROVED',
+};
 const RESOURCE_B_PRIVATE: Subject = {
   id: 'r_b',
   courseId: 'c_b',
   courseTeacherId: TEACHER_B.id,
   authorId: TEACHER_B.id,
   isPublic: false,
+  publishedAt: T0,
+};
+/** Teacher B's course is published, the resource is public, and it is not A's. */
+const RESOURCE_B_PUBLIC_DRAFT: Subject = {
+  id: 'r_b_draft',
+  courseId: 'c_b',
+  courseTeacherId: TEACHER_B.id,
+  authorId: TEACHER_B.id,
+  isPublic: true,
+  publishedAt: null,
 };
 
 const ANN_A_LIVE: Subject = { id: 'a_1', authorId: TEACHER_A.id, publishedAt: T0 };
@@ -397,7 +425,7 @@ const RESOURCE_CELLS: readonly Cell[] = [
     'anonymous reads a private resource',
     ANON,
     'resource:read',
-    'anonymous:isPublic',
+    'anonymous:and(isPublic, isPublished)',
     RESOURCE_A_PRIVATE,
   ),
   ok('any student reads a public resource', STUDENT_OUT, 'resource:read', RESOURCE_A_PUBLIC),
@@ -411,14 +439,14 @@ const RESOURCE_CELLS: readonly Cell[] = [
     'non-enrolled student reads a private resource',
     STUDENT_OUT,
     'resource:read',
-    'STUDENT:or(isPublic, enrolledApproved)',
+    'STUDENT:or(and(isPublic, isPublished), enrolledApproved)',
     RESOURCE_A_PRIVATE,
   ),
   no(
     'student with a PENDING request reads a private resource',
     STUDENT_OUT,
     'resource:read',
-    'STUDENT:or(isPublic, enrolledApproved)',
+    'STUDENT:or(and(isPublic, isPublished), enrolledApproved)',
     RESOURCE_A_PRIVATE_PENDING,
   ),
   ok(
@@ -431,10 +459,65 @@ const RESOURCE_CELLS: readonly Cell[] = [
     "teacher reads another teacher's private resource",
     TEACHER_A,
     'resource:read',
-    'TEACHER:or(isPublic, ownsCourse, isAuthor)',
+    'TEACHER:or(and(isPublic, isPublished), ownsCourse, isAuthor)',
     RESOURCE_B_PRIVATE,
   ),
   ok('admin reads any resource', ADMIN, 'resource:read', RESOURCE_B_PRIVATE),
+
+  /*
+   * A resource is never more visible than its course. Measured before the fix, against
+   * the running API: an anonymous caller was refused the draft COURSE with a 401 and
+   * served its "public" resource with a 200, title and all, from `GET /resources`.
+   */
+  no(
+    'anonymous reads a public resource in an unpublished course',
+    ANON,
+    'resource:read',
+    'anonymous:and(isPublic, isPublished)',
+    RESOURCE_A_PUBLIC_DRAFT,
+  ),
+  no(
+    'a stranger student reads a public resource in an unpublished course',
+    STUDENT_OUT,
+    'resource:read',
+    'STUDENT:or(and(isPublic, isPublished), enrolledApproved)',
+    RESOURCE_A_PUBLIC_DRAFT,
+  ),
+  no(
+    "a teacher reads a public resource in another teacher's unpublished course",
+    TEACHER_A,
+    'resource:read',
+    'TEACHER:or(and(isPublic, isPublished), ownsCourse, isAuthor)',
+    RESOURCE_B_PUBLIC_DRAFT,
+  ),
+  no(
+    'anonymous downloads a public resource in an unpublished course',
+    ANON,
+    'resource:download',
+    'anonymous:deny',
+    RESOURCE_A_PUBLIC_DRAFT,
+  ),
+  no(
+    'a stranger student downloads a public resource in an unpublished course',
+    STUDENT_OUT,
+    'resource:download',
+    'STUDENT:or(and(isPublic, isPublished), enrolledApproved)',
+    RESOURCE_A_PUBLIC_DRAFT,
+  ),
+  // The allowances the narrowing must NOT have cost:
+  ok(
+    'an approved student still reads a draft-course resource they are enrolled on',
+    STUDENT_IN,
+    'resource:read',
+    RESOURCE_A_PUBLIC_DRAFT_APPROVED,
+  ),
+  ok(
+    'the owning teacher still reads their own unpublished draft resource',
+    TEACHER_A,
+    'resource:read',
+    RESOURCE_A_PUBLIC_DRAFT,
+  ),
+  ok('admin still reads a draft-course resource', ADMIN, 'resource:read', RESOURCE_A_PUBLIC_DRAFT),
 
   ok('teacher creates a resource in their own course', TEACHER_A, 'resource:create', COURSE_A_LIVE),
   no(
@@ -514,7 +597,7 @@ const RESOURCE_CELLS: readonly Cell[] = [
     'non-enrolled student downloads a private resource',
     STUDENT_OUT,
     'resource:download',
-    'STUDENT:or(isPublic, enrolledApproved)',
+    'STUDENT:or(and(isPublic, isPublished), enrolledApproved)',
     RESOURCE_A_PRIVATE,
   ),
   ok(
@@ -527,7 +610,7 @@ const RESOURCE_CELLS: readonly Cell[] = [
     "teacher downloads another teacher's private resource",
     TEACHER_A,
     'resource:download',
-    'TEACHER:or(isPublic, ownsCourse, isAuthor)',
+    'TEACHER:or(and(isPublic, isPublished), ownsCourse, isAuthor)',
     RESOURCE_B_PRIVATE,
   ),
   ok('admin downloads anything', ADMIN, 'resource:download', RESOURCE_B_PRIVATE),

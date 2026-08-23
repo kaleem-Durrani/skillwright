@@ -1,6 +1,7 @@
 import type { Role } from './actor.js';
 import {
   allow,
+  and,
   deny,
   enrolledApproved,
   isAuthor,
@@ -109,8 +110,31 @@ function definePolicy(table: PolicyTable): PolicyTable {
 // way in every row that uses them.
 const teacherOrPublishedCourse = or(isPublished, ownsCourse);
 const studentCourseVisible = or(isPublished, enrolledApproved);
-const resourceVisibleToStudent = or(isPublic, enrolledApproved);
-const resourceVisibleToTeacher = or(isPublic, ownsCourse, isAuthor);
+/*
+ * A resource is never more visible than the course it hangs off.
+ *
+ * `isPublic` alone was not enough, and the gap was reachable rather than theoretical:
+ * a teacher may create resources in a course they have not published yet
+ * (`resource:create` is `ownsCourse`, with no publication term), so a draft course
+ * could hold a resource flagged public. Measured on 2026-08-23 against the real API:
+ * an anonymous caller was refused the COURSE with a 401 and simultaneously served that
+ * resource with a 200, plus its title in `GET /resources`. The nested list under
+ * `/courses/:id/resources` was safe only because it is gated on `course:read`.
+ *
+ * So the public branch now carries the course's own publication state, exactly as
+ * `course:read`'s anonymous cell does. `publicAndLive` is `and(isPublic, isPublished)`
+ * and reads `subject.publishedAt` — which is why `loadResourceSubject` must supply it;
+ * a subject that omits it denies silently, the failure mode LESSONS-LEARNED #31 is
+ * about.
+ *
+ * The other branches are deliberately NOT narrowed. An approved student keeps access to
+ * material in a course that was later unpublished — the same allowance
+ * `studentCourseVisible` makes one line above — and a teacher who owns the course or
+ * wrote the file is exactly who is meant to see a draft.
+ */
+const publicAndLive = and(isPublic, isPublished);
+const resourceVisibleToStudent = or(publicAndLive, enrolledApproved);
+const resourceVisibleToTeacher = or(publicAndLive, ownsCourse, isAuthor);
 
 export const POLICY: PolicyTable = definePolicy({
   // -------------------------------------------------------------------------
@@ -189,7 +213,7 @@ export const POLICY: PolicyTable = definePolicy({
   // Resource
   // -------------------------------------------------------------------------
   'resource:read': {
-    anonymous: isPublic,
+    anonymous: publicAndLive,
     STUDENT: resourceVisibleToStudent,
     TEACHER: resourceVisibleToTeacher,
     ADMIN: allow,
@@ -216,9 +240,10 @@ export const POLICY: PolicyTable = definePolicy({
   },
   'resource:download': {
     // Strictly narrower than `resource:read`: a logged-out visitor may SEE that a
-    // public resource exists, but pulling the bytes out of the private bucket
-    // requires a session. That is the anti-scraping line, and it keeps the
-    // anonymous surface to exactly three actions.
+    // public resource on a PUBLISHED course exists, but pulling the bytes out of the
+    // private bucket requires a session. That is the anti-scraping line, and it keeps
+    // the anonymous surface to four actions — `course:read`, `resource:read`,
+    // `department:read` and `department:list`.
     anonymous: deny,
     STUDENT: resourceVisibleToStudent,
     TEACHER: resourceVisibleToTeacher,

@@ -72,8 +72,8 @@ rule reads named fields off `Subject` and denies when they are absent.
 | `notification:update` | ✗ deny | `isSelf` | `isSelf` | `isSelf` |
 | `resource:create` | ✗ deny | ✗ deny | `ownsCourse` | ✓ allow |
 | `resource:delete` | ✗ deny | ✗ deny | `ownsCourse` | ✓ allow |
-| `resource:download` | ✗ deny | `or(isPublic, enrolledApproved)` | `or(isPublic, ownsCourse, isAuthor)` | ✓ allow |
-| `resource:read` | `isPublic` | `or(isPublic, enrolledApproved)` | `or(isPublic, ownsCourse, isAuthor)` | ✓ allow |
+| `resource:download` | ✗ deny | `or(and(isPublic, isPublished), enrolledApproved)` | `or(and(isPublic, isPublished), ownsCourse, isAuthor)` | ✓ allow |
+| `resource:read` | `and(isPublic, isPublished)` | `or(and(isPublic, isPublished), enrolledApproved)` | `or(and(isPublic, isPublished), ownsCourse, isAuthor)` | ✓ allow |
 | `resource:update` | ✗ deny | ✗ deny | `ownsCourse` | ✓ allow |
 | `upload:commit` | ✗ deny | `isSelf` | `isSelf` | `isSelf` |
 | `upload:presign` | ✗ deny | ✓ allow | ✓ allow | ✓ allow |

@@ -125,6 +125,10 @@ export type {
   AnnouncementDetail,
   AnnouncementSummary,
   AnnouncementTypeValue,
+  // `GET /resources/:id/download`. It is declared in schema/upload.ts rather than
+  // schema/resource.ts because the uploads module answers with the same shape, but the
+  // only screen that reads it is the one listing resources — so it lives here.
+  DownloadUrlResponse,
   ResourceDto,
   ResourceTypeValue,
 } from '@skillwright/shared/schema';

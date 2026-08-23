@@ -3,12 +3,21 @@ import {
   paginationMeta,
   toSkipTake,
   type Actor,
+  // `DownloadUrlResponse` is declared in schema/upload.ts (upload.ts:107-113) and shared
+  // with the uploads module, so it is named here rather than in resources.schema.ts —
+  // that barrel is this module's own wire surface.
+  type DownloadUrlResponse,
   type EnrollmentState,
   type Paginated,
   type Subject,
 } from '@skillwright/shared';
 import { toUserSummary, USER_SUMMARY_SELECT } from '../../lib/dto.js';
-import { notFound, validationFailed } from '../../lib/errors.js';
+import { conflict, notFound, validationFailed } from '../../lib/errors.js';
+import { presignGet, safeFilename } from '../../lib/storage.js';
+// The Upload row belongs to the uploads module, and so does the question of whether it
+// may be attached to anything. This used to be a private copy here that forgot to check
+// the status, while courses.service.ts checked nothing at all.
+import { assertUploadClaimable } from '../uploads/uploads.service.js';
 import type {
   CreateResourceInput,
   ListResourcesQuery,
@@ -115,9 +124,16 @@ async function viewerEnrollmentStatus(
  * rather than spread: TypeScript does not excess-property-check a spread, so
  * `{ ...resource }` would accept a misspelled key silently (LESSONS-LEARNED #18).
  *   isPublic          -> isPublic          (combinators.ts:101)
+ *   publishedAt       -> isPublished       (combinators.ts:95-98)
  *   enrollmentStatus  -> enrolledApproved  (combinators.ts:62-65)
  *   courseTeacherId   -> ownsCourse        (combinators.ts:55-59)
  *   authorId          -> isAuthor          (combinators.ts:68-72)
+ *
+ * `publishedAt` is the COURSE's, not the resource's — a Resource has no such column.
+ * The public branch of both read rules is `and(isPublic, isPublished)`, so a resource
+ * flagged public inside a course nobody has published is refused. Omitting this field
+ * would not fail loudly; it would deny every anonymous and non-enrolled caller for a
+ * reason no log line explains.
  *
  * `courseTeacherId`, NOT `teacherId`. Every `Subject` field is optional (actor.ts:49-51)
  * and a rule that reads an absent field must deny, so a wrong key here is a SILENT 403
@@ -137,7 +153,7 @@ export async function loadResourceSubject(
       authorId: true,
       isPublic: true,
       deletedAt: true,
-      course: { select: { teacherId: true } },
+      course: { select: { teacherId: true, publishedAt: true } },
     },
   });
   if (!resource) return undefined;
@@ -146,6 +162,7 @@ export async function loadResourceSubject(
     id: resource.id,
     courseId: resource.courseId,
     courseTeacherId: resource.course.teacherId,
+    publishedAt: resource.course.publishedAt,
     authorId: resource.authorId,
     isPublic: resource.isPublic,
     deletedAt: resource.deletedAt,
@@ -194,9 +211,9 @@ export async function loadResourceCourseSubject(courseId: string): Promise<Subje
  *
  * A list cannot ask `can()` a yes/no question — there is no single subject — so each
  * branch below mirrors one policy row and must be changed with it:
- *   anonymous -> isPublic                              (policy.ts:192)
- *   STUDENT   -> or(isPublic, enrolledApproved)        (policy.ts:193, 112)
- *   TEACHER   -> or(isPublic, ownsCourse, isAuthor)    (policy.ts:194, 113)
+ *   anonymous -> and(isPublic, isPublished)                        (policy.ts)
+ *   STUDENT   -> or(and(isPublic, isPublished), enrolledApproved)  (policy.ts)
+ *   TEACHER   -> or(and(isPublic, isPublished), ownsCourse, isAuthor)
  *   ADMIN     -> allow                                 (policy.ts:195)
  *
  * Reading `actor.role` here is choosing which WHERE mirrors which policy row — the one
@@ -219,10 +236,19 @@ export async function loadResourceCourseSubject(courseId: string): Promise<Subje
 export function visibilityWhere(actor: Actor | null): Prisma.ResourceWhereInput {
   const live: Prisma.ResourceWhereInput = { deletedAt: null, course: { deletedAt: null } };
 
+  // `and(isPublic, isPublished)`, as SQL. The publication state belongs to the COURSE,
+  // so the public branch of every role below carries this pair rather than `isPublic`
+  // alone — otherwise a draft course's "public" resource is listed to the world while
+  // the course itself answers 401.
+  const publicAndLive: Prisma.ResourceWhereInput = {
+    isPublic: true,
+    course: { publishedAt: { not: null } },
+  };
+
   // `AND` rather than a spread throughout: `live` already binds the `course` key, and
   // spreading a second `course` filter over it would REPLACE the soft-delete term
   // rather than add to it.
-  if (actor === null) return { AND: [live, { isPublic: true }] };
+  if (actor === null) return { AND: [live, publicAndLive] };
 
   switch (actor.role) {
     case 'ADMIN':
@@ -232,7 +258,7 @@ export function visibilityWhere(actor: Actor | null): Prisma.ResourceWhereInput 
         AND: [
           live,
           {
-            OR: [{ isPublic: true }, { course: { teacherId: actor.id } }, { authorId: actor.id }],
+            OR: [publicAndLive, { course: { teacherId: actor.id } }, { authorId: actor.id }],
           },
         ],
       };
@@ -242,8 +268,10 @@ export function visibilityWhere(actor: Actor | null): Prisma.ResourceWhereInput 
           live,
           {
             OR: [
-              { isPublic: true },
-              // enrolledApproved: PENDING is not enough (combinators.ts:62-65).
+              publicAndLive,
+              // enrolledApproved: PENDING is not enough (combinators.ts:62-65). An
+              // approved student keeps access even after the course is unpublished,
+              // which is why this branch carries no publication term.
               { course: { enrollments: { some: { studentId: actor.id, status: 'APPROVED' } } } },
             ],
           },
@@ -394,6 +422,65 @@ export async function getById(id: string): Promise<ResourceDto> {
   return toResourceDto(resource);
 }
 
+/**
+ * The short-lived signed GET behind `GET /resources/:id/download`, after
+ * `authorize('resource:download')` has already accepted the caller.
+ *
+ * That gate is narrower than `resource:read` — anonymous is `deny` (policy.ts:217-226)
+ * where reading a public resource is `isPublic` — so by the time this runs the caller is
+ * entitled to the BYTES and not merely to the row. Nothing below is about who is asking;
+ * it is about whether there is an object to hand back at all.
+ *
+ * Both refusals are 409 and neither is 404: the resource is exactly the row the caller
+ * named, and it is live.
+ *   - no upload -> a LINK resource. `externalUrl` is already on the resource payload
+ *     (resource.ts:24-25), so the client has its answer, and signing a key that does not
+ *     exist would answer 200 with a URL that fails later and elsewhere.
+ *   - PENDING -> presign wrote the Upload row before the browser PUT anything, and commit
+ *     never confirmed the bytes arrived. Signing that key gets the user a NoSuchKey XML
+ *     document saved to disk under the file's name instead of a diagnosable error.
+ *
+ * The branch is on `upload === null`, not `type === 'LINK'`: `type` is a label the
+ * creator picks (resource.ts:11) while the CHECK in migration 0002 is what actually
+ * guarantees each row has exactly one source, and it is the absent upload — not the
+ * label — that leaves this endpoint with nothing to sign.
+ */
+export async function buildDownloadUrl(id: string): Promise<DownloadUrlResponse> {
+  const resource = await prisma.resource.findFirst({
+    where: { id, deletedAt: null, course: { deletedAt: null } },
+    select: { id: true, upload: { select: { key: true, originalName: true, status: true } } },
+  });
+  // Reachable rather than a race, on the same reasoning as `getById` above: ADMIN's cell
+  // in the `resource:download` row is `allow`, which reads no subject field, so an admin
+  // passes the gate on an id that was never there.
+  if (!resource) throw notFound('Resource');
+
+  const { upload } = resource;
+  if (upload === null) {
+    throw conflict('This resource is a link, not a file — its externalUrl is on the resource.');
+  }
+  if (upload.status !== 'COMMITTED') {
+    throw conflict('This upload was never confirmed, so there are no bytes to download.');
+  }
+
+  // `originalName` is display only and deliberately never went into the key
+  // (schema.prisma:402-403); storage.ts puts it in the response's Content-Disposition so
+  // the browser saves the file under the name its uploader chose rather than under a ULID.
+  // The same cleaning the disposition header gets. `Upload.originalName` is whatever
+  // the uploader typed, and this field used to come back RAW in the JSON while the
+  // header beside it was sanitised — so a name carrying a right-to-left override was
+  // safe in the download dialog and unsafe in any client that rendered the payload.
+  // One function, both consumers.
+  const filename = safeFilename(upload.originalName);
+  const signed = await presignGet({ key: upload.key, filename });
+
+  return {
+    url: signed.url,
+    expiresAt: signed.expiresAt.toISOString(),
+    filename,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Mutations
 // ---------------------------------------------------------------------------
@@ -405,38 +492,6 @@ async function assertCourseExists(courseId: string): Promise<void> {
     select: { id: true },
   });
   if (!course) throw validationFailed([{ path: 'courseId', message: 'Unknown course' }]);
-}
-
-/**
- * The three things that can be wrong with a client-chosen `uploadId`, checked in one
- * query so each is a 422 with a field path rather than a 500 or a bare 409.
- *
- * The OWNERSHIP check is the same class of rule as `ownsCourse` on `resource:create`:
- * without it a teacher could attach a colleague's private file to their own PUBLIC
- * resource by guessing an id, which is the upload-shaped version of exactly the hole
- * policy.ts:200-201 closes for courses. There is no `upload:attach` action to express it
- * in the policy table (policy.ts:68-69 stops at presign and commit), so the service owns
- * it — and ADMIN is exempt here for the same reason ADMIN is `allow` everywhere else.
- *
- * `Resource.uploadId` is `@unique` (schema.prisma:435), so an upload already spoken for
- * is refused here; two creates racing past this check collide on P2002, which is already
- * a 409 (errors.plugin.ts:46-50) and is deliberately left to be exactly that — the same
- * call enrollments.service.ts:348-350 makes.
- */
-async function assertUploadUsable(uploadId: string, actor: Actor): Promise<void> {
-  const upload = await prisma.upload.findUnique({
-    where: { id: uploadId },
-    select: { id: true, ownerId: true, resource: { select: { id: true } } },
-  });
-  if (!upload) throw validationFailed([{ path: 'uploadId', message: 'Unknown upload' }]);
-  if (actor.role !== 'ADMIN' && upload.ownerId !== actor.id) {
-    throw validationFailed([{ path: 'uploadId', message: 'That upload belongs to someone else' }]);
-  }
-  if (upload.resource !== null) {
-    throw validationFailed([
-      { path: 'uploadId', message: 'That upload is already attached to a resource' },
-    ]);
-  }
 }
 
 /**
@@ -452,7 +507,7 @@ async function assertUploadUsable(uploadId: string, actor: Actor): Promise<void>
  */
 export async function create(actor: Actor, input: CreateResourceInput): Promise<ResourceDto> {
   await assertCourseExists(input.courseId);
-  if (input.uploadId) await assertUploadUsable(input.uploadId, actor);
+  if (input.uploadId) await assertUploadClaimable(input.uploadId, actor, 'uploadId');
 
   const resource = await prisma.resource.create({
     data: {
@@ -545,9 +600,11 @@ export async function update(id: string, input: UpdateResourceInput): Promise<Re
  * (schema.prisma:495), and "remove this file from the course" does not mean "erase the
  * discussion about it".
  *
- * The upload behind it is deliberately left alone: `Resource.uploadId` is
- * `onDelete: SetNull` while the CHECK demands exactly one source, so touching the Upload
- * row is the deadlock recorded in NEXT.md:42 and not this endpoint's business.
+ * The upload behind it is deliberately left alone. `Resource.uploadId` is
+ * `onDelete: Restrict` since migration 0003, so deleting the Upload while this row still
+ * points at it raises P2003 — a 409 (errors.plugin.ts:78-82) — and a soft delete leaves
+ * the row pointing at it by definition. Reclaiming the object is a sweep of unreferenced
+ * uploads, which nothing runs yet; it is not this endpoint's business either way.
  */
 export async function remove(id: string): Promise<void> {
   const resource = await prisma.resource.findFirst({

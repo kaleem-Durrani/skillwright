@@ -480,7 +480,9 @@ describe("listing a course's resources", () => {
     const refused = await get(`/resources/${world.privateA}`, world.teacherB.token);
     expect(refused.statusCode).toBe(403);
     expect(refused.json().code).toBe('FORBIDDEN');
-    expect(refused.json().detail).toContain('TEACHER:or(isPublic, ownsCourse, isAuthor)');
+    expect(refused.json().detail).toContain(
+      'TEACHER:or(and(isPublic, isPublished), ownsCourse, isAuthor)',
+    );
   });
 
   it('drops a soft-deleted course from the teacher and student lists, not only the admin one', async () => {
@@ -504,6 +506,89 @@ describe("listing a course's resources", () => {
     const single = await get(`/resources/${world.publicA}`, world.admin.token);
     expect(single.statusCode).toBe(404);
     expect(single.json().code).toBe('NOT_FOUND');
+  });
+});
+
+/*
+ * The course's publication state bounds its resources' visibility, so this block sits
+ * between listing and reading: it is about both.
+ *
+ * Found by probe on 2026-08-23, before the rules carried `isPublished`: an anonymous
+ * caller was refused the draft COURSE with a 401 and simultaneously served its
+ * "public" resource with a 200, title and all, in `GET /resources`. `resource:create`
+ * is `ownsCourse` with no publication term, so a teacher can file material into a
+ * course nobody has published, and `isPublic` alone then published it to the world.
+ */
+describe('a resource is never more visible than its course', () => {
+  it('hides a public resource in an unpublished course from anonymous callers', async () => {
+    const teacher = await signIn('teacher-draft@example.com', 'TEACHER');
+    const draftCourse = await makeCourse(teacher.id, { published: false });
+    const hidden = await makeResource({
+      courseId: draftCourse,
+      authorId: teacher.id,
+      isPublic: true,
+      title: 'Draft handout',
+    });
+
+    // The course itself is already refused, which is the contradiction: these two
+    // answers used to disagree.
+    const course = await app.inject({ method: 'GET', url: `/api/v1/courses/${draftCourse}` });
+    expect(course.statusCode).toBe(401);
+
+    const list = await get('/resources');
+    expect(list.statusCode).toBe(200);
+    expect(idsOf(list)).not.toContain(hidden);
+
+    const one = await get(`/resources/${hidden}`);
+    expect(one.statusCode).toBe(401);
+  });
+
+  it('hides it from a signed-in student who is not enrolled', async () => {
+    const teacher = await signIn('teacher-draft2@example.com', 'TEACHER');
+    const stranger = await signIn('student-draft2@example.com', 'STUDENT');
+    const draftCourse = await makeCourse(teacher.id, { published: false });
+    const hidden = await makeResource({
+      courseId: draftCourse,
+      authorId: teacher.id,
+      isPublic: true,
+    });
+
+    expect(idsOf(await get('/resources', stranger.token))).not.toContain(hidden);
+
+    const refused = await get(`/resources/${hidden}`, stranger.token);
+    expect(refused.statusCode).toBe(403);
+    expect(refused.json().detail).toContain(
+      'STUDENT:or(and(isPublic, isPublished), enrolledApproved)',
+    );
+  });
+
+  it('still shows it to the teacher who owns the draft, and to an admin', async () => {
+    const teacher = await signIn('teacher-draft3@example.com', 'TEACHER');
+    const admin = await signIn('admin-draft3@example.com', 'ADMIN');
+    const draftCourse = await makeCourse(teacher.id, { published: false });
+    const own = await makeResource({ courseId: draftCourse, authorId: teacher.id, isPublic: true });
+
+    // The narrowing must not have cost the people who are meant to see a draft.
+    expect(idsOf(await get('/resources', teacher.token))).toContain(own);
+    expect((await get(`/resources/${own}`, teacher.token)).statusCode).toBe(200);
+    expect(idsOf(await get('/resources', admin.token))).toContain(own);
+  });
+
+  it('keeps serving an approved student after their course is unpublished', async () => {
+    const teacher = await signIn('teacher-draft4@example.com', 'TEACHER');
+    const student = await signIn('student-draft4@example.com', 'STUDENT');
+    const courseId = await makeCourse(teacher.id);
+    const resourceId = await makeResource({ courseId, authorId: teacher.id, isPublic: true });
+    await prisma.enrollment.create({
+      data: { courseId, studentId: student.id, status: 'APPROVED' },
+    });
+
+    await prisma.course.update({ where: { id: courseId }, data: { publishedAt: null } });
+
+    // enrolledApproved carries no publication term, deliberately: the same allowance
+    // `studentCourseVisible` makes for the course itself.
+    expect(idsOf(await get('/resources', student.token))).toContain(resourceId);
+    expect((await get(`/resources/${resourceId}`, student.token)).statusCode).toBe(200);
   });
 });
 
@@ -531,7 +616,9 @@ describe('reading one resource', () => {
     // The composed rule name, not merely FORBIDDEN: this is what separates "your
     // application is still pending" from a subject loaded without `enrollmentStatus`,
     // which denies identically and for entirely the wrong reason.
-    expect(refused.json().detail).toContain('STUDENT:or(isPublic, enrolledApproved)');
+    expect(refused.json().detail).toContain(
+      'STUDENT:or(and(isPublic, isPublished), enrolledApproved)',
+    );
 
     // Same row, same route, an APPROVED enrolment: it was the rule that refused, not a
     // resource that is missing.
@@ -604,12 +691,16 @@ describe('reading one resource', () => {
     const teacher = await get(`/resources/${ABSENT_ID}`, world.teacherA.token);
     expect(teacher.statusCode).toBe(403);
     expect(teacher.json().code).toBe('FORBIDDEN');
-    expect(teacher.json().detail).toContain('TEACHER:or(isPublic, ownsCourse, isAuthor)');
+    expect(teacher.json().detail).toContain(
+      'TEACHER:or(and(isPublic, isPublished), ownsCourse, isAuthor)',
+    );
 
     const student = await get(`/resources/${ABSENT_ID}`, world.approved.token);
     expect(student.statusCode).toBe(403);
     expect(student.json().code).toBe('FORBIDDEN');
-    expect(student.json().detail).toContain('STUDENT:or(isPublic, enrolledApproved)');
+    expect(student.json().detail).toContain(
+      'STUDENT:or(and(isPublic, isPublished), enrolledApproved)',
+    );
 
     // The delete route loads the same subject, so an admin reaches the same truthful 404
     // rather than a P2025 leaking out of `prisma.resource.update`
