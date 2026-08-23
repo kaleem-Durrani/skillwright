@@ -162,7 +162,7 @@ Eight ADRs, each under 300 words, each naming the tradeoff that was accepted rat
 <details>
 <summary><strong>More screens</strong> — login, both dashboards, the catalogue, and dark mode</summary>
 
-Regenerated on demand with `pnpm screenshots` ([`scripts/screenshots.ts`](scripts/screenshots.ts)), so these never drift from what actually ships.
+Regenerated on demand with `pnpm screenshots` ([`scripts/screenshots.ts`](scripts/screenshots.ts)), so these never drift from what actually ships — the script refuses to run if any screen exists without a capture. The full gallery, one image per screen, is in [SCREENSHOTS.md](SCREENSHOTS.md).
 
 |                                                                                                                                 |                                                                                                                                            |
 | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |

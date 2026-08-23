@@ -1,18 +1,32 @@
 #!/usr/bin/env tsx
 /**
- * README screenshots.
+ * Every user-facing screen, captured from the real app.
  *
  * WHY a script and not a folder of hand-taken PNGs: hand-taken screenshots go stale
- * the first time a screen changes, and nobody remembers to retake all seven. This
- * drives the real dev server as each demo role, from a cold session every time, and
+ * the first time a screen changes, and nobody remembers to retake them. This drives
+ * the real dev server as each demo role, from a cold session every time, and
  * overwrites `docs/screenshots/*.png` in place — so `pnpm screenshots` after a UI
- * change is the only step needed to keep the README honest about what the app
- * currently looks like.
+ * change is the only step needed to keep the README and SCREENSHOTS.md honest about
+ * what the app currently looks like.
+ *
+ * COVERAGE CONTRACT: every .tsx file under apps/web/src/routes/ must be either mapped
+ * to the captures that show it (ROUTE_CAPTURES below) or listed with a reason in
+ * NOT_SCREENS (layouts, redirect-only routes). The check runs before the browser
+ * launches and exits 1 on any gap, so adding a screen without a capture breaks the
+ * build instead of drifting silently. The reverse holds too: a capture no route file
+ * asks for is a rename that was not propagated.
  *
  * One login per role (not per screenshot): a session signs in once and then
  * navigates, same as a person would, rather than re-authenticating for every
  * capture — which also keeps this comfortably under the per-account login rate
  * limit (RATE_LIMIT_AUTH_ACCOUNT_MAX in .env.example) on a re-run.
+ *
+ * Screens behind interactions are reached the way a person reaches them — clicking
+ * the dashboard's course card, a catalogue row's announcement link, a conversation —
+ * not by pasting URLs. The one exception is `/resources/:id`, which no UI element
+ * links to yet (the Resources tab renders titles as plain text, CourseDetail.tsx);
+ * the script discovers an id over the same-origin API and navigates, and says so at
+ * that shot.
  *
  * Demo credentials are the seed's own (packages/db/prisma/seed.ts) — the same three
  * accounts a reader of the README is told to sign in with, not a fixture invented for
@@ -21,11 +35,11 @@
  * Requires the dev server reachable at SCREENSHOTS_BASE_URL (default
  * http://localhost:5173) and the Compose stack up with the seed applied.
  *
- * Exit 0 = every capture written, exit 1 = a page failed to reach the state it was
- * supposed to screenshot.
+ * Exit 0 = every capture written, exit 1 = a route is unmapped or a page failed to
+ * reach the state it was supposed to screenshot.
  */
 
-import { mkdirSync, statSync } from 'node:fs';
+import { mkdirSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { chromium, type Browser, type Page } from '@playwright/test';
 
@@ -38,6 +52,12 @@ const BASE_URL = process.env.SCREENSHOTS_BASE_URL ?? 'http://localhost:5173';
 // that the PNG is still a README-sized asset once compressed.
 const VIEWPORT = { width: 1440, height: 900 } as const;
 const DEVICE_SCALE_FACTOR = 2;
+
+// One phone-width capture, because mobile-first is a build constraint here (ADR 0008)
+// and a gallery that only ever shows 1440px cannot show it. 390px is the iPhone
+// class the Playwright projects already run (apps/web/e2e/mobile-shell.spec.ts),
+// where DataList shows cards instead of tables and AppShell shows the bottom tab bar.
+const MOBILE_VIEWPORT = { width: 390, height: 844 } as const;
 
 /** packages/db/prisma/seed.ts — DEMO_PASSWORD, and the three isDemo/demo:true rows. */
 const DEMO_PASSWORD = 'demo-password-123';
@@ -59,6 +79,8 @@ interface Shot {
 interface Session {
   role: Role | 'anonymous';
   theme?: 'light' | 'dark';
+  /** Overrides the desktop viewport for every shot in this session (mobile capture). */
+  viewport?: { width: number; height: number };
   shots: Shot[];
 }
 
@@ -66,20 +88,107 @@ const noNav = async (): Promise<void> => {
   /* already on the right screen after sign-in */
 };
 
+/** A screen reached by plain navigation from anywhere — no row to click, nothing to arrange. */
+const gotoShot = (name: string, urlPath: string): Shot => ({
+  name,
+  arrive: async (page) => {
+    await page.goto(`${BASE_URL}${urlPath}`);
+    await settle(page);
+  },
+});
+
+/**
+ * Waits for a DataList to have swapped its skeleton for rows. A list page's query
+ * starts in a mount effect, so `networkidle` can already be satisfied in the gap
+ * before the first request even fires — admin-users.png was once captured as four
+ * skeleton rows exactly this way, with settle() green. The table rendering is the
+ * only honest signal that data arrived.
+ */
+const waitForListRows = (page: Page): Promise<void> =>
+  page.locator('table tbody tr').first().waitFor({ state: 'visible', timeout: 10_000 });
+
+/** A list screen: navigate, then wait until its table actually has rows. */
+const listShot = (name: string, urlPath: string): Shot => ({
+  name,
+  arrive: async (page) => {
+    await page.goto(`${BASE_URL}${urlPath}`);
+    await settle(page);
+    await waitForListRows(page);
+  },
+});
+
 const SESSIONS: Session[] = [
   {
+    // The public surface needs no account at all, so these cost zero logins. /login is
+    // the arrival screen; the rest are plain navigations within the same visit, which
+    // is exactly how an anonymous visitor moves between them.
     role: 'anonymous',
-    shots: [{ name: 'login', arrive: noNav }],
+    shots: [
+      { name: 'login', arrive: noNav },
+      gotoShot('register', '/register'),
+      gotoShot('forgot-password', '/forgot-password'),
+      gotoShot('reset-password', '/reset-password'),
+      {
+        name: 'verify-email',
+        arrive: async (page) => {
+          // Without an address the screen refuses to work — it renders a "we do not
+          // know which address to verify" warning (VerifyEmail.tsx NO_ADDRESS_MESSAGE),
+          // because in real life nobody types this URL: they arrive from an email link
+          // that carries ?email=. Navigating with one shows the screen a person sees.
+          await page.goto(`${BASE_URL}/verify-email?email=${DEMO_EMAIL.student}`);
+          await settle(page);
+        },
+      },
+      // Unguarded by design ("a component gallery containing no data is not a leak",
+      // routes/_design.tsx) — reachable signed out, so it belongs to this session.
+      gotoShot('design-system', '/design'),
+    ],
   },
   {
     role: 'student',
     shots: [
       { name: 'student-dashboard', arrive: noNav },
+      listShot('course-catalogue', '/courses'),
+      // Students get the announcements pair because their feed is deterministic: the
+      // visibility WHERE clause fixes STUDENT to published rows only
+      // (announcements.service.ts listWhere), while TEACHER/ADMIN also see drafts, and
+      // whichever draft happens to sort first would decide what the click opens.
+      listShot('announcements', '/announcements'),
       {
-        name: 'course-catalogue',
+        name: 'announcement-detail',
         arrive: async (page) => {
-          await page.goto(`${BASE_URL}/courses`);
+          await page.goto(`${BASE_URL}/announcements`);
           await settle(page);
+          // Click the row like a person. DataList renders the card list AND the table
+          // into the DOM and switches them with `display` (DataList.tsx:75-103); scoping
+          // to the table selects the md-up rendering a 1440px viewport actually shows.
+          await page.locator('table a[href^="/announcements/"]').first().click();
+          await page.waitForURL(/\/announcements\/[^/?#]+$/);
+          // The URL flips before the router commits the new route (the lazy detail
+          // chunk resolves through Vite's dev module graph), and settle()'s two
+          // signals can both fire inside that gap. The detail screen's own
+          // Discussion heading is the marker that the swap actually happened.
+          await page.getByRole('heading', { name: 'Discussion' }).waitFor({
+            state: 'visible',
+            timeout: 10_000,
+          });
+          await settle(page);
+        },
+      },
+      {
+        name: 'notifications',
+        arrive: async (page) => {
+          await page.goto(`${BASE_URL}/notifications`);
+          await settle(page);
+          // The archive list is a plain ul inside the app shell's main, so the rows
+          // themselves are the marker that the query landed. (The pagination control
+          // hides on a single page of results, so it is no use as a signal here.)
+          // The seed gives the demo student three notifications, so the default tab
+          // is never empty.
+          await page.locator('#main-content ul li').first().waitFor({
+            state: 'visible',
+            timeout: 10_000,
+          });
         },
       },
     ],
@@ -91,6 +200,13 @@ const SESSIONS: Session[] = [
     role: 'student',
     theme: 'dark',
     shots: [{ name: 'student-dashboard-dark', arrive: noNav }],
+  },
+  {
+    // One phone-width pass, kept deliberately cheap: a single capture of the catalogue
+    // as cards with the bottom tab bar, which is the ADR 0008 claim made visible.
+    role: 'student',
+    viewport: MOBILE_VIEWPORT,
+    shots: [gotoShot('course-catalogue-mobile', '/courses')],
   },
   {
     // Dashboard.tsx's "Enrolment requests" section — a teacher's pending queue.
@@ -119,21 +235,220 @@ const SESSIONS: Session[] = [
           await settle(page);
         },
       },
+      {
+        name: 'resource-detail',
+        arrive: async (page) => {
+          // WHY by URL and not by clicking: nothing links here yet. The Resources tab
+          // renders each title as plain text (CourseDetail.tsx, column "Resource") and
+          // offers Download/Open actions instead, so there is no row a person could
+          // click onto this screen. When an inbound link appears, replace this with a
+          // click — the guard above will not remind you, this comment is the reminder.
+          //
+          // The id is discovered over the SAME ORIGIN the browser is already using:
+          // the Vite proxy forwards /api to the API (vite.config.ts) and carries the
+          // __Host-sw_session cookie, so the answer is what THIS viewer may see rather
+          // than a second, privileged client.
+          const courseId = page.url().match(/\/courses\/([^/?#]+)/)?.[1];
+          if (!courseId) {
+            throw new Error('resource-detail must run directly after course-detail-resources');
+          }
+          const resourceId = await page.evaluate(async (courseId: string) => {
+            const list = (await fetch(`/api/v1/courses/${courseId}/resources`).then((r) =>
+              r.json(),
+            )) as { data?: Array<{ id: string }> };
+            const rows = list.data ?? [];
+            // Prefer a row that carries part of its seed discussion (seedComments
+            // covers the first 24 resources), so the capture shows the comment thread
+            // rather than the empty state under it.
+            for (const row of rows.slice(0, 5)) {
+              const comments = (await fetch(`/api/v1/comments?resourceId=${row.id}`).then((r) =>
+                r.json(),
+              )) as { meta?: { total?: number } };
+              if ((comments.meta?.total ?? 0) > 0) return row.id;
+            }
+            return rows[0]?.id ?? null;
+          }, courseId);
+          if (!resourceId) throw new Error(`no visible resource on course ${courseId}`);
+          await page.goto(`${BASE_URL}/resources/${resourceId}`);
+          await settle(page);
+        },
+      },
+      {
+        name: 'messages',
+        arrive: async (page) => {
+          await page.goto(`${BASE_URL}/messages`);
+          await settle(page);
+          // The conversation list is not a DataList table (Messages.tsx renders its
+          // own ul), so the row marker is the list's own buttons.
+          await page
+            .locator('section[aria-label="Conversations"] li button')
+            .first()
+            .waitFor({ state: 'visible', timeout: 10_000 });
+        },
+      },
+      {
+        name: 'messages-thread',
+        arrive: async (page) => {
+          await page.goto(`${BASE_URL}/messages`);
+          await settle(page);
+          // The demo teacher is seated in two seeded conversations
+          // (seedConversations: c=0 and c=12 pick teachers[c % 12]), so the list has
+          // real rows. Opening one is a button press, and the thread pane replaces
+          // its "Pick a conversation" placeholder once the messages arrive.
+          await page.locator('section[aria-label="Conversations"] li button').first().click();
+          await page.getByRole('textbox', { name: 'Message' }).waitFor({
+            state: 'visible',
+            timeout: 10_000,
+          });
+          await settle(page);
+        },
+      },
+      gotoShot('settings-profile', '/settings'),
     ],
   },
   {
     role: 'admin',
     shots: [
+      listShot('admin-console', '/admin'),
+      // The user table is admin-only (routes/_app/admin.tsx `requireRole`) and never
+      // empty on the seed: 95 accounts across three roles, including the deliberate
+      // SUSPENDED and PENDING_VERIFICATION students the status chips exist to show.
+      listShot('admin-users', '/admin/users'),
+      // The admin workspaces for departments and courses; both lists are never empty
+      // on the seed (6 departments, 18 courses).
+      listShot('admin-departments', '/admin/departments'),
+      listShot('admin-courses', '/admin/courses'),
       {
-        name: 'admin-console',
+        name: 'department-detail',
         arrive: async (page) => {
-          await page.goto(`${BASE_URL}/admin`);
+          // The only inbound link to /departments/:id is a department's name on the
+          // admin list (AdminDepartments.tsx), so this screen is an admin
+          // click-through by construction. The list is navigated to explicitly
+          // rather than inherited from the previous shot, so the shot does not
+          // depend on its neighbours' order.
+          await page.goto(`${BASE_URL}/admin/departments`);
+          await settle(page);
+          await waitForListRows(page);
+          await page.locator('table a[href^="/departments/"]').first().click();
+          await page.waitForURL(/\/departments\/[^/?#]+$/);
+          // Same URL-flips-before-commit gap as announcement-detail: the three
+          // head-count cards render only once the fetch has landed.
+          await page
+            .getByText('Teachers', { exact: true })
+            .waitFor({ state: 'visible', timeout: 10_000 });
           await settle(page);
         },
       },
     ],
   },
 ];
+
+// ---------------------------------------------------------------------------
+// Staleness guard: routes without captures are a build error, not drift.
+// ---------------------------------------------------------------------------
+
+/**
+ * Route file -> the captures that show it. Keys are repo-relative paths with forward
+ * slashes; the mapping is mechanical because route paths mirror URLs
+ * (`_app/courses.$courseId.tsx` IS `/courses/:courseId`), so a new route file has no
+ * excuse for staying unmapped: name what the new session shot(s) show it.
+ */
+const ROUTE_CAPTURES: Record<string, readonly string[]> = {
+  'apps/web/src/routes/_public/login.tsx': ['login'],
+  'apps/web/src/routes/_public/register.tsx': ['register'],
+  'apps/web/src/routes/_public/forgot-password.tsx': ['forgot-password'],
+  'apps/web/src/routes/_public/reset-password.tsx': ['reset-password'],
+  'apps/web/src/routes/_public/verify-email.tsx': ['verify-email'],
+  'apps/web/src/routes/_design.tsx': ['design-system'],
+  'apps/web/src/routes/_app/dashboard.tsx': [
+    'student-dashboard',
+    'student-dashboard-dark',
+    // The same dashboard route as the teacher, whose "Enrolment requests" section
+    // (Dashboard.tsx) is that role's approval queue.
+    'teacher-approval-queue',
+  ],
+  'apps/web/src/routes/_app/courses.tsx': ['course-catalogue', 'course-catalogue-mobile'],
+  'apps/web/src/routes/_app/courses.$courseId.tsx': ['course-detail-resources'],
+  'apps/web/src/routes/_app/resources.$resourceId.tsx': ['resource-detail'],
+  'apps/web/src/routes/_app/announcements.tsx': ['announcements'],
+  'apps/web/src/routes/_app/announcements.$announcementId.tsx': ['announcement-detail'],
+  'apps/web/src/routes/_app/messages.tsx': ['messages', 'messages-thread'],
+  'apps/web/src/routes/_app/settings.tsx': ['settings-profile'],
+  'apps/web/src/routes/_app/notifications.tsx': ['notifications'],
+  'apps/web/src/routes/_app/admin.index.tsx': ['admin-console'],
+  'apps/web/src/routes/_app/admin.users.tsx': ['admin-users'],
+  'apps/web/src/routes/_app/admin.departments.tsx': ['admin-departments'],
+  'apps/web/src/routes/_app/admin.courses.tsx': ['admin-courses'],
+  'apps/web/src/routes/_app/departments.$id.tsx': ['department-detail'],
+};
+
+/**
+ * Route files that render no screen of their own, each with the reason. Anything
+ * added here must genuinely paint nothing — this list is the escape hatch that keeps
+ * the guard honest.
+ */
+const NOT_SCREENS: Record<string, string> = {
+  // Root layout (tooltip singleton, toast viewport, 404 fallback) — mounts under every URL.
+  'apps/web/src/routes/__root.tsx': 'layout',
+  // Pathless layouts: an `id` route guards or wraps children, owns no URL.
+  'apps/web/src/routes/_app.tsx': 'authenticated layout (requireAuth)',
+  'apps/web/src/routes/_public.tsx': 'anonymous layout',
+  // `/admin` is a guard-only layout rendering <Outlet />; the screen AT /admin belongs
+  // to admin.index and is captured as admin-console.
+  'apps/web/src/routes/_app/admin.tsx': 'admin guard layout (requireRole)',
+  // `/` never paints: beforeLoad redirects to /dashboard or /login (routes/_public/index.tsx).
+  'apps/web/src/routes/_public/index.tsx': 'redirect-only',
+};
+
+function collectRouteFiles(): string[] {
+  const walk = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const child = path.join(dir, entry.name);
+      return entry.isDirectory() ? walk(child) : [child];
+    });
+  return (
+    walk(path.join(REPO_ROOT, 'apps', 'web', 'src', 'routes'))
+      .map((file) => path.relative(REPO_ROOT, file).split(path.sep).join('/'))
+      // Only components can be screens. Generated router code (routeTree.ts) and
+      // helpers are .ts files and never match this glob.
+      .filter((file) => file.endsWith('.tsx'))
+      .sort()
+  );
+}
+
+function routeCoverageProblems(shotNames: readonly string[]): string[] {
+  const problems: string[] = [];
+
+  for (const file of collectRouteFiles()) {
+    const expected = ROUTE_CAPTURES[file];
+    if (expected !== undefined) {
+      for (const name of expected) {
+        if (!shotNames.includes(name)) {
+          problems.push(`${file} expects "${name}.png" but no session takes it`);
+        }
+      }
+      continue;
+    }
+    if (NOT_SCREENS[file] === undefined) {
+      problems.push(
+        `${file} maps to no capture — add a shot to SESSIONS and list it in ROUTE_CAPTURES, or justify the omission in NOT_SCREENS`,
+      );
+    }
+  }
+
+  // The mirror direction catches the quieter failure: a route file renamed or deleted
+  // while its capture kept running, quietly photographing a 404 forever.
+  const mapped = new Set(Object.values(ROUTE_CAPTURES).flat());
+  for (const name of shotNames) {
+    if (!mapped.has(name)) {
+      problems.push(
+        `"${name}.png" is required by no route file — update ROUTE_CAPTURES or drop it`,
+      );
+    }
+  }
+
+  return problems;
+}
 
 /**
  * `lib/theme.ts` reads `localStorage['sw.theme']` before the first paint (see
@@ -144,7 +459,7 @@ const SESSIONS: Session[] = [
 async function openSession(browser: Browser, session: Session): Promise<Page> {
   const theme = session.theme ?? 'light';
   const context = await browser.newContext({
-    viewport: VIEWPORT,
+    viewport: session.viewport ?? VIEWPORT,
     deviceScaleFactor: DEVICE_SCALE_FACTOR,
     colorScheme: theme,
   });
@@ -207,8 +522,23 @@ async function withRetry(attempt: () => Promise<void>): Promise<void> {
 async function main(): Promise<void> {
   mkdirSync(OUT_DIR, { recursive: true });
 
+  const shotNames = SESSIONS.flatMap((session) => session.shots.map((shot) => shot.name));
+
+  // Fail before the browser launches: a stale mapping needs no dev server to prove.
+  const problems = routeCoverageProblems(shotNames);
+  if (problems.length > 0) {
+    for (const problem of problems) console.error(`  - ${problem}`);
+    console.error(
+      `\n${problems.length} screenshot-coverage problem(s) — fix SESSIONS/ROUTE_CAPTURES.`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+
   const total = SESSIONS.reduce((sum, session) => sum + session.shots.length, 0);
-  console.log(`Capturing against ${BASE_URL} -> ${path.relative(REPO_ROOT, OUT_DIR)}/`);
+  console.log(
+    `Capturing ${total} screens against ${BASE_URL} -> ${path.relative(REPO_ROOT, OUT_DIR)}/`,
+  );
 
   const browser = await chromium.launch();
   let failures = 0;
