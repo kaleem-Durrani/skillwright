@@ -9,6 +9,7 @@ import {
 } from '@skillwright/shared';
 import { toUserSummary, USER_SUMMARY_SELECT } from '../../lib/dto.js';
 import { notFound, validationFailed } from '../../lib/errors.js';
+import { notify } from '../notifications/notifications.service.js';
 import type {
   AnnouncementDetail,
   AnnouncementSummary,
@@ -336,6 +337,22 @@ function resolveSlug(candidate: string | undefined, title: string): string {
 }
 
 /**
+ * ANNOUNCEMENT_PUBLISHED's audience, shared by the two paths that can flip a row live
+ * (`create` with `publish: true` and `publish`). An Announcement has no course to scope
+ * it (schema.prisma:465-490) — it speaks to the whole school — so "approved enrolled
+ * students" is read school-wide: every student seated in a live course except the actor.
+ * The Phase 1 plan's parenthetical named a course the schema does not give announcements;
+ * this is that sentence adapted to the rows that exist.
+ */
+async function approvedStudentIdsExcept(exceptUserId: string): Promise<string[]> {
+  const rows = await prisma.enrollment.findMany({
+    where: { status: 'APPROVED', studentId: { not: exceptUserId }, course: { deletedAt: null } },
+    select: { studentId: true },
+  });
+  return rows.map((row) => row.studentId);
+}
+
+/**
  * `announcement:create` was decided at the route with no subject at all — TEACHER and
  * ADMIN are both a flat `allow` (policy.ts:238-243) — so everything here is data
  * shaping. The author is always the session, never the body: `createAnnouncementSchema`
@@ -363,6 +380,19 @@ export async function create(
     },
     include: ANNOUNCEMENT_DETAIL_INCLUDE,
   });
+
+  // The row went live in the create above; announce it after that commit, best-effort
+  // (notify() never throws). A draft created without `publish` announces nothing here —
+  // its publication is `publish`'s event to announce.
+  if (input.publish) {
+    await notify({
+      userIds: await approvedStudentIdsExcept(actor.id),
+      type: 'ANNOUNCEMENT_PUBLISHED',
+      title: 'New announcement',
+      body: `${announcement.author.name} posted: ${announcement.title}`,
+      linkPath: `/announcements/${announcement.id}`,
+    });
+  }
 
   return toAnnouncementDetail(announcement);
 }
@@ -411,6 +441,7 @@ export async function update(
  * post has been live — and for unpublish it just avoids a write nobody asked for.
  */
 export async function publish(
+  actor: Actor,
   id: string,
   input: PublishAnnouncementInput,
 ): Promise<AnnouncementDetail> {
@@ -430,6 +461,21 @@ export async function publish(
     data: { publishedAt: input.published ? new Date() : null },
     include: ANNOUNCEMENT_DETAIL_INCLUDE,
   });
+
+  // Only the draft -> live transition announces, and only after the update has
+  // committed; best-effort (notify() never throws). Unpublishing is silent — a row
+  // telling students about a post that has just been withdrawn would be noise with a
+  // link to it.
+  if (input.published) {
+    await notify({
+      userIds: await approvedStudentIdsExcept(actor.id),
+      type: 'ANNOUNCEMENT_PUBLISHED',
+      title: 'New announcement',
+      body: `${announcement.author.name} posted: ${announcement.title}`,
+      linkPath: `/announcements/${announcement.id}`,
+    });
+  }
+
   return toAnnouncementDetail(announcement);
 }
 

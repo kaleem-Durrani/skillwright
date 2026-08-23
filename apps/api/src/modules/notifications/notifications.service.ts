@@ -7,6 +7,7 @@ import type {
   MarkNotificationsReadInput,
   NotificationDto,
   NotificationPayload,
+  NotificationTypeValue,
   UnreadCountResponse,
 } from './notifications.schema.js';
 
@@ -220,4 +221,70 @@ export async function markRead(
   // the mutation the SPA already awaited, rather than a second round trip that can
   // race with another tab.
   return unreadCount(actor);
+}
+
+// ---------------------------------------------------------------------------
+// The single writer
+// ---------------------------------------------------------------------------
+
+/**
+ * What a caller hands `notify`. The payload is CLOSED here on purpose: `{ title, body }`
+ * is exactly what `notificationPayloadSchema` (notification.ts:29-32) will parse back
+ * out, and rows that fail that parse render blank by design (`toPayload` above). Every
+ * notification the seed ever wrote with its own ad-hoc shapes became one of the blank
+ * rows it now serves — which is why this function is the ONLY code outside the test
+ * fixtures that writes a Notification row.
+ */
+export interface NotifyInput {
+  /**
+   * Final recipients. Callers resolve WHO an event reaches — the course's teacher, the
+   * approved roster minus the actor — and pass the ids; duplicates are collapsed here
+   * so a caller never has to remember. An empty list writes nothing: that is the honest
+   * outcome for "the only participant was the sender".
+   */
+  userIds: readonly string[];
+  type: NotificationTypeValue;
+  /** Human copy, shown verbatim in the bell. Short and concrete; names beat pronouns. */
+  title: string;
+  body: string;
+  /** Where clicking it goes — an href the SPA can navigate directly (NotificationBell.tsx:168). */
+  linkPath: string;
+}
+
+/**
+ * Writes one notification per recipient. THE single writer of notification rows.
+ *
+ * BEST-EFFORT BY CONTRACT. Every call site runs AFTER the action it announces has
+ * committed — outside the triggering transaction, never inside one — and this function
+ * catches its own failures: a notification that cannot be written must never fail the
+ * enrolment approval, message send or publication it belongs to. The action already
+ * succeeded; the row announcing it is a side effect of that success, not a step of it.
+ * auth.service.ts:149 makes the same trade for audit events, for the same reason.
+ * Callers therefore do not wrap their `notify()` call in try/catch — doing so would
+ * suggest the failure could escape, and it cannot.
+ *
+ * `createMany` rather than N inserts: Notification carries no unique constraint to
+ * conflict on (schema.prisma:606-624), so one round trip is all a fan-out costs. It is
+ * not in AUDITED_MODELS (audit.ts:51-59), so nothing here touches the audit extension's
+ * second pool.
+ */
+export async function notify(input: NotifyInput): Promise<void> {
+  const recipients = [...new Set(input.userIds)];
+  if (recipients.length === 0) return;
+
+  try {
+    await prisma.notification.createMany({
+      data: recipients.map((userId) => ({
+        userId,
+        type: input.type,
+        payload: { title: input.title, body: input.body },
+        linkPath: input.linkPath,
+      })),
+    });
+  } catch (error) {
+    log.error(
+      { err: error, type: input.type, recipients: recipients.length },
+      'failed to write notification',
+    );
+  }
 }

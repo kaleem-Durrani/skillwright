@@ -107,7 +107,8 @@ const announcementsRoutes: FastifyPluginAsync = async (fastify) => {
         announcementsService.loadAnnouncementSubject(idOf(request)),
       ),
     },
-    async (request) => announcementsService.publish(request.params.id, request.body),
+    async (request) =>
+      announcementsService.publish(requireActor(request), request.params.id, request.body),
   );
 
   /*

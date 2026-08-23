@@ -8,6 +8,7 @@ import {
 } from '@skillwright/shared';
 import { COURSE_SUMMARY_INCLUDE, toCourseSummary, toUserSummary } from '../../lib/dto.js';
 import { capacityExceeded, conflict, validationFailed } from '../../lib/errors.js';
+import { notify } from '../notifications/notifications.service.js';
 import type {
   ApproveEnrollmentInput,
   EnrollmentDto,
@@ -342,6 +343,17 @@ export async function requestEnrollment(
       },
       include: ENROLLMENT_INCLUDE,
     });
+
+    // After the write has committed, best-effort — a failed notification never fails
+    // the request (notify() catches its own errors). Re-application is a fresh PENDING
+    // row the teacher must action, so it announces like a first one.
+    await notify({
+      userIds: [reapplied.course.teacherId],
+      type: 'ENROLLMENT_REQUESTED',
+      title: 'Enrolment requested',
+      body: `${reapplied.student.name} asked to join ${reapplied.course.name}.`,
+      linkPath: `/courses/${reapplied.courseId}`,
+    });
     return toEnrollmentDto(reapplied);
   }
 
@@ -352,6 +364,15 @@ export async function requestEnrollment(
   const created = await prisma.enrollment.create({
     data: { studentId, courseId: input.courseId, status: 'PENDING' },
     include: ENROLLMENT_INCLUDE,
+  });
+
+  // Same side effect as the re-application branch above, after the same commit.
+  await notify({
+    userIds: [created.course.teacherId],
+    type: 'ENROLLMENT_REQUESTED',
+    title: 'Enrolment requested',
+    body: `${created.student.name} asked to join ${created.course.name}.`,
+    linkPath: `/courses/${created.courseId}`,
   });
   return toEnrollmentDto(created);
 }
@@ -379,7 +400,7 @@ export async function approve(
   enrollmentId: string,
   input?: ApproveEnrollmentInput,
 ): Promise<EnrollmentDto> {
-  return prisma.$transaction(async (tx) => {
+  const settled = await prisma.$transaction(async (tx) => {
     const current = await tx.enrollment.findUniqueOrThrow({
       // P2025 -> 404, errors.plugin.ts:52-53.
       where: { id: enrollmentId },
@@ -388,13 +409,15 @@ export async function approve(
 
     if (current.status === 'APPROVED') {
       // Idempotent: a second click must return the seated row without a second
-      // increment, or two clicks oversell by one.
-      return toEnrollmentDto(
-        await tx.enrollment.findUniqueOrThrow({
+      // increment, or two clicks oversell by one. `decided: false` also keeps that
+      // second click from re-notifying the student.
+      return {
+        enrollment: await tx.enrollment.findUniqueOrThrow({
           where: { id: enrollmentId },
           include: ENROLLMENT_INCLUDE,
         }),
-      );
+        decided: false,
+      };
     }
     assertTransition(current.status, 'APPROVED');
 
@@ -434,8 +457,22 @@ export async function approve(
       },
       include: ENROLLMENT_INCLUDE,
     });
-    return toEnrollmentDto(updated);
+    return { enrollment: updated, decided: true };
   }, TX_OPTIONS);
+
+  if (settled.decided) {
+    // After the transaction above has committed — a notification written inside it
+    // would both extend its lock window and roll back with a later failure. Best-
+    // effort; notify() never throws.
+    await notify({
+      userIds: [settled.enrollment.studentId],
+      type: 'ENROLLMENT_APPROVED',
+      title: 'Enrolment approved',
+      body: `You have a seat on ${settled.enrollment.course.name}.`,
+      linkPath: `/courses/${settled.enrollment.courseId}`,
+    });
+  }
+  return toEnrollmentDto(settled.enrollment);
 }
 
 /**
@@ -454,7 +491,7 @@ async function settle(
   next: Extract<EnrollmentStatusValue, 'REJECTED' | 'WITHDRAWN'>,
   note: string | null,
 ): Promise<EnrollmentDto> {
-  return prisma.$transaction(async (tx) => {
+  const settled = await prisma.$transaction(async (tx) => {
     const current = await tx.enrollment.findUniqueOrThrow({
       where: { id: enrollmentId },
       select: { id: true, status: true, courseId: true },
@@ -462,13 +499,15 @@ async function settle(
 
     if (current.status === next) {
       // Same-state repeat, on the same reasoning as approve(): a double submission
-      // must not move the counter. The row is returned untouched.
-      return toEnrollmentDto(
-        await tx.enrollment.findUniqueOrThrow({
+      // must not move the counter. The row is returned untouched, and `changed:
+      // false` keeps it from re-notifying anyone.
+      return {
+        enrollment: await tx.enrollment.findUniqueOrThrow({
           where: { id: enrollmentId },
           include: ENROLLMENT_INCLUDE,
         }),
-      );
+        changed: false,
+      };
     }
     assertTransition(current.status, next);
 
@@ -494,8 +533,23 @@ async function settle(
       },
       include: ENROLLMENT_INCLUDE,
     });
-    return toEnrollmentDto(updated);
+    return { enrollment: updated, changed: true };
   }, TX_OPTIONS);
+
+  // A rejection is news to its student; it lands after the transaction has committed,
+  // best-effort (notify() never throws). A withdrawal announces nothing because no
+  // enum member names that event yet — recorded as a deliberate gap in the Phase 1
+  // section of docs/roadmap/00-FEATURE-PLAN.md, not an omission here.
+  if (next === 'REJECTED' && settled.changed) {
+    await notify({
+      userIds: [settled.enrollment.studentId],
+      type: 'ENROLLMENT_REJECTED',
+      title: 'Enrolment declined',
+      body: `Your request for ${settled.enrollment.course.name} was not approved.`,
+      linkPath: `/courses/${settled.enrollment.courseId}`,
+    });
+  }
+  return toEnrollmentDto(settled.enrollment);
 }
 
 export function reject(

@@ -10,6 +10,7 @@ import {
 } from '@skillwright/shared';
 import { toUserSummary, USER_SUMMARY_SELECT } from '../../lib/dto.js';
 import { forbidden, notFound, validationFailed } from '../../lib/errors.js';
+import { notify } from '../notifications/notifications.service.js';
 // The Resource row, and the question of who may read it, belong to the resources
 // module. `loadResourceSubject` is reused rather than re-queried here — same
 // reasoning courses.service.ts's `assertUploadClaimable` import from uploads.service.ts
@@ -325,13 +326,21 @@ async function assertCanReadParent(actor: Actor, input: CreateCommentInput): Pro
  * attached to the SAME parent as the reply — a 422 on `parentId`, since by the time
  * this runs `assertCanReadParent` has already confirmed the caller may see that
  * parent, so a bad `parentId` here is a bad request rather than a hidden row.
+ *
+ * Returns the validated parent row, because its `authorId` is exactly who
+ * COMMENT_REPLIED reaches — loading it here rather than re-querying in `create` keeps
+ * one read per reply. `undefined` for a top-level comment, which announces nothing.
  */
-async function assertValidParent(input: CreateCommentInput): Promise<void> {
-  if (input.parentId === undefined) return;
+async function assertValidParent(
+  input: CreateCommentInput,
+): Promise<
+  { authorId: string; resourceId: string | null; announcementId: string | null } | undefined
+> {
+  if (input.parentId === undefined) return undefined;
 
   const parent = await prisma.comment.findFirst({
     where: { id: input.parentId, deletedAt: null },
-    select: { parentId: true, resourceId: true, announcementId: true },
+    select: { authorId: true, parentId: true, resourceId: true, announcementId: true },
   });
   if (!parent) {
     throw validationFailed([{ path: 'parentId', message: 'Unknown parent comment' }]);
@@ -352,6 +361,7 @@ async function assertValidParent(input: CreateCommentInput): Promise<void> {
       },
     ]);
   }
+  return parent;
 }
 
 /**
@@ -364,7 +374,7 @@ async function assertValidParent(input: CreateCommentInput): Promise<void> {
  */
 export async function create(actor: Actor, input: CreateCommentInput): Promise<CommentDto> {
   await assertCanReadParent(actor, input);
-  await assertValidParent(input);
+  const parent = await assertValidParent(input);
 
   const comment = await prisma.comment.create({
     data: {
@@ -379,6 +389,27 @@ export async function create(actor: Actor, input: CreateCommentInput): Promise<C
     },
     include: COMMENT_INCLUDE,
   });
+
+  if (parent) {
+    // COMMENT_REPLIED, after the create above has committed — best-effort, never
+    // throws. The reply to a top-level comment is the only shape threading allows
+    // (assertValidParent), and the self-reply case is excluded here: answering your
+    // own comment is not news worth a bell. There is deliberately no enum member for
+    // a top-level comment yet — recorded as a known debt in the Phase 1 section of
+    // docs/roadmap/00-FEATURE-PLAN.md.
+    if (parent.authorId !== actor.id) {
+      await notify({
+        userIds: [parent.authorId],
+        type: 'COMMENT_REPLIED',
+        title: 'New reply',
+        body: `${comment.author.name} replied to your comment.`,
+        linkPath:
+          parent.resourceId !== null
+            ? `/resources/${parent.resourceId}`
+            : `/announcements/${parent.announcementId}`,
+      });
+    }
+  }
 
   return toCommentDto(comment, actor);
 }

@@ -18,6 +18,7 @@ import { presignGet, safeFilename } from '../../lib/storage.js';
 // may be attached to anything. This used to be a private copy here that forgot to check
 // the status, while courses.service.ts checked nothing at all.
 import { assertUploadClaimable } from '../uploads/uploads.service.js';
+import { notify } from '../notifications/notifications.service.js';
 import type {
   CreateResourceInput,
   ListResourcesQuery,
@@ -525,6 +526,32 @@ export async function create(actor: Actor, input: CreateResourceInput): Promise<
     },
     include: RESOURCE_INCLUDE,
   });
+
+  // RESOURCE_PUBLISHED is creation here — a Resource has no publish verb of its own;
+  // new material in the course IS the publication. One query fetches the course's name
+  // for the copy and the whole audience: every APPROVED student except the teacher who
+  // just uploaded it. PENDING students are excluded deliberately — they cannot see the
+  // resource yet (visibilityWhere's enrolledApproved branch), so a bell pointing at one
+  // would answer 403. After the create has committed; best-effort, never throws.
+  const audience = await prisma.course.findFirst({
+    where: { id: input.courseId, deletedAt: null },
+    select: {
+      name: true,
+      enrollments: {
+        where: { status: 'APPROVED', studentId: { not: actor.id } },
+        select: { studentId: true },
+      },
+    },
+  });
+  if (audience) {
+    await notify({
+      userIds: audience.enrollments.map((enrollment) => enrollment.studentId),
+      type: 'RESOURCE_PUBLISHED',
+      title: 'New course material',
+      body: `New material was added to ${audience.name}.`,
+      linkPath: `/resources/${resource.id}`,
+    });
+  }
 
   return toResourceDto(resource);
 }

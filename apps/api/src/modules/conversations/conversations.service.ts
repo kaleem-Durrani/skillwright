@@ -10,6 +10,7 @@ import {
 import { ulid } from 'ulid';
 import { USER_SUMMARY_SELECT, toUserSummary } from '../../lib/dto.js';
 import { conflict, notFound, validationFailed } from '../../lib/errors.js';
+import { notify } from '../notifications/notifications.service.js';
 import type {
   ConversationDto,
   CreateConversationInput,
@@ -557,7 +558,7 @@ export async function sendMessage(
    * A P2002 on @@unique([senderId, clientMsgId]) from a true race past the findUnique
    * above is already a 409 (errors.plugin.ts:47-51). It is not caught and re-mapped.
    */
-  return prisma.$transaction(async (tx) => {
+  const message = await prisma.$transaction(async (tx) => {
     /*
      * ADR-0006 style: THE UPDATE IS THE ALLOCATION. There is no `SELECT nextSeq`
      * followed by a write — the read-then-write shape loses the race every time under
@@ -605,6 +606,30 @@ export async function sendMessage(
 
     return toMessageDto(message);
   });
+
+  // MESSAGE_RECEIVED, after the transaction above has committed — best-effort,
+  // never throws (notify() catches its own failures). Every ACTIVE participant except
+  // the sender is notified; in the common direct thread that is exactly one person.
+  // The idempotent replay path above has already returned, so a retried send does not
+  // re-ring anyone's bell. `user.deletedAt` is filtered because a removed account must
+  // not accumulate rows its cascade will only race to delete.
+  const recipients = await prisma.conversationParticipant.findMany({
+    where: {
+      conversationId,
+      leftAt: null,
+      userId: { not: actor.id },
+      user: { deletedAt: null },
+    },
+    select: { userId: true },
+  });
+  await notify({
+    userIds: recipients.map((participant) => participant.userId),
+    type: 'MESSAGE_RECEIVED',
+    title: 'New message',
+    body: `${message.sender.name} sent you a message.`,
+    linkPath: `/messages?conversationId=${conversationId}`,
+  });
+  return message;
 }
 
 // ---------------------------------------------------------------------------
