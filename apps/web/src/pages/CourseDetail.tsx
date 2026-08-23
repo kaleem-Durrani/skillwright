@@ -7,6 +7,10 @@ import {
   ExternalLink,
   FileText,
   Link2,
+  MoreVertical,
+  Pencil,
+  Plus,
+  Trash2,
   Video,
   type LucideIcon,
 } from 'lucide-react';
@@ -23,11 +27,19 @@ import type {
   ResourceTypeValue,
 } from '@/lib/types';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { ResourceFormDialog } from '@/components/resources/ResourceFormDialog';
 import { Avatar } from '@/components/ui/Avatar';
-import { Button } from '@/components/ui/Button';
+import { Button, IconButton } from '@/components/ui/Button';
 import { Card, CardTitle } from '@/components/ui/Card';
 import { DataList } from '@/components/ui/DataList';
 import { Dialog, DialogContent } from '@/components/ui/Dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/DropdownMenu';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { SkeletonCard, SkeletonList } from '@/components/ui/Skeleton';
 import { StatusChip } from '@/components/ui/StatusChip';
@@ -142,6 +154,18 @@ export function CourseDetailPage() {
   const client = useQueryClient();
   const [rejecting, setRejecting] = useState<EnrollmentDto | null>(null);
 
+  /**
+   * The resource form's target in ONE value: `null` is closed, `'new'` is create, and a
+   * row is edit-that-row.
+   *
+   * Not an `open` boolean beside a nullable row, because those two can disagree and this
+   * cannot: there is no way to represent an open form that is neither creating nor
+   * editing, which is the state a stale `setOpen(true)` produces and which
+   * `ResourceFormDialog` would have to guess its way out of.
+   */
+  const [resourceForm, setResourceForm] = useState<ResourceDto | 'new' | null>(null);
+  const [deletingResource, setDeletingResource] = useState<ResourceDto | null>(null);
+
   // `GET /courses/:id` serves `courseDetailSchema` (courses.routes.ts:70-79) — the
   // summary plus the blurb, the dates, the syllabus and the viewer's own enrollment.
   const course = useQuery({
@@ -249,6 +273,34 @@ export function CourseDetailPage() {
     onError: (error) => toast.fromError(error, 'Could not start that download'),
   });
 
+  /*
+   * `DELETE /resources/:id` answers 204 with no body (resources.routes.ts:149-160), and
+   * the service only stamps `deletedAt` (resources.service.ts:609-620) — the row and its
+   * comments stay in the database. `api.del` returns `undefined` for a 204, so nothing
+   * here reads a result, and the declared `void` says that rather than inventing a shape.
+   *
+   * BOTH keys are invalidated because the row is counted in two caches: the list under
+   * `qk.courseResources`, and `resourceCount` on the course detail (course.ts:50).
+   * Invalidating only the list leaves a count that disagrees with the rows under it.
+   *
+   * The row's upload is deliberately left alone by the server, so there is nothing to
+   * clean up here either (resources.service.ts:597-608).
+   */
+  const removeResource = useMutation({
+    mutationFn: (resourceId: string) => api.del<void>(`/resources/${resourceId}`),
+    onSuccess: async () => {
+      setDeletingResource(null);
+      toast.success('Resource removed', {
+        description: 'It is gone from the course. The discussion on it is kept.',
+      });
+      await Promise.all([
+        client.invalidateQueries({ queryKey: qk.courseResources(courseId) }),
+        client.invalidateQueries({ queryKey: qk.course(courseId) }),
+      ]);
+    },
+    onError: (error) => toast.fromError(error, 'Could not remove that resource'),
+  });
+
   if (course.isPending) {
     return (
       <div className="flex flex-col gap-4">
@@ -274,6 +326,19 @@ export function CourseDetailPage() {
   const isFull = data.isFull;
   const pendingCount =
     enrollments.data?.data.filter((entry) => entry.status === 'PENDING').length ?? 0;
+
+  /*
+   * `resource:create` is COURSE-scoped — `ownsCourse` for a teacher, with no publication
+   * term (policy.ts:221-228) — so it is asked with the course subject, exactly once, and
+   * the same answer drives the header button and the empty state's action. Two `can()`
+   * calls for one decision is two places for one of them to be given the wrong subject.
+   */
+  const canAddResource = policy.can('resource:create', viewerSubject);
+
+  // `'new'` and `null` both mean "no row to edit". Narrowing here once keeps the two
+  // props the dialog reads — `key` and `resource` — from disagreeing about which it is.
+  const editingResource =
+    resourceForm !== null && resourceForm !== 'new' ? resourceForm : undefined;
 
   return (
     <div className="flex flex-col">
@@ -337,6 +402,30 @@ export function CourseDetailPage() {
         </TabsList>
 
         <TabsContent value="resources">
+          {canAddResource ? (
+            /*
+             * The tab's own header action, and deliberately NOT a child of `TabsList`:
+             * that list is a Radix `role="tablist"` with a roving tabindex, so a button
+             * among the tabs is both invalid ARIA and unreachable by the arrow keys that
+             * move between them. Sitting at the top of the panel instead, it is the
+             * first stop after the tab strip in the normal tab order.
+             *
+             * Full width at the base viewport — it is the primary action of this panel
+             * and a thumb should not have to aim — and shrinks to its label from `sm`,
+             * where a pointer is doing the aiming.
+             */
+            <div className="flex flex-col pb-4 sm:flex-row sm:justify-end">
+              <Button
+                block
+                className="sm:w-auto"
+                leadingIcon={<Plus aria-hidden="true" className="size-4" />}
+                onClick={() => setResourceForm('new')}
+              >
+                Add a resource
+              </Button>
+            </div>
+          ) : null}
+
           {resources.isPending ? (
             <SkeletonList rows={3} />
           ) : (
@@ -393,6 +482,19 @@ export function CourseDetailPage() {
                       />
                     ) : null,
                 },
+                {
+                  id: 'actions',
+                  header: 'Actions',
+                  align: 'end',
+                  cell: (resource) => (
+                    <ResourceRowMenu
+                      resource={resource}
+                      course={data}
+                      onEdit={() => setResourceForm(resource)}
+                      onDelete={() => setDeletingResource(resource)}
+                    />
+                  ),
+                },
               ]}
               renderCard={(resource) => {
                 const Icon = RESOURCE_ICON[resource.type];
@@ -421,6 +523,25 @@ export function CourseDetailPage() {
                         />
                       ) : null}
                     </div>
+                    {/*
+                      Third column of the card, beside the title block rather than under
+                      it: `DataList` renders BOTH this and the table and switches them
+                      with `display` (DataList.tsx:75-101), so a menu wired into only the
+                      table would be missing on every phone. It renders `null` for a
+                      viewer who may do neither thing, which is why it is unguarded here.
+
+                      `self-start` for the same reason `ResourceAccess` above carries it:
+                      `Card` is a flex row and a flex item defaults to `stretch`, so a
+                      44px tap target would otherwise grow to the full height of a card
+                      with a two-line description and read as a tall grey bar.
+                    */}
+                    <ResourceRowMenu
+                      resource={resource}
+                      course={data}
+                      className="self-start"
+                      onEdit={() => setResourceForm(resource)}
+                      onDelete={() => setDeletingResource(resource)}
+                    />
                   </Card>
                 );
               }}
@@ -436,21 +557,31 @@ export function CourseDetailPage() {
                  * middle branch says only what is true from where they stand, and
                  * still does not confirm that anything private is there.
                  *
-                 * There is no "Add a resource" action any more. It called
-                 * `() => undefined`. `POST /resources` exists now, but no screen builds
-                 * that form yet, and a button that does nothing is worse than no button
-                 * — the same call as the suspend dialog's reinstatement promise.
+                 * The "Add a resource" action is back, and this time it opens a real
+                 * form. It was removed while it called `() => undefined`, because a
+                 * button that does nothing is worse than no button — the same call as
+                 * the suspend dialog's reinstatement promise. It opens the SAME dialog
+                 * the panel header opens, so there is one create flow rather than two
+                 * that can drift.
+                 *
+                 * Label and handler travel together in one spread: `EmptyState` paints
+                 * the button on `onAction` alone (EmptyState.tsx:111), so setting only
+                 * the label to a viewer who may not create would be silent dead copy,
+                 * and setting only the handler would render the preset's "Get started".
                  */
                 <EmptyState
                   variant="empty"
                   title="No resources yet"
                   description={
-                    policy.can('resource:create', viewerSubject)
+                    canAddResource
                       ? 'Nothing has been added to this course yet.'
                       : data.viewerEnrollmentStatus === 'APPROVED'
                         ? 'The teacher has not published anything for this course yet.'
                         : 'Nothing public has been published here. Enrolled students may see more.'
                   }
+                  {...(canAddResource
+                    ? { actionLabel: 'Add a resource', onAction: () => setResourceForm('new') }
+                    : {})}
                 />
               }
             />
@@ -563,6 +694,46 @@ export function CourseDetailPage() {
           rejecting && decide.mutate({ id: rejecting.id, action: 'reject', reason })
         }
       />
+
+      {/*
+        ONE dialog for create and for edit, remounted per target by `key`.
+
+        The key is load-bearing: the form is seeded from the `resource` prop, and a form
+        seeded once at mount would open on the SECOND row still showing the first one's
+        title. `RejectDialog` above carries one for the same reason. The cost is the
+        close animation — the key returns to 'new' as the state clears, so the dialog
+        unmounts instead of sliding out — which is the trade this file already made.
+
+        The dialog owns its own mutations and its own invalidation, so nothing about the
+        create or the edit is duplicated here; this component only decides WHICH row it
+        is pointed at. Closing is its call too: it refuses to close mid-upload, which is
+        why `onOpenChange` and not a `Cancel` handler is what clears the target.
+      */}
+      <ResourceFormDialog
+        key={editingResource?.id ?? 'new'}
+        open={resourceForm !== null}
+        onOpenChange={(open) => !open && setResourceForm(null)}
+        courseId={courseId}
+        resource={editingResource}
+      />
+
+      <DeleteResourceDialog
+        resource={deletingResource}
+        pending={removeResource.isPending}
+        /*
+         * Asked again at the point of action, with the ROW's subject — the menu that
+         * opened this is gated the same way, and a decision worth making once is worth
+         * making where the request is actually sent. The `=== null` branch is not a
+         * formality: `can()` with no subject DENIES silently (LESSONS-LEARNED #15), so
+         * the closed state must be answered by this file rather than by the policy.
+         */
+        disabled={
+          deletingResource === null ||
+          !policy.can('resource:delete', resourceSubject(deletingResource, data))
+        }
+        onClose={() => setDeletingResource(null)}
+        onConfirm={() => deletingResource && removeResource.mutate(deletingResource.id)}
+      />
     </div>
   );
 }
@@ -639,6 +810,92 @@ function ResourceAccess({
     >
       Download
     </Button>
+  );
+}
+
+/**
+ * Edit and Delete for ONE resource row, rendered identically by the card list and by the
+ * table for the same reason `ResourceAccess` is a component: `DataList` keeps both
+ * renderings in the DOM and switches them with `display`, so an action wired into one of
+ * them is missing at half the viewports.
+ *
+ * THE SUBJECT IS THE ROW, NOT THE COURSE. `resource:update` and `resource:delete` are
+ * `ownsCourse` for a TEACHER (policy.ts:229-240), which reads `courseTeacherId` — a field
+ * that lives on the course and not on `ResourceDto` — so neither a bare row nor the
+ * course subject answers the question being asked here. `resourceSubject` is the
+ * projection that carries both halves, and it is the one the download gate already uses.
+ * LESSONS-LEARNED #15 and #31 are both about getting this wrong, and both failures are
+ * silent denials.
+ *
+ * `usePolicy` is called here rather than in the page because `renderCard` and a column's
+ * `cell` are plain callbacks, not components — a hook cannot be called from either.
+ */
+function ResourceRowMenu({
+  resource,
+  course,
+  onEdit,
+  onDelete,
+  className,
+}: {
+  resource: ResourceDto;
+  course: CourseDetail;
+  onEdit: () => void;
+  onDelete: () => void;
+  className?: string;
+}) {
+  const policy = usePolicy();
+  const target = resourceSubject(resource, course);
+
+  const canEdit = policy.can('resource:update', target);
+  const canDelete = policy.can('resource:delete', target);
+
+  // Nothing permitted means no menu at all — an empty menu is worse than none, and this
+  // is the common case: every student looking at every row.
+  if (!canEdit && !canDelete) return null;
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        {/*
+         * The label names the ROW. "Actions" alone is what a screen reader hears from
+         * every one of these buttons in a list of twelve, with nothing to tell them
+         * apart; `IconButton` makes `aria-label` required at the type level for exactly
+         * this reason, and the visible title is the only thing that distinguishes them.
+         */}
+        <IconButton
+          aria-label={`Actions for ${resource.title}`}
+          icon={<MoreVertical className="size-5" />}
+          size="sm"
+          className={className}
+        />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {canEdit ? (
+          /*
+           * "Edit details", not "Edit": `updateResourceSchema` has no `uploadId`
+           * (resource.ts:78-89), so the file behind a row cannot be swapped and the
+           * label should not suggest it can. The dialog says the same thing again by
+           * showing the current filename as read-only text.
+           */
+          <DropdownMenuItem
+            icon={<Pencil aria-hidden="true" className="size-4" />}
+            onSelect={onEdit}
+          >
+            Edit details
+          </DropdownMenuItem>
+        ) : null}
+        {canEdit && canDelete ? <DropdownMenuSeparator /> : null}
+        {canDelete ? (
+          <DropdownMenuItem
+            destructive
+            icon={<Trash2 aria-hidden="true" className="size-4" />}
+            onSelect={onDelete}
+          >
+            Delete resource
+          </DropdownMenuItem>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -726,6 +983,75 @@ function RejectDialog({
             Required, and shown to the student. At least four characters.
           </span>
         </label>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * The delete confirmation — and specifically NOT a promise that this can be undone.
+ *
+ * What actually happens, read rather than assumed: `resources.service.ts:609-620` stamps
+ * `deletedAt` and nothing else. The row survives, and so do the comments on it — a hard
+ * delete would cascade the discussion away, and "remove this file from the course" does
+ * not mean "erase what was said about it". Every read in that service filters the column,
+ * so the resource disappears from this screen for everyone, an administrator included.
+ *
+ * What an administrator CAN see is the deletion itself: `Resource` is in AUDITED_MODELS,
+ * and the Prisma extension classifies a write that sets `deletedAt` as action `DELETE`
+ * with the actor against it (packages/db/src/audit.ts:51-58, :158), which is what the
+ * admin overview lists (AdminOverview.tsx:119-155).
+ *
+ * The audit extension also knows a `RESTORE` (audit.ts:159) — but no endpoint exposes
+ * one, so putting the row back is a database change and the copy says so instead of
+ * implying a button somewhere. Same call as the suspend dialog's, which used to promise
+ * a reinstatement nothing could perform (AdminUsers.tsx:292-300).
+ */
+function DeleteResourceDialog({
+  resource,
+  pending,
+  disabled,
+  onClose,
+  onConfirm,
+}: {
+  resource: ResourceDto | null;
+  pending: boolean;
+  disabled: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Dialog open={resource !== null} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent
+        title="Delete this resource?"
+        description={
+          resource
+            ? `${resource.title} disappears from this course for every student and teacher.`
+            : undefined
+        }
+        footer={
+          <>
+            <Button variant="ghost" block className="sm:w-auto" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              block
+              className="sm:w-auto"
+              loading={pending}
+              disabled={disabled}
+              onClick={onConfirm}
+            >
+              Delete resource
+            </Button>
+          </>
+        }
+      >
+        <p className="text-fg-secondary">
+          Nothing is erased: the record is marked deleted and the comments on it are kept. An
+          administrator sees the deletion in the audit log with your name against it — but no screen
+          in this app puts it back, so restoring it takes a database change.
+        </p>
       </DialogContent>
     </Dialog>
   );
