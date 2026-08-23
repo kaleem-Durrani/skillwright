@@ -396,7 +396,12 @@ model Upload {
   key    String @unique
   bucket String
 
-  /// Verified server-side with HeadObject after the browser's PUT completes.
+  /// What the STORE recorded, read back with HeadObject after the browser's PUT.
+  /// Not a claim about the bytes: nothing sniffs them. The client declares a type at
+  /// presign, that type is part of the PUT signature so the store refuses any other,
+  /// and commit reads back what the store kept. A caller who declares application/pdf
+  /// and uploads an executable gets a row saying application/pdf — which is why every
+  /// download is served as an attachment rather than rendered inline.
   contentType String
   sizeBytes   Int
   /// What the user called it. Display only; never used to build the key.
@@ -431,7 +436,12 @@ model Resource {
   authorId String
 
   /// Exactly one of uploadId / externalUrl is set — enforced by CHECK in migration 0002.
-  upload      Upload? @relation(fields: [uploadId], references: [id], onDelete: SetNull)
+  ///
+  /// Restrict, not SetNull: SetNull plus that CHECK meant "clear the column, and also
+  /// never let it be clear", so deleting a backing Upload always failed — just with a
+  /// check-constraint error about a column the caller never named. Migration 0003 made
+  /// the declaration match the behaviour.
+  upload      Upload? @relation(fields: [uploadId], references: [id], onDelete: Restrict)
   uploadId    String? @unique
   externalUrl String?
 
