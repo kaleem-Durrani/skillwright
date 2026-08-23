@@ -603,3 +603,22 @@ git add 'apps/web/src/routes/_app/announcements.$announcementId.tsx'
 ```
 
 **Rule.** When writing a command someone will paste into a shell, quote every path that contains `$`, a space, `*`, `?`, `[`, `~` or a backtick — and check the plan mechanically for them, which is one `grep -n '\$' COMMIT-PLAN*.md`. Two habits make the failure loud instead of silent: `git add --dry-run` first, which prints exactly what will be staged, and reading `git log --oneline` against the plan's commit count afterwards. The all-or-nothing behaviour is the trap — a partially-staged commit would have been obvious; an empty one is not.
+
+---
+
+## 38. An image that has never been run is not a build artefact, it is a guess
+
+**Symptom.** The `Dockerfile` had existed for months. It was reviewed, commented in detail, and referenced by CI. The first time it was actually built and started, **six separate faults** surfaced in under an hour — every one of which would have been a failed deploy, and not one of which was reachable by 977 passing tests, five clean typechecks, three clean lints, or any of the four bespoke repo checks.
+
+**The six, because the pattern matters more than any one of them:**
+
+1. **An orphaned build stage.** A `deps` stage ran `pnpm fetch` into a cache mount; the `build` stage re-declared the same mount id and a comment claimed that "reattaches the store `deps` populated". BuildKit never builds a stage nothing depends on — so once the `COPY --from=deps` was removed, `pnpm fetch` stopped running entirely. Builds kept succeeding on a warm cache mount until a new dependency was added, then failed with `ERR_PNPM_NO_OFFLINE_TARBALL` naming exactly that package.
+2. **A transitive dependency that needed to be direct.** `@prisma/client` was only reachable through `@skillwright/db`. The bundled entrypoint sits at the API's own top level, and pnpm's isolated `node_modules` links only what a package itself declares — `ERR_MODULE_NOT_FOUND` at container start.
+3. **An environment variable nothing read.** The image set `WEB_DIST_DIR` and copied the built SPA to it. `env.ts` had no such key, so the value was discarded and `/` answered a JSON 404. The image had been building the SPA and throwing it away.
+4. **Two not-found handlers.** Fastify permits one per prefix; the errors plugin already owned it. The second `setNotFoundHandler` threw at boot, so the container exited before listening — the image built perfectly and could not start.
+5. **A 4xx flattener.** Every thrown 4xx that was not 404 or 429 became `VALIDATION_FAILED` 422, so a plugin's 403 reached the client as a validation failure at the wrong status. Invisible until something inside the process threw a real 403.
+6. **A one-year cache on the HTML.** `maxAge`/`immutable` are right for fingerprinted assets and catastrophic for the shell, and `sendFile` applies the registration's options over a header set beforehand. `/` went out `max-age=31536000, immutable` — a deploy would strand every browser on a document referencing deleted chunks.
+
+**Root cause, common to all six.** Each lives in the seam between two things that are individually tested: the bundler and the package manager, the image and the app config, the plugin and the error translator, the cache policy and the file it applies to. Unit tests, typechecks and linters all operate _inside_ one of those things. Nothing in the repository ran the seam.
+
+**Rule.** A deployment artefact is verified by running it and asking it questions, not by reviewing it. The check is cheap and mechanical: build the image, start it against real dependencies, and assert **status, content-type AND cache-control** for a table of paths — the root, a client-router path, an API path, a real fingerprinted asset, a missing asset, a missing API route. Six of these six were caught by that one table. Put the build in CI the day the `Dockerfile` is written, so its first execution is not also its first deploy.
