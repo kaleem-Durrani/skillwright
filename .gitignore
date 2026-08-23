@@ -47,6 +47,9 @@ docs/*
 # them, and a screenshot that is not committed is a broken image on the one page a
 # stranger actually reads — the same shape of miss as the anchored `/uploads/` rule.
 !docs/screenshots/
+# The feature roadmap. `docs/*` above would swallow it, and a plan nobody can read from
+# the repository is a plan that only exists on one machine.
+!docs/roadmap/
 
 # editor & os
 .DS_Store
