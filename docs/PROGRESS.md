@@ -11,6 +11,9 @@ This file records **what changed and the state it left the repository in** — n
 
 ## 2026-08-23
 
+**Phase 1 is complete end to end: notifications have a home.** _(verified — web side re-run independently: 49/49 vitest, typecheck/lint/build clean, `check:mobile-first` 117 files and `check:brand` 606 files clean)_
+`/notifications` is a paginated archive with All/Unread tabs in the URL (bookmarkable), per-row and mark-all read, rows linking through their `linkPath`, opening an unread row marks it read. Badge consistency comes from reusing the bell's exact cache path rather than a second observer. The bell keeps its quick-view panel and gained "View all notifications" — deliberately not a sixth primary nav entry, which `primaryNav.slice(0, 5)` would silently delete. Settings' fake notifications tab (four dead checkboxes promising email preferences) is fully removed, old `?tab=notifications` bookmarks degrade cleanly. Committed `dbad66c`. Phase 1's remaining known debts are unchanged: withdrawal/COURSE_PUBLISHED/top-level-comment enum members.
+
 **The three never-read search vectors are read, ranked and headlined.** _(verified — full API suite re-run independently: 386/386 across 15 files, exit 0; this run also re-proves Phase 2's publish line on the same tree)_
 Slice 1 retires the `contains` fallback in all three list handlers; slice 2 adds `GET /search` across entities. The architecture decision that matters: **visibility is never restated in SQL** — Prisma resolves each module's own `visibilityWhere` to an id set and the raw SQL ranks within it, so no second policy mirror exists to drift (lessons #15/#31/#33). The plan's trigram warning proved empirical: `websearch_to_tsquery('english','WELD-2')` parses as `'weld' <-> '-2'` and matches nothing even on `WELD-207`; the trigram arm carries partial codes and a regression test pins it. Committed `1aef0e2`. Frontend slice queued behind the notifications UI.
 
