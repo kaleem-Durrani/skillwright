@@ -34,6 +34,7 @@ import usersRoutes from './modules/users/users.routes.js';
 import conversationsRoutes from './modules/conversations/conversations.routes.js';
 import notificationsRoutes from './modules/notifications/notifications.routes.js';
 import dashboardRoutes from './modules/dashboard/dashboard.routes.js';
+import searchRoutes from './modules/search/search.routes.js';
 import adminRoutes from './modules/admin/admin.routes.js';
 import auditRoutes from './modules/audit/audit.routes.js';
 
@@ -124,6 +125,7 @@ export async function buildApp(): Promise<AppInstance> {
   await app.register(conversationsRoutes, { prefix: `${API_PREFIX}/conversations` });
   await app.register(notificationsRoutes, { prefix: `${API_PREFIX}/notifications` });
   await app.register(dashboardRoutes, { prefix: `${API_PREFIX}/dashboard` });
+  await app.register(searchRoutes, { prefix: `${API_PREFIX}/search` });
   await app.register(adminRoutes, { prefix: `${API_PREFIX}/admin` });
   // `audit-events`, not `audit`: that is the path AdminOverview.tsx already calls.
   await app.register(auditRoutes, { prefix: `${API_PREFIX}/audit-events` });

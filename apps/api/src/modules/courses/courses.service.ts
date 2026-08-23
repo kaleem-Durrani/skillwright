@@ -1,4 +1,4 @@
-import { prisma, type Prisma } from '@skillwright/db';
+import { prisma, Prisma } from '@skillwright/db';
 import {
   paginationMeta,
   toSkipTake,
@@ -15,6 +15,10 @@ import { notFound, validationFailed } from '../../lib/errors.js';
 // The Upload row belongs to the uploads module, and so does the question of whether
 // this actor may claim it. Before this, `syllabusUploadId` was written unchecked.
 import { assertUploadClaimable } from '../uploads/uploads.service.js';
+// The raw-SQL vocabulary for ranked search — match predicate, rank expression and the
+// two-query page-plus-total shape. Shared with resources and announcements so the three
+// handlers cannot drift apart over escaping or weighting (search.sql.ts header).
+import { rankedIdPage } from '../search/search.sql.js';
 import type {
   CourseDetail,
   CourseListItem,
@@ -220,8 +224,16 @@ async function viewerEnrollmentStatusByCourse(
  *   STUDENT   -> or(isPublished, enrolledApproved)    (policy.ts:121)
  *   TEACHER   -> or(isPublished, ownsCourse)          (policy.ts:122)
  *   ADMIN     -> allow                                (policy.ts:123)
+ *
+ * EXPORTED because the cross-entity search module (`GET /search`) must scope its
+ * course group by exactly this clause — the dashboard's arrangement
+ * (dashboard.service.ts imports resources' clause rather than keeping a second copy),
+ * and for the same reason. NOTE for every importer: unlike resources and
+ * announcements, this clause deliberately carries NO soft-delete term — the catalogue's
+ * own `listWhere` applies `deletedAt: null` outside it — so importers must add that
+ * term themselves.
  */
-function visibilityWhere(actor: Actor | null): Prisma.CourseWhereInput {
+export function visibilityWhere(actor: Actor | null): Prisma.CourseWhereInput {
   if (actor === null) return { publishedAt: { not: null } };
   switch (actor.role) {
     case 'ADMIN':
@@ -242,6 +254,12 @@ function visibilityWhere(actor: Actor | null): Prisma.CourseWhereInput {
  * Visibility AND the caller's filters, never visibility OR them. The filters are
  * collected into `AND` because `visibilityWhere` already owns the top-level `OR` and
  * a second one would silently replace it.
+ *
+ * `q` is deliberately NOT one of these filters. A text term needs `ts_rank_cd` and the
+ * trigram indexes (migration 0002), which Prisma cannot see — so when `q` is present
+ * `list` switches to `listRanked` below instead of building a WHERE here. Everything
+ * else a caller can send is expressed exactly once, in this function, and both paths
+ * consume it.
  */
 function listWhere(actor: Actor | null, query: ListCoursesQuery): Prisma.CourseWhereInput {
   const filters: Prisma.CourseWhereInput[] = [visibilityWhere(actor)];
@@ -256,18 +274,6 @@ function listWhere(actor: Actor | null, query: ListCoursesQuery): Prisma.CourseW
     // Column-to-column comparison via a Prisma field reference; the alternative is
     // raw SQL, and this stays inside the same query the count reuses.
     filters.push({ approvedCount: { lt: prisma.course.fields.capacity } });
-  }
-  if (query.q !== undefined) {
-    // v1 substring match. The GIN tsvector index (`Course_searchVector_idx`) and the
-    // trigram indexes exist for a real ranked search, but `searchVector` is absent
-    // from schema.prisma on purpose (migration 0002:48-51), so wiring it needs raw
-    // SQL. Saying so here beats pretending the tsvector is already in play.
-    filters.push({
-      OR: [
-        { name: { contains: query.q, mode: 'insensitive' } },
-        { code: { contains: query.q, mode: 'insensitive' } },
-      ],
-    });
   }
 
   return {
@@ -306,11 +312,18 @@ function orderFor(query: ListCoursesQuery): Prisma.CourseOrderByWithRelationInpu
  *
  * Two queries — page and total — plus ONE more for a signed-in student, whatever the
  * page size. The badge is never resolved row by row.
+ *
+ * A `q` text term switches the whole read to `listRanked`: ranking needs the stored
+ * `searchVector` tsvector and the trigram indexes (migration 0002), which live in the
+ * database only and are invisible to Prisma. Every other filter still flows through
+ * `listWhere` above.
  */
 export async function list(
   actor: Actor | null,
   query: ListCoursesQuery,
 ): Promise<Paginated<CourseListItem>> {
+  if (query.q !== undefined) return listRanked(actor, query, query.q);
+
   const where = listWhere(actor, query);
   const [rows, total] = await prisma.$transaction([
     prisma.course.findMany({
@@ -331,6 +344,78 @@ export async function list(
   return {
     data: rows.map((row) => toCourseListItem(row, statuses.get(row.id) ?? null)),
     meta: paginationMeta(query.page, query.limit, total),
+  };
+}
+
+/**
+ * The ranked search path behind `?q=`, replacing the v1 substring fallback.
+ *
+ * THREE phases, and the split is deliberate:
+ *
+ * Phase 1 finds every candidate through PRISMA — `listWhere`, which is `visibilityWhere`
+ * plus the caller's other filters. This is why visibility is never restated in SQL:
+ * `visibilityWhere` is the one mirror of the `course:read` rows, and a second copy
+ * inside raw SQL is exactly how dashboard.service.ts's resource tile once drifted from
+ * the list it sat above (LESSONS-LEARNED #15/#31/#33 are all this shape of mistake).
+ *
+ * Phase 2 ranks those candidate ids with raw SQL (`rankedIdPage`): `searchVector @@
+ * websearch_to_tsquery(...)` for stemmed words, phrases and `-exclusions`, OR'd with a
+ * trigram `ILIKE '%term%'` on name/code so partial codes like "WELD-2" keep matching —
+ * `websearch_to_tsquery('WELD-2')` parses the hyphen as negation syntax and matches
+ * nothing, which is measured fact rather than caution, and the whole reason migration
+ * 0002 built both index families. Page and total go out as one `$transaction`.
+ *
+ * Phase 3 hydrates the surviving ids with the SAME include and mapper the ordinary
+ * path uses, so the response shape cannot diverge between searched and unsearched
+ * lists, then restores phase 2's order (a Prisma `in`-query does not preserve it).
+ *
+ * When `q` is present, relevance ordering replaces `sort`/`order` — a search that
+ * silently re-sorts by date would hide the best hit below the fold.
+ */
+async function listRanked(
+  actor: Actor | null,
+  query: ListCoursesQuery,
+  term: string,
+): Promise<Paginated<CourseListItem>> {
+  const candidates = await prisma.course.findMany({
+    where: listWhere(actor, query),
+    select: { id: true },
+  });
+  if (candidates.length === 0) {
+    return { data: [], meta: paginationMeta(query.page, query.limit, 0) };
+  }
+
+  const { page, total } = rankedIdPage({
+    table: Prisma.sql`"Course" c`,
+    alias: Prisma.sql`c`,
+    vector: Prisma.sql`c."searchVector"`,
+    likeColumns: [Prisma.sql`c."name"`, Prisma.sql`c."code"`],
+    term,
+    candidateIds: candidates.map((row) => row.id),
+    limit: query.limit,
+    offset: (query.page - 1) * query.limit,
+  });
+  const [matches, counts] = await prisma.$transaction([page, total]);
+
+  const meta = paginationMeta(query.page, query.limit, counts[0]?.count ?? 0);
+  const orderedIds = matches.map((row) => row.id);
+  if (orderedIds.length === 0) return { data: [], meta };
+
+  const [courseRows, statuses] = await Promise.all([
+    prisma.course.findMany({
+      where: { id: { in: orderedIds } },
+      include: COURSE_SUMMARY_INCLUDE,
+    }),
+    viewerEnrollmentStatusByCourse(actor, orderedIds),
+  ]);
+  const byId = new Map(courseRows.map((row) => [row.id, row]));
+
+  return {
+    data: orderedIds.flatMap((id) => {
+      const course = byId.get(id);
+      return course ? [toCourseListItem(course, statuses.get(id) ?? null)] : [];
+    }),
+    meta,
   };
 }
 

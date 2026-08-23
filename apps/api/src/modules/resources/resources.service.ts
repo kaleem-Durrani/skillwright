@@ -1,4 +1,4 @@
-import { prisma, type Prisma } from '@skillwright/db';
+import { prisma, Prisma } from '@skillwright/db';
 import {
   paginationMeta,
   toSkipTake,
@@ -19,6 +19,9 @@ import { presignGet, safeFilename } from '../../lib/storage.js';
 // the status, while courses.service.ts checked nothing at all.
 import { assertUploadClaimable } from '../uploads/uploads.service.js';
 import { notify } from '../notifications/notifications.service.js';
+// The raw-SQL vocabulary for ranked search, shared with courses and announcements so
+// the three handlers cannot drift apart over escaping or weighting (search.sql.ts header).
+import { rankedIdPage } from '../search/search.sql.js';
 import type {
   CreateResourceInput,
   ListResourcesQuery,
@@ -286,6 +289,10 @@ export function visibilityWhere(actor: Actor | null): Prisma.ResourceWhereInput 
  * collected into separate `AND` terms because `visibilityWhere` already owns the
  * top-level `OR` and a second one would silently replace it — so `?type=VIDEO` can
  * narrow a student's rows and can never widen them past the policy.
+ *
+ * `q` is deliberately NOT one of these filters. A text term needs `ts_rank_cd` and the
+ * trigram indexes (migration 0002), which Prisma cannot see — so when `q` is present
+ * `list` switches to `listRanked` below instead of building a WHERE here.
  */
 function listWhere(actor: Actor | null, query: ListResourcesQuery): Prisma.ResourceWhereInput {
   const filters: Prisma.ResourceWhereInput[] = [visibilityWhere(actor)];
@@ -295,20 +302,8 @@ function listWhere(actor: Actor | null, query: ListResourcesQuery): Prisma.Resou
 
   // `isPublic=false` is ignored for anonymous callers, who only ever see public
   // resources: applying it there answers an empty page instead of the shelf they asked
-  // for. Same call courses.service.ts:246-250 makes for `?published=false`.
+  // for. Same call courses.service.ts makes for `?published=false`.
   if (actor !== null && query.isPublic !== undefined) filters.push({ isPublic: query.isPublic });
-
-  if (query.q !== undefined) {
-    // v1 substring match, the same shape the course catalogue uses. The trigram indexes
-    // in migration 0002 exist for a ranked search, but reaching them needs raw SQL and
-    // `Resource` has no `searchVector` column at all.
-    filters.push({
-      OR: [
-        { title: { contains: query.q, mode: 'insensitive' } },
-        { description: { contains: query.q, mode: 'insensitive' } },
-      ],
-    });
-  }
 
   return { AND: filters };
 }
@@ -366,11 +361,17 @@ function orderFor(query: ListResourcesQuery): Prisma.ResourceOrderByWithRelation
  * `deny` (policy.ts:192): a logged-out visitor is a legitimate caller here and gets the
  * public shelf. Seeing that a public resource EXISTS is deliberately wider than
  * `resource:download`, which refuses anonymous outright (policy.ts:217-226).
+ *
+ * A `q` text term switches the whole read to `listRanked`: ranking needs the stored
+ * `searchVector` tsvector and the trigram index (migration 0002), which live in the
+ * database only and are invisible to Prisma.
  */
 export async function list(
   actor: Actor | null,
   query: ListResourcesQuery,
 ): Promise<Paginated<ResourceDto>> {
+  if (query.q !== undefined) return listRanked(actor, query, query.q);
+
   const where = listWhere(actor, query);
 
   const [rows, total] = await prisma.$transaction([
@@ -384,6 +385,66 @@ export async function list(
   ]);
 
   return { data: rows.map(toResourceDto), meta: paginationMeta(query.page, query.limit, total) };
+}
+
+/**
+ * The ranked search path behind `?q=`, replacing the v1 substring fallback — same
+ * three-phase shape as courses.service.ts's `listRanked`, and for the same reasons:
+ *
+ * Phase 1 proves visibility and every other filter through PRISMA (`listWhere` above),
+ * so `visibilityWhere` stays the one mirror of the `resource:read` rows and no SQL
+ * copy of it can drift. Phase 2 ranks the surviving ids with raw SQL —
+ * `searchVector @@ websearch_to_tsquery(...)` OR'd with a trigram `ILIKE '%term%'` on
+ * TITLE, the one natural-key column migration 0002:86 indexed for this table; stemming
+ * covers the description's words, the trigram arm covers partial titles ("acety") that
+ * stemming cannot see. Page and total go out as one `$transaction`. Phase 3 hydrates
+ * with the SAME include and mapper as the ordinary path and restores phase 2's order.
+ *
+ * When `q` is present, relevance ordering replaces `sort`/`order` — a search that
+ * silently re-sorts by date would hide the best hit below the fold.
+ */
+async function listRanked(
+  actor: Actor | null,
+  query: ListResourcesQuery,
+  term: string,
+): Promise<Paginated<ResourceDto>> {
+  const candidates = await prisma.resource.findMany({
+    where: listWhere(actor, query),
+    select: { id: true },
+  });
+  if (candidates.length === 0) {
+    return { data: [], meta: paginationMeta(query.page, query.limit, 0) };
+  }
+
+  const { page, total } = rankedIdPage({
+    table: Prisma.sql`"Resource" r`,
+    alias: Prisma.sql`r`,
+    vector: Prisma.sql`r."searchVector"`,
+    likeColumns: [Prisma.sql`r."title"`],
+    term,
+    candidateIds: candidates.map((row) => row.id),
+    limit: query.limit,
+    offset: (query.page - 1) * query.limit,
+  });
+  const [matches, counts] = await prisma.$transaction([page, total]);
+
+  const meta = paginationMeta(query.page, query.limit, counts[0]?.count ?? 0);
+  const orderedIds = matches.map((row) => row.id);
+  if (orderedIds.length === 0) return { data: [], meta };
+
+  const rows = await prisma.resource.findMany({
+    where: { id: { in: orderedIds } },
+    include: RESOURCE_INCLUDE,
+  });
+  const byId = new Map(rows.map((row) => [row.id, row]));
+
+  return {
+    data: orderedIds.flatMap((id) => {
+      const resource = byId.get(id);
+      return resource ? [toResourceDto(resource)] : [];
+    }),
+    meta,
+  };
 }
 
 /**

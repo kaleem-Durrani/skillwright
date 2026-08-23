@@ -1,4 +1,4 @@
-import { prisma, type Prisma } from '@skillwright/db';
+import { prisma, Prisma } from '@skillwright/db';
 import {
   paginationMeta,
   slugSchema,
@@ -10,6 +10,9 @@ import {
 import { toUserSummary, USER_SUMMARY_SELECT } from '../../lib/dto.js';
 import { notFound, validationFailed } from '../../lib/errors.js';
 import { notify } from '../notifications/notifications.service.js';
+// The raw-SQL vocabulary for ranked search, shared with courses and resources so the
+// three handlers cannot drift apart over escaping or weighting (search.sql.ts header).
+import { rankedIdPage } from '../search/search.sql.js';
 import type {
   AnnouncementDetail,
   AnnouncementSummary,
@@ -181,6 +184,10 @@ export function visibilityWhere(actor: Actor | null): Prisma.AnnouncementWhereIn
  * already owns the top-level `OR`, and a second one at this level would silently
  * replace it, so a filter can narrow a caller's rows and can never widen them past the
  * policy. Same shape as resources.service.ts's `listWhere`.
+ *
+ * `q` is deliberately NOT one of these filters. A text term needs `ts_rank_cd` and the
+ * trigram indexes (migration 0002), which Prisma cannot see — so when `q` is present
+ * `list` switches to `listRanked` below instead of building a WHERE here.
  */
 function listWhere(
   actor: Actor | null,
@@ -206,18 +213,6 @@ function listWhere(
     // column never satisfies `gte` or `lt`, with no separate `type` term needed.
     const now = new Date();
     filters.push({ eventDate: query.upcoming ? { gte: now } : { lt: now } });
-  }
-
-  if (query.q !== undefined) {
-    // v1 substring match, the same shape resources.service.ts uses. The trigram and
-    // tsvector indexes in migration 0002 exist for a ranked search, but reaching them
-    // needs raw SQL and `Announcement` has no `searchVector` column in schema.prisma.
-    filters.push({
-      OR: [
-        { title: { contains: query.q, mode: 'insensitive' } },
-        { content: { contains: query.q, mode: 'insensitive' } },
-      ],
-    });
   }
 
   return { AND: filters };
@@ -260,11 +255,17 @@ function orderFor(query: ListAnnouncementsQuery): Prisma.AnnouncementOrderByWith
  * `GET /announcements`. `Actor | null` because the anonymous row of
  * `announcement:read` is `isPublished`, not `deny` (policy.ts:230): a logged-out
  * visitor is a legitimate caller here and gets the published feed.
+ *
+ * A `q` text term switches the whole read to `listRanked`: ranking needs the stored
+ * `searchVector` tsvector and the trigram index (migration 0002), which live in the
+ * database only and are invisible to Prisma.
  */
 export async function list(
   actor: Actor | null,
   query: ListAnnouncementsQuery,
 ): Promise<Paginated<AnnouncementSummary>> {
+  if (query.q !== undefined) return listRanked(actor, query, query.q);
+
   const where = listWhere(actor, query);
 
   const [rows, total] = await prisma.$transaction([
@@ -280,6 +281,67 @@ export async function list(
   return {
     data: rows.map(toAnnouncementSummary),
     meta: paginationMeta(query.page, query.limit, total),
+  };
+}
+
+/**
+ * The ranked search path behind `?q=`, replacing the v1 substring fallback — same
+ * three-phase shape as courses.service.ts's `listRanked`, and for the same reasons:
+ *
+ * Phase 1 proves visibility and every other filter through PRISMA (`listWhere` above),
+ * so `visibilityWhere` stays the one mirror of the `announcement:read` rows and no SQL
+ * copy of it can drift. Phase 2 ranks the surviving ids with raw SQL —
+ * `searchVector @@ websearch_to_tsquery(...)` over title+content OR'd with a trigram
+ * `ILIKE '%term%'` on TITLE, the one natural-key column migration 0002:87 indexed for
+ * this table; stemming covers the content's words, the trigram arm covers partial
+ * titles ("Closu") that stemming cannot see. Page and total go out as one
+ * `$transaction`. Phase 3 hydrates with the SAME include and mapper as the ordinary
+ * path and restores phase 2's order.
+ *
+ * When `q` is present, relevance ordering replaces `sort`/`order` — a search that
+ * silently re-sorts by date would hide the best hit below the fold.
+ */
+async function listRanked(
+  actor: Actor | null,
+  query: ListAnnouncementsQuery,
+  term: string,
+): Promise<Paginated<AnnouncementSummary>> {
+  const candidates = await prisma.announcement.findMany({
+    where: listWhere(actor, query),
+    select: { id: true },
+  });
+  if (candidates.length === 0) {
+    return { data: [], meta: paginationMeta(query.page, query.limit, 0) };
+  }
+
+  const { page, total } = rankedIdPage({
+    table: Prisma.sql`"Announcement" a`,
+    alias: Prisma.sql`a`,
+    vector: Prisma.sql`a."searchVector"`,
+    likeColumns: [Prisma.sql`a."title"`],
+    term,
+    candidateIds: candidates.map((row) => row.id),
+    limit: query.limit,
+    offset: (query.page - 1) * query.limit,
+  });
+  const [matches, counts] = await prisma.$transaction([page, total]);
+
+  const meta = paginationMeta(query.page, query.limit, counts[0]?.count ?? 0);
+  const orderedIds = matches.map((row) => row.id);
+  if (orderedIds.length === 0) return { data: [], meta };
+
+  const rows = await prisma.announcement.findMany({
+    where: { id: { in: orderedIds } },
+    include: ANNOUNCEMENT_INCLUDE,
+  });
+  const byId = new Map(rows.map((row) => [row.id, row]));
+
+  return {
+    data: orderedIds.flatMap((id) => {
+      const announcement = byId.get(id);
+      return announcement ? [toAnnouncementSummary(announcement)] : [];
+    }),
+    meta,
   };
 }
 
