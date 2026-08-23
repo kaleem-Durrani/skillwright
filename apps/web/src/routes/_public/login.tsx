@@ -1,4 +1,5 @@
 import { createRoute, lazyRouteComponent } from '@tanstack/react-router';
+import { BRAND } from '@skillwright/shared/brand';
 import { Route as publicLayout } from '../_public.js';
 
 export interface LoginSearch {
@@ -20,6 +21,7 @@ export const Route = createRoute({
       ? { reason: search.reason as 'suspended' | 'expired' }
       : {}),
   }),
+  head: () => ({ meta: [{ title: `Sign in · ${BRAND.name}` }] }),
   // Concrete module path, never a barrel: this import is the split point, and a
   // barrel would drag every other screen into the login chunk.
   component: lazyRouteComponent(() => import('@/pages/Login'), 'LoginPage'),

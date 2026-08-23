@@ -1,4 +1,5 @@
 import { createRoute, lazyRouteComponent } from '@tanstack/react-router';
+import { BRAND } from '@skillwright/shared/brand';
 import { Route as publicLayout } from '../_public.js';
 
 export interface VerifyEmailSearch {
@@ -21,5 +22,6 @@ export const Route = createRoute({
     ...(typeof search.code === 'string' ? { code: search.code } : {}),
     ...(typeof search.email === 'string' ? { email: search.email } : {}),
   }),
+  head: () => ({ meta: [{ title: `Verify your email · ${BRAND.name}` }] }),
   component: lazyRouteComponent(() => import('@/pages/VerifyEmail'), 'VerifyEmailPage'),
 });

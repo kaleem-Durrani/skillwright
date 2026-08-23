@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Skillwright brand mark: an ember-filled square with the SW wordmark, matching
+       the mark drawn in AppShell.tsx (bg-brand, rounded-md on a size-8 box — a 0.25
+       corner-radius ratio) and the tokens.css light-theme values: the brand-solid
+       token (ember-600) behind the text-on-brand token (iron-950). Static colours on
+       purpose: a favicon cannot react to in-app theme state, and ember-600 reads
+       clearly against both light and dark browser chrome. -->
+  <rect width="512" height="512" rx="128" fill="#ea410c" />
+  <text
+    x="256"
+    y="266"
+    text-anchor="middle"
+    dominant-baseline="middle"
+    font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+    font-weight="700"
+    font-size="216"
+    letter-spacing="-4"
+    fill="#12161d"
+  >SW</text>
+</svg>

@@ -15,6 +15,36 @@
     <meta name="description" content="Skillwright — vocational training, permissions first." />
     <title>Skillwright</title>
 
+    <!-- icon.svg is the primary favicon (modern browsers prefer it over the PNG);
+         favicon-32.png is the fallback for the ones that don't. Both are the same
+         ember-filled SW mark AppShell.tsx draws in the top bar. -->
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <!-- Flat, opaque square — deliberately not rounded like the other icons. iOS
+         masks this itself, and a pre-rounded PNG with transparent corners is what
+         makes a home-screen icon show up with black corners. -->
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Skillwright" />
+    <meta property="og:title" content="Skillwright" />
+    <meta
+      property="og:description"
+      content="Skillwright — vocational training, permissions first."
+    />
+    <meta property="og:url" content="https://skillwright.dev/" />
+    <meta property="og:image" content="https://skillwright.dev/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Skillwright" />
+    <meta
+      name="twitter:description"
+      content="Skillwright — vocational training, permissions first."
+    />
+    <meta name="twitter:image" content="https://skillwright.dev/og-image.png" />
+
     <!--
       Blocking, deliberately. This runs before the first paint so the document is
       never painted in the wrong theme and then corrected — that flash is the one

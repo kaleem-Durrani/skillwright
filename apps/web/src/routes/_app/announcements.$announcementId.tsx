@@ -1,4 +1,5 @@
 import { createRoute, lazyRouteComponent } from '@tanstack/react-router';
+import { BRAND } from '@skillwright/shared/brand';
 import { qk } from '@/lib/query';
 import { api } from '@/lib/api';
 import { Route as appLayout } from '../_app.js';
@@ -13,6 +14,7 @@ export const Route = createRoute({
       queryKey: qk.announcement(params.announcementId),
       queryFn: () => api.get(`/announcements/${params.announcementId}`),
     }),
+  head: () => ({ meta: [{ title: `Announcement · ${BRAND.name}` }] }),
   component: lazyRouteComponent(
     () => import('@/pages/AnnouncementDetail'),
     'AnnouncementDetailPage',

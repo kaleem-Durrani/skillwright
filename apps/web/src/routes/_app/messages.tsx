@@ -1,4 +1,5 @@
 import { createRoute, lazyRouteComponent } from '@tanstack/react-router';
+import { BRAND } from '@skillwright/shared/brand';
 import { Route as appLayout } from '../_app.js';
 
 export interface MessagesSearch {
@@ -11,5 +12,6 @@ export const Route = createRoute({
   path: '/messages',
   validateSearch: (search: Record<string, unknown>): MessagesSearch =>
     typeof search.conversationId === 'string' ? { conversationId: search.conversationId } : {},
+  head: () => ({ meta: [{ title: `Messages · ${BRAND.name}` }] }),
   component: lazyRouteComponent(() => import('@/pages/Messages'), 'MessagesPage'),
 });

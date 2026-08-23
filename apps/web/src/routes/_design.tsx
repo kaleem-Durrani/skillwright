@@ -1,4 +1,5 @@
 import { createRoute, lazyRouteComponent } from '@tanstack/react-router';
+import { BRAND } from '@skillwright/shared/brand';
 import { Route as rootRoute } from './__root.js';
 
 /**
@@ -16,5 +17,6 @@ import { Route as rootRoute } from './__root.js';
 export const Route = createRoute({
   getParentRoute: () => rootRoute,
   path: '/design',
+  head: () => ({ meta: [{ title: `Design system · ${BRAND.name}` }] }),
   component: lazyRouteComponent(() => import('@/pages/Design'), 'DesignPage'),
 });

@@ -1,4 +1,5 @@
 import { createRoute, lazyRouteComponent } from '@tanstack/react-router';
+import { BRAND } from '@skillwright/shared/brand';
 import { Route as appLayout } from '../_app.js';
 
 export interface AnnouncementsSearch {
@@ -31,5 +32,6 @@ export const Route = createRoute({
           : {}),
     };
   },
+  head: () => ({ meta: [{ title: `Announcements · ${BRAND.name}` }] }),
   component: lazyRouteComponent(() => import('@/pages/Announcements'), 'AnnouncementsPage'),
 });
