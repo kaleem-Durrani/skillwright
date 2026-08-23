@@ -1,7 +1,8 @@
 import { prisma, type Prisma } from '@skillwright/db';
 import { paginationMeta, toSkipTake, type Actor, type Paginated } from '@skillwright/shared';
-import { notFound, validationFailed } from '../../lib/errors.js';
+import { notFound } from '../../lib/errors.js';
 import { baseLogger } from '../../lib/logger.js';
+import { presignGet, safeFilename } from '../../lib/storage.js';
 /*
  * `toUserDetail` is imported rather than copied. It is the ONLY shape a user is
  * serialised as, and a second copy here would be a second place for `mfaEnabled`, the
@@ -18,6 +19,7 @@ import { baseLogger } from '../../lib/logger.js';
  * file, so it is not this change's to make.
  */
 import { toUserDetail } from '../auth/auth.service.js';
+import { assertUploadClaimable } from '../uploads/uploads.service.js';
 import { destroyAllSessions } from '../auth/session.service.js';
 import type {
   ListUsersQuery,
@@ -34,7 +36,13 @@ const log = baseLogger.child({ module: 'users' });
  * have, so the department name the console renders arrives through two joins and not
  * one field.
  *
- * This is a byte-for-byte copy of auth.service.ts:68-71 on purpose, and it is the
+ * `avatarUpload` is what lets this module prefer an uploaded avatar over the derived
+ * one: `avatarUrlFor` (packages/db/src/avatar.ts) takes only a userId and can never see
+ * the upload, so the preference resolves HERE, where the row is loaded with its
+ * relation — see `withAvatarUrl`. Only key/originalName/status are selected; no bytes
+ * ever flow through this process.
+ *
+ * This is a byte-for-byte copy of auth.service.ts:69-72 on purpose, and it is the
  * INCLUDE and not the mapper: the two produce structurally identical
  * `UserGetPayload`s, so `toUserDetail` still type-checks against rows loaded here, and
  * the TODO(dto) above collapses both constants into one when it lands.
@@ -46,7 +54,36 @@ const log = baseLogger.child({ module: 'users' });
 const USER_DETAIL_INCLUDE = {
   teacherProfile: { include: { department: true } },
   studentProfile: { include: { department: true } },
+  avatarUpload: { select: { key: true, originalName: true, status: true } },
 } as const;
+
+/**
+ * The uploaded avatar, when there is one worth serving.
+ *
+ * `toUserDetail` itself stays synchronous (it is embedded in list mappings) and always
+ * writes the deterministic fallback; this wraps it with the ONE async step — a signed
+ * GET for the committed upload, same 5-minute TTL and `attachment` disposition as every
+ * other download. PENDING or absent falls through to the fallback: a URL for unverified
+ * bytes would render as a broken image in every <img> tag that holds it.
+ *
+ * The auth flows' own responses (login, session, MFA) go through
+ * auth.service.ts:loadUserDetail, whose PROFILE_INCLUDE does not carry this relation,
+ * and keep the derived avatar — noted at that file's avatar line rather than fixed
+ * here, because changing that include is outside this change's fences.
+ */
+async function withAvatarUrl(
+  user: Prisma.UserGetPayload<{ include: typeof USER_DETAIL_INCLUDE }>,
+): Promise<UserDetail> {
+  const detail = toUserDetail(user);
+  const { avatarUpload } = user;
+  if (avatarUpload === null || avatarUpload.status !== 'COMMITTED') return detail;
+
+  const signed = await presignGet({
+    key: avatarUpload.key,
+    filename: safeFilename(avatarUpload.originalName),
+  });
+  return { ...detail, avatarUrl: signed.url };
+}
 
 /**
  * user.ts:123 — "Suspension always carries a reason; it lands in the audit row and the
@@ -68,9 +105,11 @@ const DEFAULT_SUSPENSION_REASON = 'Suspended by an administrator';
 // ---------------------------------------------------------------------------
 
 /*
- * `toUserDetail` is the module's entity mapper and is imported above. Nothing is
- * re-derived here: `avatarUrl` is `avatarUrlFor(user.id)` (packages/db/src/avatar.ts:13)
- * and `mfaEnabled` is `totpEnabledAt !== null`, both inside that one function.
+ * `toUserDetail` is the module's entity mapper and is imported above. `avatarUrl`
+ * starts as the derived fallback inside it (packages/db/src/avatar.ts:13) and is
+ * replaced by a signed URL for the caller's uploaded avatar in `withAvatarUrl` when the
+ * row carries one; `mfaEnabled` is `totpEnabledAt !== null`, both inside that one
+ * function.
  */
 
 /**
@@ -87,7 +126,7 @@ async function detailById(id: string): Promise<UserDetail> {
     include: USER_DETAIL_INCLUDE,
   });
   if (!user) throw notFound('User');
-  return toUserDetail(user);
+  return withAvatarUrl(user);
 }
 
 // ---------------------------------------------------------------------------
@@ -207,7 +246,10 @@ export async function list(query: ListUsersQuery): Promise<Paginated<UserDetail>
     }),
     prisma.user.count({ where }),
   ]);
-  return { data: rows.map(toUserDetail), meta: paginationMeta(query.page, query.limit, total) };
+  return {
+    data: await Promise.all(rows.map((row) => withAvatarUrl(row))),
+    meta: paginationMeta(query.page, query.limit, total),
+  };
 }
 
 export function getById(id: string): Promise<UserDetail> {
@@ -230,20 +272,20 @@ export function getSelf(actor: Actor): Promise<UserDetail> {
  */
 export async function updateSelf(actor: Actor, input: UpdateUserInput): Promise<UserDetail> {
   /*
-   * `avatarUploadId` is a REAL foreign key (schema.prisma:143-144) and the uploads
-   * module does not exist yet, so no client can be holding a valid id. Left to Prisma
-   * it would be a P2003 rendered as a bare 409 (errors.plugin.ts:45-62); rejected here
-   * it is a field-level 422 that says why — the courses.service.ts:296-315 rule that a
-   * client-chosen foreign key is checked FIRST.
+   * `avatarUploadId` is a client-chosen foreign key (schema.prisma:143-144), so it is
+   * checked FIRST — left to Prisma it would be a P2003 rendered as a bare 409, and the
+   * courses.service.ts:296-315 rule turns that into a field-level 422.
    *
    * `null` is allowed through: clearing an avatar needs no Upload row, and
    * `updateUserSchema.avatarUploadId` is `idSchema.nullable()` precisely so it can be
-   * cleared. TODO(uploads): drop this guard and validate the id against Upload when
-   * the uploads module lands — courses.service.ts:68-70 carries the twin of this note
-   * for `syllabusUrl`.
+   * cleared. A non-null id must be the caller's own COMMITTED upload MINTED AS AN
+   * AVATAR: `assertUploadClaimable`'s four questions plus its purpose check against the
+   * key prefix, which is the only record of a purpose that exists. Without the purpose
+   * half, an upload presigned as a RESOURCE — up to 512 MB of any MIME the purpose
+   * accepts — could be attached as a face and served through an <img> tag.
    */
   if (input.avatarUploadId !== undefined && input.avatarUploadId !== null) {
-    throw validationFailed([{ path: 'avatarUploadId', message: 'Uploads are not available yet' }]);
+    await assertUploadClaimable(input.avatarUploadId, actor, 'avatarUploadId', 'AVATAR');
   }
 
   await prisma.user.update({

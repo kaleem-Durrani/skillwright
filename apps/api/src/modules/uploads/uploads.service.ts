@@ -1,7 +1,13 @@
 import { prisma, type Prisma } from '@skillwright/db';
-import type { Actor, Subject } from '@skillwright/shared';
+import type { Actor, Subject, UploadPurpose } from '@skillwright/shared';
 import { notFound, validationFailed } from '../../lib/errors.js';
-import { BUCKET, buildObjectKey, headObject, presignPut } from '../../lib/storage.js';
+import {
+  BUCKET,
+  buildObjectKey,
+  headObject,
+  PURPOSE_FOLDER,
+  presignPut,
+} from '../../lib/storage.js';
 import type { PresignUploadInput, PresignUploadResponse, UploadDto } from './uploads.schema.js';
 
 /**
@@ -99,13 +105,11 @@ export async function loadUploadSubject(uploadId: string): Promise<Subject | und
  * `GET /resources/:id/download` refuses to sign a PENDING upload rather than trusting the
  * `contentType` and `sizeBytes` stored here.
  *
- * NOTHING SWEEPS THE ABANDONED ROWS YET. A user who asks for a signature and then closes
- * the dialog leaves a PENDING row forever, and upload.ts:87 already promises a cron that
- * removes them. `@@index([status, createdAt])` (schema.prisma:418) is the index that job
- * will read — it exists for exactly this and has no other caller today. Until that job is
- * written, PENDING rows accumulate; they are harmless (they reference no object and no
- * resource can attach an unowned one) but they are not tidy, and pretending otherwise in
- * a comment would be worse than saying so.
+ * A PENDING row left behind by a user who asked for a signature and then closed the dialog
+ * is reclaimed by the scheduled sweeper (uploads.sweeper.ts), which deletes rows still
+ * PENDING past a configurable age — object first, then row. `@@index([status, createdAt])`
+ * (schema.prisma:423) is the index that job reads; it exists for exactly this and has no
+ * other caller.
  *
  * `ownerId` is the ACTOR and never the body: `presignUploadSchema` has no owner field
  * (upload.ts:46-53), and accepting one would let a caller mint an upload in someone
@@ -261,9 +265,9 @@ export async function commit(uploadId: string): Promise<UploadDto> {
  *
  * Lives here because the Upload row is this module's, and because three callers need
  * the identical answer: `resource:create` (resources.service.ts), a course syllabus
- * (courses.service.ts), and eventually an avatar. Until this existed, resources had a
- * private copy and courses had NOTHING — `syllabusUploadId` went from the request body
- * straight into the row, so a teacher could bind a colleague's private file to their
+ * (courses.service.ts), and an avatar (users.service.ts). Until this existed, resources
+ * had a private copy and courses had NOTHING — `syllabusUploadId` went from the request
+ * body straight into the row, so a teacher could bind a colleague's private file to their
  * own course by guessing an id. That is the upload-shaped version of the hole
  * `ownsCourse` closes on policy.ts's `resource:create`.
  *
@@ -278,6 +282,15 @@ export async function commit(uploadId: string): Promise<UploadDto> {
  *                     `User.avatarUploadId` are each `@unique`, so a second claim is a
  *                     P2002 the caller cannot read. Checked here, it names the field.
  *
+ * A fifth question is opt-in via `purpose`: when given, the key prefix must be the
+ * folder that purpose mints (PURPOSE_FOLDER). The prefix is the only record of a
+ * purpose — `Upload` has no `purpose` column (storage.ts:56-70) — so this is the whole
+ * check, not part of one. Only avatars ask for it today: an avatar pointing at an
+ * upload presigned as a RESOURCE would serve a 512 MB video through an <img> tag and
+ * bypass the avatar limits entirely, where resources and syllabi are both attached by
+ * privileged course staff. Resources/syllabi callers omit it and behave exactly as
+ * before.
+ *
  * There is no `upload:attach` action to express any of this in the policy table
  * (policy.ts stops at `upload:presign` and `upload:commit`), so the service owns it.
  * A race past this check still collides on the unique index and is a 409, deliberately.
@@ -286,11 +299,13 @@ export async function assertUploadClaimable(
   uploadId: string,
   actor: Actor,
   path: string,
+  purpose?: UploadPurpose,
 ): Promise<void> {
   const upload = await prisma.upload.findUnique({
     where: { id: uploadId },
     select: {
       id: true,
+      key: true,
       ownerId: true,
       status: true,
       resource: { select: { id: true } },
@@ -308,6 +323,15 @@ export async function assertUploadClaimable(
   if (upload.status !== 'COMMITTED') {
     throw validationFailed([
       { path, message: 'That upload has not been confirmed yet. Commit it before attaching it.' },
+    ]);
+  }
+
+  if (purpose !== undefined && !upload.key.startsWith(`${PURPOSE_FOLDER[purpose]}/`)) {
+    throw validationFailed([
+      {
+        path,
+        message: `That upload was not made as a ${purpose.toLowerCase()} upload.`,
+      },
     ]);
   }
 

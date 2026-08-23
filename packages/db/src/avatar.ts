@@ -5,6 +5,14 @@
  * (`User.avatarUpload`) or it is derived from the user's id. Deriving it costs no storage,
  * never 404s, and means a seeded account is never a grey silhouette.
  *
+ * This function is the FALLBACK half only. Preferring a committed upload needs the
+ * user's upload relation and an await — presigning lives behind the API's storage module,
+ * which this package deliberately does not depend on — so that half resolves where the
+ * row is already loaded with its relation: users.service.ts `withAvatarUrl` (GET /users/me,
+ * GET /users/:id, the admin list). Summaries and the auth responses still serve this
+ * derived form; when the uploaded-avatar thread widens, it extends THERE and keeps using
+ * this function as its else-branch. One decision, two halves, each named.
+ *
  * It lives in the data package rather than in the web app because the API embeds it in
  * notification payloads and message previews too. Two implementations of "which avatar"
  * would eventually disagree, and a face that changes between the list and the detail view

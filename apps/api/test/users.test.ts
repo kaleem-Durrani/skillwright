@@ -124,6 +124,71 @@ function send(
   });
 }
 
+// --- uploads (real bytes through the real presigned flow) -------------------
+
+/** Bytes shaped enough like a document that a human could tell them apart in a diff. */
+function fileBytes(marker: string): Buffer {
+  return Buffer.from(
+    `%PDF-1.4\n% ${marker}\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n`,
+    'utf8',
+  );
+}
+
+/** presignUploadResponseSchema (upload.ts:77-84), named so the fetch call below typechecks. */
+interface PresignBody {
+  uploadId: string;
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  key: string;
+  expiresAt: string;
+}
+
+/**
+ * Presign -> PUT -> (optionally) commit, straight to the bucket over `fetch` exactly as
+ * the browser does. The API never sees these bytes, so an injected request would prove
+ * nothing about whether MinIO accepted the signature — or, below, about the avatar URL
+ * really serving what was PUT.
+ *
+ * The declared contentType follows the PURPOSE, because that is what the purpose limits
+ * check; the bytes themselves are irrelevant to MinIO.
+ */
+async function storeUpload(
+  token: string,
+  options: { purpose: 'AVATAR' | 'RESOURCE'; originalName?: string; commit?: boolean },
+): Promise<{ uploadId: string; key: string; body: Buffer }> {
+  const body = fileBytes(options.originalName ?? 'uploaded');
+  const presigned = await app.inject({
+    method: 'POST',
+    url: '/api/v1/uploads/presign',
+    headers: { ...originHeaders, cookie: cookieHeader(token) },
+    payload: {
+      purpose: options.purpose,
+      originalName: options.originalName ?? 'me.png',
+      contentType: options.purpose === 'AVATAR' ? 'image/png' : 'application/pdf',
+      sizeBytes: body.length,
+    },
+  });
+  expect(presigned.statusCode).toBe(201);
+  const signed: PresignBody = presigned.json();
+
+  const put = await fetch(signed.url, { method: 'PUT', headers: signed.headers, body });
+  if (!put.ok) throw new Error(`PUT to the signed URL failed: ${put.status} ${await put.text()}`);
+
+  if (options.commit !== false) {
+    const committed = await app.inject({
+      method: 'POST',
+      url: '/api/v1/uploads/commit',
+      headers: { ...originHeaders, cookie: cookieHeader(token) },
+      payload: { uploadId: signed.uploadId },
+    });
+    expect(committed.statusCode).toBe(200);
+    expect(committed.json().status).toBe('COMMITTED');
+  }
+
+  return { uploadId: signed.uploadId, key: signed.key, body };
+}
+
 // --- tests -----------------------------------------------------------------
 
 describe('GET /users', () => {
@@ -379,15 +444,109 @@ describe('PATCH /users/me', () => {
     expect(response.statusCode).toBe(422);
   });
 
-  it('refuses an avatarUploadId with a field path while uploads do not exist', async () => {
-    const student = await signedIn('avatar@example.com', 'STUDENT', 'Avatar', 'student');
+  /**
+   * The avatar path end to end: presign (purpose AVATAR), PUT, commit, attach through
+   * PATCH /users/me, then read the face back and pull its BYTES out of the bucket. The
+   * bytes assertion is what stops a plausible-looking URL from passing the test — a
+   * signed URL for a deleted or never-uploaded key answers 403 from the private bucket,
+   * which a status-only check would happily read as "not dicebear".
+   */
+  it('attaches the caller’s own committed AVATAR upload and serves it as avatarUrl', async () => {
+    const studentId = await createAccount('avatar-ok@example.com', 'STUDENT', 'Avatar');
+    const token = await login('avatar-ok@example.com');
+    const file = await storeUpload(token, { purpose: 'AVATAR', originalName: 'me.png' });
 
-    const response = await send('PATCH', '/me', { avatarUploadId: ABSENT_ID }, student);
-    expect(response.statusCode).toBe(422);
-    expect(response.json().errors).toContainEqual({
-      path: 'avatarUploadId',
-      message: 'Uploads are not available yet',
+    const response = await send('PATCH', '/me', { avatarUploadId: file.uploadId }, token);
+    expect(response.statusCode).toBe(200);
+
+    // Stored on the row, not merely echoed.
+    const row = await prisma.user.findUniqueOrThrow({ where: { id: studentId } });
+    expect(row.avatarUploadId).toBe(file.uploadId);
+
+    // The detail read prefers the upload over the derived fallback...
+    const me = await get('/me', token);
+    expect(me.statusCode).toBe(200);
+    expect(me.json().avatarUrl).not.toContain('dicebear');
+    expect(me.json().avatarUrl).toContain(file.key);
+
+    // ...and it is a real door to the real bytes.
+    const fetched = await fetch(me.json().avatarUrl as string);
+    expect(fetched.status).toBe(200);
+    expect(Buffer.from(await fetched.arrayBuffer()).equals(file.body)).toBe(true);
+
+    // The admin list shares the same preference — USER_DETAIL_INCLUDE feeds both.
+    const admin = await signedIn('avatar-admin@example.com', 'ADMIN');
+    const listed = await get(`/${studentId}`, admin);
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json().avatarUrl).toContain(file.key);
+  });
+
+  it('clears the avatar with an explicit null and falls back to the derived face', async () => {
+    const token = await signedIn('avatar-clear@example.com', 'STUDENT', 'Clear');
+    const file = await storeUpload(token, { purpose: 'AVATAR' });
+
+    const attached = await send('PATCH', '/me', { avatarUploadId: file.uploadId }, token);
+    expect(attached.statusCode).toBe(200);
+
+    const cleared = await send('PATCH', '/me', { avatarUploadId: null }, token);
+    expect(cleared.statusCode).toBe(200);
+    expect(cleared.json().avatarUrl).toContain('dicebear');
+
+    const row = await prisma.user.findFirstOrThrow({
+      where: { email: 'avatar-clear@example.com' },
     });
+    expect(row.avatarUploadId).toBeNull();
+  });
+
+  it("refuses an upload minted for another purpose, at path 'avatarUploadId'", async () => {
+    const token = await signedIn('avatar-purpose@example.com', 'STUDENT', 'Purpose');
+    // Committed, owned, unclaimed — every question except the purpose one passes.
+    const file = await storeUpload(token, { purpose: 'RESOURCE', originalName: 'handbook.pdf' });
+
+    const response = await send('PATCH', '/me', { avatarUploadId: file.uploadId }, token);
+    expect(response.statusCode).toBe(422);
+    expect(response.json().errors).toContainEqual(
+      expect.objectContaining({
+        path: 'avatarUploadId',
+        message: expect.stringContaining('avatar'),
+      }),
+    );
+
+    const row = await prisma.user.findFirstOrThrow({
+      where: { email: 'avatar-purpose@example.com' },
+    });
+    expect(row.avatarUploadId).toBeNull();
+  });
+
+  it("refuses an upload that was never committed, at path 'avatarUploadId'", async () => {
+    const token = await signedIn('avatar-pending@example.com', 'STUDENT', 'Pending');
+    // The PUT happened; the commit did not. From the client's side this looks finished,
+    // which is exactly why the refusal must name the skipped step rather than 409.
+    const file = await storeUpload(token, { purpose: 'AVATAR', commit: false });
+
+    const response = await send('PATCH', '/me', { avatarUploadId: file.uploadId }, token);
+    expect(response.statusCode).toBe(422);
+    expect(response.json().errors).toContainEqual(
+      expect.objectContaining({
+        path: 'avatarUploadId',
+        message: expect.stringContaining('confirmed'),
+      }),
+    );
+  });
+
+  it("refuses somebody else's upload, at path 'avatarUploadId'", async () => {
+    const owner = await signedIn('avatar-owner@example.com', 'STUDENT', 'Owner');
+    const thiefToken = await signedIn('avatar-thief@example.com', 'STUDENT', 'Thief');
+    const file = await storeUpload(owner, { purpose: 'AVATAR' });
+
+    const response = await send('PATCH', '/me', { avatarUploadId: file.uploadId }, thiefToken);
+    expect(response.statusCode).toBe(422);
+    expect(response.json().errors).toContainEqual(
+      expect.objectContaining({
+        path: 'avatarUploadId',
+        message: expect.stringContaining('someone else'),
+      }),
+    );
   });
 
   it('cannot change its own role or status — those keys are not in the schema', async () => {

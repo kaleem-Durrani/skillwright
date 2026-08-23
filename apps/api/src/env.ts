@@ -113,6 +113,15 @@ const envSchema = z.object({
   RATE_LIMIT_AUTH_IP_WINDOW_MS: count.default(60_000),
   RATE_LIMIT_AUTH_ACCOUNT_MAX: count.default(10),
   RATE_LIMIT_AUTH_ACCOUNT_WINDOW_MS: count.default(900_000),
+
+  /**
+   * The abandoned-upload sweeper (uploads.sweeper.ts): how often it runs, and how old a
+   * PENDING row must be before the job reclaims it. The age default is a full day —
+   * deliberately many times the 15-minute PUT signature lifetime, so no live dialog can
+   * ever have its row swept from under a PUT in flight.
+   */
+  UPLOAD_SWEEP_INTERVAL_MS: count.default(300_000),
+  UPLOAD_SWEEP_MAX_AGE_MS: count.default(86_400_000),
 });
 
 export type Env = Readonly<z.infer<typeof envSchema>>;

@@ -143,6 +143,62 @@ async function apply(courseId: string, cookie: string): Promise<string> {
   return (response.json() as { id: string }).id;
 }
 
+// --- syllabus uploads (real bytes through the real presigned flow) ----------
+
+function fileBytes(marker: string): Buffer {
+  return Buffer.from(
+    `%PDF-1.4\n% ${marker}\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n`,
+    'utf8',
+  );
+}
+
+/** presignUploadResponseSchema (upload.ts:77-84), named so the fetch call below typechecks. */
+interface PresignBody {
+  uploadId: string;
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  key: string;
+  expiresAt: string;
+}
+
+/**
+ * Presign (purpose SYLLABUS), PUT straight to the bucket over `fetch` — the API never
+ * sees these bytes, so an injected request would prove nothing about the signature —
+ * then commit. What comes back attaches cleanly through POST /courses.
+ */
+async function storeSyllabus(
+  token: string,
+): Promise<{ uploadId: string; key: string; body: Buffer }> {
+  const body = fileBytes('syllabus');
+  const presigned = await app.inject({
+    method: 'POST',
+    url: '/api/v1/uploads/presign',
+    headers: { ...originHeaders, cookie: cookieHeader(token) },
+    payload: {
+      purpose: 'SYLLABUS',
+      originalName: 'course-handbook.pdf',
+      contentType: 'application/pdf',
+      sizeBytes: body.length,
+    },
+  });
+  expect(presigned.statusCode).toBe(201);
+  const signed: PresignBody = presigned.json();
+
+  const put = await fetch(signed.url, { method: 'PUT', headers: signed.headers, body });
+  if (!put.ok) throw new Error(`PUT to the signed URL failed: ${put.status} ${await put.text()}`);
+
+  const committed = await app.inject({
+    method: 'POST',
+    url: '/api/v1/uploads/commit',
+    headers: { ...originHeaders, cookie: cookieHeader(token) },
+    payload: { uploadId: signed.uploadId },
+  });
+  expect(committed.statusCode).toBe(200);
+
+  return { uploadId: signed.uploadId, key: signed.key, body };
+}
+
 /** One catalogue row, as the SPA reads it. */
 interface ListItem {
   code: string;
@@ -431,6 +487,68 @@ describe('GET /courses/:id', () => {
       syllabusUrl: null,
       viewerEnrollmentStatus: null,
     });
+  });
+
+  /**
+   * The syllabus download, end to end: attach a COMMITTED SYLLABUS upload at creation,
+   * read the course back, then pull the file's BYTES out of the private bucket through
+   * the URL the DTO served. A fabricated or stale URL answers 403 from MinIO, so the
+   * byte-equality fetch is what separates "a link" from "a working download button".
+   */
+  it('serves an attached syllabus as a short-lived signed download', async () => {
+    const teacher = await signedIn('syllabus@example.com', 'TEACHER');
+    const file = await storeSyllabus(teacher);
+    const course = await createCourse(teacher, { syllabusUploadId: file.uploadId });
+
+    const response = await get(`/${course.id}`, teacher);
+    expect(response.statusCode).toBe(200);
+    expect(response.json().syllabusUploadId).toBe(file.uploadId);
+
+    const url = response.json().syllabusUrl as string;
+    expect(url).not.toBe('');
+    expect(url).toContain(file.key);
+
+    const fetched = await fetch(url);
+    expect(fetched.status).toBe(200);
+    expect(Buffer.from(await fetched.arrayBuffer()).equals(file.body)).toBe(true);
+  });
+
+  it('answers syllabusUrl null for a PENDING syllabus rather than signing unverified bytes', async () => {
+    // Built directly because no API path can produce this state any more —
+    // assertUploadClaimable refuses PENDING claims. Legacy rows and restored backups
+    // can still carry one, and the detail must degrade to "no link", not hand out a
+    // URL for bytes nothing ever verified.
+    const teacherId = await createAccount('legacy@example.com', 'TEACHER');
+    const token = await login('legacy@example.com');
+    const pending = await prisma.upload.create({
+      data: {
+        key: 'syllabi/01HZZZZZZZZZZZZZZZZZZZZZZZ.pdf',
+        bucket: 'skillwright-uploads',
+        contentType: 'application/pdf',
+        sizeBytes: 128,
+        originalName: 'old-handbook.pdf',
+        status: 'PENDING',
+        ownerId: teacherId,
+      },
+    });
+    const course = await prisma.course.create({
+      data: {
+        code: 'WELD-900',
+        slug: 'legacy-syllabus',
+        name: 'Legacy Syllabus Course',
+        departmentId,
+        teacherId,
+        durationValue: 6,
+        durationUnit: 'WEEK',
+        capacity: 10,
+        syllabusUploadId: pending.id,
+      },
+    });
+
+    const response = await get(`/${course.id}`, token);
+    expect(response.statusCode).toBe(200);
+    expect(response.json().syllabusUploadId).toBe(pending.id);
+    expect(response.json().syllabusUrl).toBeNull();
   });
 
   it('refuses an anonymous visitor a draft course', async () => {

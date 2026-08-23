@@ -70,8 +70,14 @@ export function toUserSummary(user: UserSummarySource): UserSummary {
     id: user.id,
     name: user.name,
     role: user.role,
-    // TODO(uploads): serve a presigned URL when avatarUploadId is set, as
-    // auth.service.ts:85-87 already notes for UserDetail.
+    /*
+     * The derived fallback, deliberately. Preferring an uploaded avatar needs the
+     * user's upload relation AND an await (presigning is async); every summary here is
+     * embedded synchronously inside mappers whose loaders live in other modules, so
+     * threading the relation through means touching every module that renders a face.
+     * The users module does that work for the DETAIL shape it owns
+     * (users.service.ts `withAvatarUrl`); summaries follow when their loaders do.
+     */
     avatarUrl: avatarUrlFor(user.id),
   };
 }

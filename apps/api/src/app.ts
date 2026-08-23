@@ -12,8 +12,9 @@ import {
 } from 'fastify-type-provider-zod';
 import { ulid } from 'ulid';
 import { API_BASE_PATH } from '@skillwright/shared';
-import { env } from './env.js';
+import { env, isTest } from './env.js';
 import { baseLogger } from './lib/logger.js';
+import { startUploadSweeper } from './modules/uploads/uploads.sweeper.js';
 import loggerPlugin from './plugins/logger.plugin.js';
 import prismaPlugin from './plugins/prisma.plugin.js';
 import redisPlugin from './plugins/redis.plugin.js';
@@ -214,6 +215,15 @@ export async function buildApp(): Promise<AppInstance> {
     // Every OTHER client-router path reaches the shell through the not-found handler in
     // errors.plugin.ts: Fastify permits one per prefix and that plugin already owns it.
   }
+
+  /*
+   * The abandoned-upload sweeper — the app's first scheduled job, a plain unref'd
+   * interval that dies with the server via its onClose hook (uploads.sweeper.ts).
+   * Registered here so main.ts and the integration tests build the SAME app and the
+   * job can never be forgotten in one of them; skipped under test, where suites drive
+   * `sweepAbandonedUploads` directly and must not race a background timer.
+   */
+  if (!isTest) startUploadSweeper(app);
 
   await app.ready();
   return app;

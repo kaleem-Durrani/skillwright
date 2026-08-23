@@ -1,4 +1,5 @@
 import {
+  DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
@@ -14,8 +15,9 @@ import { env } from '../env.js';
  * The one place in the API that talks to the object store.
  *
  * The API never proxies bytes: the browser PUTs straight to MinIO/S3 with a signed URL
- * and GETs the same way (upload.ts:73-76). So this module signs URLs and asks the store
- * one question — HeadObject — and nothing here ever streams a file through Node.
+ * and GETs the same way (upload.ts:73-76). So this module signs URLs, asks the store
+ * one question — HeadObject — and deletes objects exactly once, from the sweeper; no
+ * request path ever streams a file through Node.
  *
  * Like the mailer (mailer.ts:38-51) the client is built lazily rather than at import,
  * so importing this module in a unit test does not construct a socket pool for a bucket
@@ -51,9 +53,12 @@ const GET_URL_TTL_SECONDS = 5 * 60;
  *
  * The prefix is the only record of an upload's purpose: `Upload` has no `purpose` column
  * (schema.prisma:392-419), which is deliberate — the purpose is spent at presign time,
- * where it selects the size and MIME limits (upload.ts:35-44).
+ * where it selects the size and MIME limits (upload.ts:35-44). EXPORTED for the same
+ * reason it exists: the avatar attachment point (`users.service.ts`) must confirm a
+ * claimed upload was minted as an AVATAR, and the key prefix is the only evidence there
+ * is or ever will be.
  */
-const PURPOSE_FOLDER: Readonly<Record<UploadPurpose, string>> = Object.freeze({
+export const PURPOSE_FOLDER: Readonly<Record<UploadPurpose, string>> = Object.freeze({
   AVATAR: 'avatars',
   RESOURCE: 'resources',
   SYLLABUS: 'syllabi',
@@ -137,7 +142,7 @@ function getClient(): S3Client {
  * enforced only by the zod check in front of it: an authenticated caller could declare
  * a 1 KB avatar, receive the signature, and PUT half a gigabyte at that key. `commit`
  * would refuse the row afterwards, but the BYTES were already in a bucket nothing
- * reclaims — the sweeper for abandoned uploads does not exist yet.
+ * reclaims until the sweeper collects them (uploads.sweeper.ts).
  *
  * With both named, the store refuses the request itself. That is the "enforced twice …
  * refused by the object store itself" that upload.ts:31-33 promises, now true of the
@@ -336,4 +341,25 @@ export async function headObject(
     if (isMissingObject(error)) return null;
     throw error;
   }
+}
+
+/**
+ * The first delete this API has ever issued against the bucket, and the sweeper's
+ * entire object-store surface (uploads.sweeper.ts).
+ *
+ * DeleteObject is IDEMPOTENT by S3 semantics: deleting a key that holds no object
+ * succeeds with 204, exactly like `headObject` answering null above. That is why there
+ * is no existence check and no missing-object branch here — a PENDING row whose PUT
+ * never happened (the common abandoned case) and one whose object was already deleted
+ * by a previous sweep that died before it could delete the row are both swept in one
+ * call. The ordering in the caller is what matters: OBJECT first, ROW second, so a
+ * crash between the two leaves a row pointing at nothing rather than bytes pointing at
+ * nothing — a retryable bookkeeping artefact, not an unreclaimable leak.
+ *
+ * Not exposed to any request path on purpose: every attachment point is `@unique` and
+ * `onDelete`-guarded (Resource restricts, User.avatarUpload SetNull), so rows that mean
+ * something are unreachable from here.
+ */
+export async function deleteObject(key: string): Promise<void> {
+  await getClient().send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key }));
 }

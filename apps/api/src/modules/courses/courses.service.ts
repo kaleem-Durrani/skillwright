@@ -15,6 +15,7 @@ import { notFound, validationFailed } from '../../lib/errors.js';
 // The Upload row belongs to the uploads module, and so does the question of whether
 // this actor may claim it. Before this, `syllabusUploadId` was written unchecked.
 import { assertUploadClaimable } from '../uploads/uploads.service.js';
+import { presignGet, safeFilename } from '../../lib/storage.js';
 // The raw-SQL vocabulary for ranked search — match predicate, rank expression and the
 // two-query page-plus-total shape. Shared with resources and announcements so the three
 // handlers cannot drift apart over escaping or weighting (search.sql.ts header).
@@ -29,15 +30,19 @@ import type {
 } from './courses.schema.js';
 
 /**
- * The detail include is the summary include (lib/dto.ts) plus the one aggregate the
- * detail DTO adds. Spread rather than restated so the query and `toCourseSummary` can
- * never disagree about which relations are loaded.
+ * The detail include is the summary include (lib/dto.ts) plus the aggregates the detail
+ * DTO adds. Spread rather than restated so the query and `toCourseSummary` can never
+ * disagree about which relations are loaded.
+ *
+ * `syllabusUpload` carries exactly what a signed download needs — key, original name,
+ * status — and no bytes ever flow through this process.
  *
  * Soft delete is not enforced by the ORM, so the nested count filters `deletedAt`
  * by hand exactly like every other read in this file.
  */
 const COURSE_DETAIL_INCLUDE = {
   ...COURSE_SUMMARY_INCLUDE,
+  syllabusUpload: { select: { key: true, originalName: true, status: true } },
   _count: { select: { resources: { where: { deletedAt: null } } } },
 } as const;
 
@@ -65,20 +70,38 @@ const SUBJECT_SELECT = {
 /**
  * `viewerEnrollmentStatus` is a parameter rather than a column because it is the
  * REQUESTING actor's own state (course.ts:51-54), which no include can express.
+ *
+ * Async only because presigning is: the syllabus download mirrors
+ * `buildDownloadUrl` (resources.service.ts) — same signed GET, same 5-minute TTL,
+ * same `attachment` disposition under `originalName`. A PENDING or missing upload
+ * answers null rather than a URL: signing unverified bytes is exactly what the
+ * resources download endpoint refuses with 409, and a detail DTO has no error channel,
+ * so "no verified object" degrades to "no link" instead of a button that 403s out of
+ * the bucket. Unreachable for rows attached through the API since
+ * `assertUploadClaimable` began refusing PENDING claims; kept for legacy rows.
  */
-export function toCourseDetail(
+export async function toCourseDetail(
   course: CourseWithDetail,
   viewerEnrollmentStatus: CourseDetail['viewerEnrollmentStatus'],
-): CourseDetail {
+): Promise<CourseDetail> {
+  const { syllabusUpload } = course;
+  const syllabusUrl =
+    syllabusUpload !== null && syllabusUpload.status === 'COMMITTED'
+      ? (
+          await presignGet({
+            key: syllabusUpload.key,
+            filename: safeFilename(syllabusUpload.originalName),
+          })
+        ).url
+      : null;
+
   return {
     ...toCourseSummary(course),
     description: course.description,
     startDate: course.startDate?.toISOString() ?? null,
     endDate: course.endDate?.toISOString() ?? null,
     syllabusUploadId: course.syllabusUploadId,
-    // TODO(uploads): presign this when the uploads module lands. A fabricated URL
-    // would render as a download button pointing at nothing.
-    syllabusUrl: null,
+    syllabusUrl,
     resourceCount: course._count.resources,
     viewerEnrollmentStatus,
     createdAt: course.createdAt.toISOString(),

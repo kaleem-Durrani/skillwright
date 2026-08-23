@@ -83,8 +83,11 @@ export function toUserDetail(user: UserWithProfiles): UserDetail {
     status: user.status,
     phoneNumber: user.phoneNumber,
     bio: user.bio,
-    // TODO(uploads): serve a presigned URL when avatarUploadId is set. Until the
-    // uploads module lands, the derived avatar is correct rather than broken.
+    // The derived fallback. The uploaded-avatar preference resolves where the row is
+    // loaded WITH its upload relation — users.service.ts `withAvatarUrl`, for
+    // GET /users/me, GET /users/:id and the admin list. This mapper's own callers
+    // (register, login, the session responses) load profiles only, so a face uploaded
+    // moments earlier still renders as the derived one until the SPA refetches /users/me.
     avatarUrl: avatarUrlFor(user.id),
     mfaEnabled: user.totpEnabledAt !== null,
     lastLoginAt: user.lastLoginAt?.toISOString() ?? null,
