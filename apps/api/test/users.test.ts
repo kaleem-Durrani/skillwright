@@ -1,5 +1,9 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import type { FastifyInstance } from 'fastify';
+// app.ts:51-52: "Anything that holds an instance built here — main.ts, the integration
+// tests — should name this type. Plain FastifyInstance is a type error, not a
+// widening." It was a type error the whole time; nothing typechecked test/ until
+// tsconfig.test.json existed.
+import type { AppInstance } from '../src/app.js';
 import { hashPassword } from '../src/lib/password.js';
 import {
   buildApp,
@@ -17,7 +21,7 @@ const PASSWORD = 'correct-horse-battery-staple';
 /** Shaped like a cuid so `idSchema` (common.ts:20-22) accepts it and the route reaches the service. */
 const ABSENT_ID = 'ckzzzzzzzzzzzzzzzzzzzzzzz';
 
-let app: FastifyInstance;
+let app: AppInstance;
 let departmentId: string;
 /** Hashed once: argon2 is deliberately expensive, and every account here shares it. */
 let passwordHash: string;

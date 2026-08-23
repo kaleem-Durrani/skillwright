@@ -1,0 +1,26 @@
+{
+  // The integration suite, typechecked.
+  //
+  // `tsconfig.json` sets `rootDir: "src"`, which is right for the application and means
+  // `test/` cannot be added to its `include` — TypeScript answers TS6059 for every file
+  // once, and the answer is about the directory layout rather than the code. So the
+  // suite went unchecked: twelve files and roughly five thousand lines that `pnpm
+  // typecheck` and CI never looked at, in a repository whose tests carry more assertions
+  // about the policy layer than the policy layer carries lines.
+  //
+  // Discovered on 2026-08-23, when an agent typechecking its own test file by hand
+  // noticed the workspace command had never done so. There were no errors hiding in
+  // there — which is the point: this makes it stay that way, under exactly the same
+  // strict flags (`noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`,
+  // `verbatimModuleSyntax`) as `src`.
+  //
+  // `rootDir: "."` rather than dropping it, so the only difference from the application
+  // config is the one that has to change.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "types": ["node", "vitest/globals"]
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

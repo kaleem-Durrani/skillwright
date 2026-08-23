@@ -1,5 +1,9 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { FastifyInstance } from 'fastify';
+// app.ts:51-52: "Anything that holds an instance built here — main.ts, the integration
+// tests — should name this type. Plain FastifyInstance is a type error, not a
+// widening." It was a type error the whole time; nothing typechecked test/ until
+// tsconfig.test.json existed.
+import type { AppInstance } from '../src/app.js';
 import * as OTPAuth from 'otpauth';
 import { BRAND } from '@skillwright/shared';
 import {
@@ -17,7 +21,7 @@ import {
 const PASSWORD = 'correct-horse-battery-staple';
 const NEW_PASSWORD = 'a-completely-different-passphrase';
 
-let app: FastifyInstance;
+let app: AppInstance;
 let departmentId: string;
 
 beforeAll(async () => {
