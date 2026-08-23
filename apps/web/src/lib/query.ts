@@ -133,7 +133,17 @@ export const qk = {
   courseResources: (courseId: string) => ['courses', courseId, 'resources'] as QueryKey,
   courseEnrollments: (courseId: string) => ['courses', courseId, 'enrollments'] as QueryKey,
   enrollments: (params: Record<string, unknown> = {}) => ['enrollments', params] as QueryKey,
+  // Single-row key, distinct from `resources()` for the same reason `course` sits
+  // beside `courses`: `routes/_app/resources.$resourceId.tsx`'s loader and any
+  // detail screen need to invalidate or read ONE row without knowing what filters
+  // the list was under.
+  resource: (resourceId: string) => ['resources', resourceId] as QueryKey,
   announcements: (params: Record<string, unknown> = {}) => ['announcements', params] as QueryKey,
+  // Single-row key, distinct from the list above for the same reason `course` sits
+  // beside `courses`: `routes/_app/announcements.$announcementId.tsx`'s loader and
+  // the detail screen need to invalidate or read ONE row without knowing what
+  // filters the list was under.
+  announcement: (announcementId: string) => ['announcements', announcementId] as QueryKey,
   conversations: ['conversations'] as QueryKey,
   messages: (conversationId: string) => ['conversations', conversationId, 'messages'] as QueryKey,
   users: (params: Record<string, unknown> = {}) => ['users', params] as QueryKey,

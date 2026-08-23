@@ -139,6 +139,26 @@ export type {
   UploadPurpose,
 } from '@skillwright/shared/schema';
 
+/**
+ * `CommentDto` is the ONE shape both resources and announcements render — the
+ * table it comes from has a CHECK enforcing exactly one of `resourceId` /
+ * `announcementId` (schema.prisma comment model), and `comment.ts` mirrors that
+ * with one schema rather than two near-identical ones.
+ *
+ * `canEdit` / `canDelete` are computed SERVER-SIDE, against the same policy rows
+ * `@skillwright/shared/policy` exposes as `comment:update` / `comment:delete`
+ * (`isAuthor`, or `or(isAuthor, ownsCourse)` for a teacher). A screen renders
+ * these flags rather than re-deriving them, because re-deriving `ownsCourse`
+ * client-side would need the comment's COURSE — which this DTO does not carry at
+ * all, only `resourceId` / `announcementId`.
+ *
+ * `CreateCommentInput` / `UpdateCommentInput` are wire BODIES, not DTOs a screen
+ * renders, so — per the note at the top of this file — they are imported
+ * straight from `@skillwright/shared/schema` at the point of use, not re-exported
+ * here.
+ */
+export type { CommentDto } from '@skillwright/shared/schema';
+
 // ---------------------------------------------------------------------------
 // Conversations and messages
 // ---------------------------------------------------------------------------

@@ -10,6 +10,9 @@ import { Route as appLayout } from './_app.js';
 import { Route as dashboardRoute } from './_app/dashboard.js';
 import { Route as coursesRoute } from './_app/courses.js';
 import { Route as courseDetailRoute } from './_app/courses.$courseId.js';
+import { Route as resourceDetailRoute } from './_app/resources.$resourceId.js';
+import { Route as announcementsRoute } from './_app/announcements.js';
+import { Route as announcementDetailRoute } from './_app/announcements.$announcementId.js';
 import { Route as messagesRoute } from './_app/messages.js';
 import { Route as settingsRoute } from './_app/settings.js';
 import { Route as adminLayout } from './_app/admin.js';
@@ -41,6 +44,9 @@ export const routeTree = rootRoute.addChildren([
     dashboardRoute,
     coursesRoute,
     courseDetailRoute,
+    resourceDetailRoute,
+    announcementsRoute,
+    announcementDetailRoute,
     messagesRoute,
     settingsRoute,
     adminLayout.addChildren([adminIndexRoute, adminUsersRoute]),
