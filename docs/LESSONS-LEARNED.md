@@ -501,3 +501,62 @@ This is [15] one step along. There the subject was **missing**; here it is **pre
 **Fix.** The list stopped asking. `resource:read` is decided per row, and a list has no single subject — so the server scopes the rows (`visibilityWhere` mirrors the same policy rows as SQL) and the client renders what it is given. The route's own gate is `course:read`, which being on the page already satisfies.
 
 **Rule.** Before passing a subject to `can()`, check that the action's rules read fields that this kind of subject actually has. If the action is decided per row and you are gating a list, that is a category error and the answer is a WHERE clause, not a better subject. Ask what the rule reads, then ask whether the thing in your hand carries it.
+
+---
+
+## 32. A presigned URL constrains exactly what the signature names, and nothing else
+
+**Symptom.** `presignPut` built its command with `ContentType` set and the limits from `UPLOAD_LIMITS` checked by zod in front of it. Both looked enforced. Measured against the MinIO in `docker-compose.yml`:
+
+| signed headers                     | request                                              | store answers                              |
+| ---------------------------------- | ---------------------------------------------------- | ------------------------------------------ |
+| `content-type;host`                | PUT declaring `application/pdf`, sending `image/png` | **200, stored**                            |
+| `content-type;host`                | PUT with no `Content-Type` at all                    | **200**, recorded as `binary/octet-stream` |
+| `content-type;host`                | 500 bytes against a signature for 23                 | **200, stored**                            |
+| `content-length;content-type;host` | 500 bytes against a signature for 23                 | **403 SignatureDoesNotMatch**              |
+
+**Root cause.** SigV4 **query** signing puts only `host` in `X-Amz-SignedHeaders` by default. Anything else set on the command is a suggestion to the SDK, not a term of the signature — so the store never checks it. `signableHeaders` is what promotes a header into the signed set.
+
+The declared size was worse than the declared type, because nothing caught it later either: `commit` refuses the ROW, but by then the bytes are in a bucket that has no sweeper. An authenticated caller could declare a 1 KB avatar and park half a gigabyte at that key.
+
+**Fix.** `signableHeaders: new Set(['content-type', 'content-length'])`, and `ContentLength` on the command. `content-length` is deliberately not returned to the client: it is a forbidden header for `fetch` and XHR, so the runtime computes it from the body — which is precisely the value the signature is checked against, and a body streamed with chunked encoding sends none and is refused.
+
+**Rule.** For any presigned upload, write down every constraint you believe is enforced, then prove each one against the real store with a request that violates it. A constraint that is not in `SignedHeaders` (or in a POST policy's conditions) is documentation. And note what the fix does **not** buy: the bytes are still never sniffed, so `contentType` remains the uploader's label — which is why every download is served `Content-Disposition: attachment` rather than rendered inline.
+
+---
+
+## 33. A child object's own visibility flag can outrank its parent's
+
+**Symptom.** An anonymous caller was refused a course with `401` and, in the same breath, served that course's resource with `200` — title, description and all — through `GET /resources`.
+
+**Root cause.** `course:read` is `isPublished` for an anonymous visitor, but `resource:read` was `isPublic`: a flag on the resource, consulted without reference to the course it hangs off. And `resource:create` is `ownsCourse` with no publication term, so a teacher can file material into a course nobody has published. Draft course, public resource, world-readable.
+
+Nothing about this was visible until the resources module existed. The rule had been written that way for months; there was simply no endpoint that could reach it, so a latent design gap became a live leak the moment the list was built.
+
+**Fix.** The public branch of `resource:read` and `resource:download` is now `and(isPublic, isPublished)`, with the course's `publishedAt` carried on the resource subject and mirrored in the SQL. The other branches are deliberately unchanged: an approved student keeps access to material in a course that was later unpublished, and the owning teacher is exactly who is meant to see a draft.
+
+**Rule.** When a child row carries its own visibility flag, ask whether reading the child directly bypasses the parent's gate. The test is concrete: find the endpoint that answers about the parent, find the one that answers about the child, and make the same anonymous request to both. If they disagree, the narrower one is the intent and the wider one is a leak.
+
+---
+
+## 34. A `file:line` citation is only true on the day it is written
+
+**Symptom.** Two rounds of review turned up sixteen citations pointing at the wrong lines. Several were wrong by exactly five — the width of a comment the same change had added to the cited file. One reviewer's proposed correction was itself wrong.
+
+**Root cause.** This repository navigates by `file:line`, which is a real strength and the reason its comments are worth reading. But a line number is a snapshot: editing the cited file breaks every citation below the edit, in files the editor never opened, and nothing checks it. The failure is silent and the citation still _looks_ authoritative — which makes a stale one worse than none, because it sends the reader somewhere confidently wrong.
+
+**Fix.** Correct them, and verify each one by opening both ends before changing it — including the ones a reviewer hands you.
+
+**Rule.** For a citation inside the same file, a line number is fine. Across files, name the **symbol** as well — `courses.service.ts`'s `viewerEnrollmentStatus` survives a reformat; `courses.service.ts:157` does not. When you edit a file that others cite, `grep -rn "<filename>:" ` for references to it. And re-verify after running a formatter: `prettier --write` moved anchors that had been correct ten minutes earlier.
+
+---
+
+## 35. A bare directory name in `.gitignore` matches at every depth
+
+**Symptom.** A new API module was written, compiled, typechecked, passed its tests — and was invisible to `git status`. It would have been committed as an `import` of a file that does not exist in the repository, and the app would not boot on a fresh clone.
+
+**Root cause.** `.gitignore` held `uploads/`, intended for a runtime directory at the repository root. A pattern with no leading slash matches at **any** depth, so it also swallowed `apps/api/src/modules/uploads/`. Nothing warns: `git add` on an ignored path is silent unless you pass `-f`, and every other tool in the stack was perfectly happy.
+
+**Fix.** `/uploads/` — anchored to the root, which is what it always meant.
+
+**Rule.** Anchor any `.gitignore` entry that names a directory you mean at one specific place: `/dist/`, `/uploads/`, `/tmp/`. And after creating a new directory of source files, look at `git status` before believing the work exists — `git check-ignore -v <path>` names the offending pattern and line when it does not.
