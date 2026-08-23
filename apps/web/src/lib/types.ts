@@ -131,6 +131,12 @@ export type {
   DownloadUrlResponse,
   ResourceDto,
   ResourceTypeValue,
+  // What an upload is FOR — 'AVATAR' | 'RESOURCE' | 'SYLLABUS' (upload.ts:11). It
+  // selects the key prefix, the accepted MIME set and the size ceiling, so it is the
+  // one argument `lib/uploads.ts` takes alongside the file itself. The type is
+  // re-exported here; `UPLOAD_LIMITS` is a VALUE and is imported from
+  // `@skillwright/shared/schema` at the point of use, per the note at the top.
+  UploadPurpose,
 } from '@skillwright/shared/schema';
 
 // ---------------------------------------------------------------------------
