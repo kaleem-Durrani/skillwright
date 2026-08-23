@@ -1,6 +1,11 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { paginated } from '@skillwright/shared';
+// `downloadUrlResponseSchema` is declared in schema/upload.ts (upload.ts:107-113) and is
+// shared with the uploads module, so it is imported straight from '@skillwright/shared'
+// rather than through resources.schema.ts — that barrel names this module's OWN wire
+// shapes, and a resource is not the only thing that will ever be handed back as a signed
+// URL.
+import { downloadUrlResponseSchema, paginated } from '@skillwright/shared';
 import { authorize, requireActor } from '../../plugins/auth.plugin.js';
 import {
   createResourceSchema,
@@ -90,6 +95,36 @@ const resourcesRoutes: FastifyPluginAsync = async (fastify) => {
     async (request) => resourceService.getById(request.params.id),
   );
 
+  /*
+   * Deliberately NOT `resource:read`, and the difference is the whole point of the
+   * endpoint: `resource:download` denies anonymous outright (policy.ts:217-226) where
+   * `resource:read` gives them `isPublic` (policy.ts:192). A logged-out visitor may SEE
+   * that a public resource exists and may not pull the bytes out of the private bucket.
+   * That is the anti-scraping line, and it is why a logged-out caller is answered 401
+   * here rather than 403 — `authorize` reports the missing session first
+   * (auth.plugin.ts:121).
+   *
+   * The same loader as `GET /:id`, `request.actor` included for the same reason: without
+   * the caller's own enrolment status `enrolledApproved` can never fire and an approved
+   * student is 403'd off a private file in their own course.
+   *
+   * The signed URL comes back in a BODY rather than as a 302 to MinIO. A redirect is
+   * opaque to the SPA's fetch layer, and `downloadUrlResponseSchema` also carries
+   * `expiresAt` and `filename`, which a `Location` header cannot — the client names the
+   * file it is offering and knows when the URL has gone stale, instead of retrying one
+   * the object store has already stopped honouring.
+   */
+  app.get(
+    '/:id/download',
+    {
+      schema: { params: idParamSchema, response: { 200: downloadUrlResponseSchema } },
+      preHandler: authorize('resource:download', (request) =>
+        resourceService.loadResourceSubject(idOf(request), request.actor),
+      ),
+    },
+    async (request) => resourceService.buildDownloadUrl(request.params.id),
+  );
+
   app.patch(
     '/:id',
     {
@@ -124,37 +159,6 @@ const resourcesRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.status(204).send();
     },
   );
-
-  /*
-   * NOT BUILT, deliberately:
-   *
-   *   GET /resources/:id/download — `resource:download` exists in the Action union
-   *                            (policy.ts:44) with its own row (policy.ts:217-226), and
-   *                            it is strictly narrower than `resource:read`: anonymous is
-   *                            `deny`, so a logged-out visitor may SEE that a public
-   *                            resource exists but may not pull the bytes. The gate is
-   *                            therefore already specified — `authorize('resource:download',
-   *                            loadResourceSubject)` — and the SPA already computes it
-   *                            client-side (CourseDetail.tsx:77-95).
-   *
-   *                            What is missing is the object store, not the policy. The
-   *                            endpoint has to presign a time-limited GET against MinIO
-   *                            from `Upload.key`/`Upload.bucket` (schema.prisma:396-397),
-   *                            which means a bucket client, an expiry policy and a
-   *                            decision about whether the URL is redirected to or returned
-   *                            in a body — none of which exists anywhere in the API yet
-   *                            (`toUserSummary` still carries a TODO(uploads) for the same
-   *                            reason, lib/dto.ts:73-74).
-   *
-   *                            It also collides with a live schema conflict:
-   *                            `Resource.uploadId` is `onDelete: SetNull` while migration
-   *                            0002 adds `CHECK (num_nonnulls("uploadId","externalUrl") = 1)`,
-   *                            so deleting an Upload nulls the column, the CHECK fails and
-   *                            the DELETE aborts — NEXT.md:42 records it, and it is a
-   *                            migration to resolve, not a route. Shipping a download URL
-   *                            first would put real traffic on top of an unresolved
-   *                            constraint. The uploads module owns both.
-   */
 };
 
 export default resourcesRoutes;

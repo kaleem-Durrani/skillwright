@@ -27,6 +27,7 @@ import departmentsRoutes from './modules/departments/departments.routes.js';
 import coursesRoutes from './modules/courses/courses.routes.js';
 import enrollmentsRoutes from './modules/enrollments/enrollments.routes.js';
 import resourcesRoutes from './modules/resources/resources.routes.js';
+import uploadsRoutes from './modules/uploads/uploads.routes.js';
 import usersRoutes from './modules/users/users.routes.js';
 import conversationsRoutes from './modules/conversations/conversations.routes.js';
 import notificationsRoutes from './modules/notifications/notifications.routes.js';
@@ -114,6 +115,7 @@ export async function buildApp(): Promise<AppInstance> {
   await app.register(coursesRoutes, { prefix: `${API_PREFIX}/courses` });
   await app.register(enrollmentsRoutes, { prefix: `${API_PREFIX}/enrollments` });
   await app.register(resourcesRoutes, { prefix: `${API_PREFIX}/resources` });
+  await app.register(uploadsRoutes, { prefix: `${API_PREFIX}/uploads` });
   await app.register(usersRoutes, { prefix: `${API_PREFIX}/users` });
   await app.register(conversationsRoutes, { prefix: `${API_PREFIX}/conversations` });
   await app.register(notificationsRoutes, { prefix: `${API_PREFIX}/notifications` });
