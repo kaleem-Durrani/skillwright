@@ -148,5 +148,10 @@ export const qk = {
   messages: (conversationId: string) => ['conversations', conversationId, 'messages'] as QueryKey,
   users: (params: Record<string, unknown> = {}) => ['users', params] as QueryKey,
   departments: ['departments'] as QueryKey,
+  // Single-row key under the same head as the list above, for the same reason
+  // `course` sits beside `courses`: `routes/_app/departments.$id.tsx` and the
+  // admin dialogs need to read or sweep ONE department without knowing what the
+  // list was filtered by. A blanket `['departments']` invalidation still reaches it.
+  department: (departmentId: string) => ['departments', departmentId] as QueryKey,
   auditEvents: (params: Record<string, unknown> = {}) => ['audit', params] as QueryKey,
 } as const;

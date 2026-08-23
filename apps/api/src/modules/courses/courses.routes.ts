@@ -107,7 +107,11 @@ const coursesRoutes: FastifyPluginAsync = async (fastify) => {
     {
       schema: {
         params: idParamSchema,
-        body: publishCourseSchema,
+        // `.nullish()`, not `.optional()`: Fastify hands a bodyless POST to the
+        // validator as `null` (the same trap the enrollment route below documents),
+        // which answered 422 before the policy gate ever ran. The verb itself names
+        // the action, so an absent body means "publish".
+        body: publishCourseSchema.nullish(),
         response: { 200: courseDetailSchema },
       },
       preHandler: authorize('course:publish', (request) =>
@@ -115,7 +119,11 @@ const coursesRoutes: FastifyPluginAsync = async (fastify) => {
       ),
     },
     async (request) =>
-      courseService.publish(requireActor(request), request.params.id, request.body),
+      courseService.publish(
+        requireActor(request),
+        request.params.id,
+        request.body ?? { published: true },
+      ),
   );
 
   app.delete(

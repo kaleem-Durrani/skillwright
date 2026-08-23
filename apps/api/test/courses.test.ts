@@ -545,6 +545,26 @@ describe('POST /courses/:id/publish', () => {
     expect(withdrawn.json().publishedAt).toBeNull();
   });
 
+  /**
+   * The bodyless-POST trap, fourth-and-one: Fastify hands a POST with no body to the
+   * validator as `null`, so a `.optional()` binding (and any non-nullish one) answers
+   * 422 before the policy preHandler runs. This route is the last of the five to carry
+   * the fix; the test sends NO body deliberately — `{}` would pass either binding.
+   */
+  it('publishes a POST with no body at all', async () => {
+    const owner = await signedIn('bodyless@example.com', 'TEACHER');
+    const course = await createCourse(owner);
+
+    const response = await send('POST', `/${course.id}/publish`, undefined, owner);
+    expect(response.statusCode).toBe(200);
+
+    // The verb names the action, so an absent body publishes rather than unpublishes.
+    expect(response.json().publishedAt).toEqual(expect.any(String));
+
+    const row = await prisma.course.findUniqueOrThrow({ where: { id: course.id } });
+    expect(row.publishedAt).not.toBeNull();
+  });
+
   it('refuses a teacher who does not own the course', async () => {
     const owner = await signedIn('owner6@example.com', 'TEACHER');
     const intruder = await signedIn('intruder2@example.com', 'TEACHER');

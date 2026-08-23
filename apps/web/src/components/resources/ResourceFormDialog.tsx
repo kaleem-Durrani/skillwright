@@ -36,6 +36,7 @@ import { ApiError } from '@/lib/problem';
 import { qk } from '@/lib/query';
 import type { ResourceDto, ResourceTypeValue } from '@/lib/types';
 import { describeFileProblem, isUploadFailure, uploadFile, type UploadedFile } from '@/lib/uploads';
+import { acceptedTypesSentence, MIME_LABEL } from '@/components/uploads/fileCopy';
 import { Button } from '@/components/ui/Button';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { Dialog, DialogContent } from '@/components/ui/Dialog';
@@ -51,45 +52,6 @@ import { toast } from '@/components/ui/Toast';
  * sentence under the picker in the same commit.
  */
 const RESOURCE_LIMITS = UPLOAD_LIMITS.RESOURCE;
-
-/**
- * Human names for the MIME types `UPLOAD_LIMITS.RESOURCE` accepts.
- *
- * Deliberately a `Record<string, string>` with a fallback rather than a closed map
- * over the accepted list: a MIME type added to the shared schema and not added here
- * then shows up as its raw string — visible and slightly ugly, which is the right
- * failure. A closed map would make widening the server's accepted set a compile error
- * in this file, and an object literal used as a whitelist is not a whitelist anyway
- * (LESSONS-LEARNED #29).
- */
-const MIME_LABEL: Readonly<Record<string, string>> = {
-  'application/pdf': 'PDF',
-  'application/msword': 'Word',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'Word',
-  'application/vnd.ms-excel': 'Excel',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'Excel',
-  'application/vnd.ms-powerpoint': 'PowerPoint',
-  'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'PowerPoint',
-  'text/plain': 'plain text',
-  'text/markdown': 'Markdown',
-  'image/jpeg': 'JPEG',
-  'image/png': 'PNG',
-  'image/webp': 'WebP',
-  'image/avif': 'AVIF',
-  'video/mp4': 'MP4',
-  'video/webm': 'WebM',
-  'video/quicktime': 'QuickTime',
-};
-
-/** "PDF, Word, Excel, …" — one label per family, in the order the schema lists them. */
-function acceptedTypesSentence(mimeTypes: readonly string[]): string {
-  const labels: string[] = [];
-  for (const mime of mimeTypes) {
-    const label = MIME_LABEL[mime] ?? mime;
-    if (!labels.includes(label)) labels.push(label);
-  }
-  return labels.join(', ');
-}
 
 const ACCEPTED_TYPES = acceptedTypesSentence(RESOURCE_LIMITS.mimeTypes);
 

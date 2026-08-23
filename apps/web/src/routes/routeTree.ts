@@ -18,6 +18,9 @@ import { Route as settingsRoute } from './_app/settings.js';
 import { Route as adminLayout } from './_app/admin.js';
 import { Route as adminIndexRoute } from './_app/admin.index.js';
 import { Route as adminUsersRoute } from './_app/admin.users.js';
+import { Route as adminDepartmentsRoute } from './_app/admin.departments.js';
+import { Route as adminCoursesRoute } from './_app/admin.courses.js';
+import { Route as departmentDetailRoute } from './_app/departments.$id.js';
 import { Route as designRoute } from './_design.js';
 
 /**
@@ -49,7 +52,15 @@ export const routeTree = rootRoute.addChildren([
     announcementDetailRoute,
     messagesRoute,
     settingsRoute,
-    adminLayout.addChildren([adminIndexRoute, adminUsersRoute]),
+    // A department detail is reachable by any signed-in role, so it hangs off the
+    // app layout beside the course detail — not inside the admin-only subtree.
+    departmentDetailRoute,
+    adminLayout.addChildren([
+      adminIndexRoute,
+      adminUsersRoute,
+      adminDepartmentsRoute,
+      adminCoursesRoute,
+    ]),
   ]),
   designRoute,
 ]);

@@ -1,7 +1,8 @@
 import { Link } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
 import { motion } from 'motion/react';
-import { ArrowRight, BookOpen, FileText, MessagesSquare, UserRoundCheck } from 'lucide-react';
+import { ArrowRight, BookOpen, FileText, MessagesSquare, Plus, UserRoundCheck } from 'lucide-react';
 /*
  * The catalogue row and the page envelope, taken from the package that DEFINES them.
  *
@@ -35,11 +36,19 @@ import { StatusChip } from '@/components/ui/StatusChip';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { SkeletonCard, SkeletonStats } from '@/components/ui/Skeleton';
 import { WORKSPACE_LABEL } from '@/components/layout/nav';
+import { Gate } from '@/components/Gate';
+import { CourseFormDialog } from '@/components/courses/CourseFormDialog';
+import { CoursePublishButton } from '@/components/courses/CoursePublishButton';
+import { CourseRowActions } from '@/components/courses/CourseRowActions';
 
 export function DashboardPage() {
   const { user } = useSession();
   const policy = usePolicy();
   const { variants } = useMotionKit();
+
+  const [creating, setCreating] = useState(false);
+  /** The row being managed through the shared course form, if any. */
+  const [editing, setEditing] = useState<CourseListItem | null>(null);
 
   const stats = useQuery({
     queryKey: ['dashboard', 'stats'],
@@ -189,12 +198,30 @@ export function DashboardPage() {
           <h2 id="dashboard-courses" className="font-display text-lg font-semibold">
             Your courses
           </h2>
-          <Button asChild variant="ghost" size="sm">
-            <Link to="/courses" search={{ page: 1 }}>
-              See all
-              <ArrowRight aria-hidden="true" className="size-4" />
-            </Link>
-          </Button>
+          {/*
+            The teacher-side management entry point. `course:create` is
+            subject-independent (TEACHER allow, ADMIN allow), so a Gate without a
+            subject is correct here — and it reuses the ONE CourseFormDialog the
+            admin console uses rather than growing a second form.
+          */}
+          <div className="flex shrink-0 items-center gap-2">
+            <Gate action="course:create">
+              <Button
+                variant="ghost"
+                size="sm"
+                leadingIcon={<Plus aria-hidden="true" className="size-4" />}
+                onClick={() => setCreating(true)}
+              >
+                New course
+              </Button>
+            </Gate>
+            <Button asChild variant="ghost" size="sm">
+              <Link to="/courses" search={{ page: 1 }}>
+                See all
+                <ArrowRight aria-hidden="true" className="size-4" />
+              </Link>
+            </Button>
+          </div>
         </div>
 
         {courses.isPending ? (
@@ -213,11 +240,17 @@ export function DashboardPage() {
                 : 'Once your enrolment is approved, your courses show up here.'
             }
             action={
-              <Button asChild block className="sm:w-auto">
-                <Link to="/courses" search={{ page: 1 }}>
-                  Browse courses
-                </Link>
-              </Button>
+              policy.can('course:create') ? (
+                <Button block className="sm:w-auto" onClick={() => setCreating(true)}>
+                  New course
+                </Button>
+              ) : (
+                <Button asChild block className="sm:w-auto">
+                  <Link to="/courses" search={{ page: 1 }}>
+                    Browse courses
+                  </Link>
+                </Button>
+              )
             }
           />
         ) : (
@@ -262,12 +295,45 @@ export function DashboardPage() {
                     seatsRemaining={course.seatsRemaining}
                     isFull={course.isFull}
                   />
+                  {/*
+                    The manage affordances for the course's own teacher. The wrapper
+                    must be POSITIONED and late in DOM order to paint above the title
+                    link's full-card overlay (`after:absolute after:inset-0`) — two
+                    positioned siblings stack in document order, so these controls win.
+                  */}
+                  <div className="relative z-10 flex items-center justify-end gap-1 pt-1">
+                    <CoursePublishButton
+                      course={{
+                        id: course.id,
+                        publishedAt: course.publishedAt,
+                        teacherId: course.teacher.id,
+                      }}
+                    />
+                    <CourseRowActions
+                      course={{ id: course.id, name: course.name, teacherId: course.teacher.id }}
+                      onEdit={() => setEditing(course)}
+                    />
+                  </div>
                 </Card>
               </li>
             ))}
           </ul>
         )}
       </section>
+
+      <CourseFormDialog open={creating} onOpenChange={setCreating} />
+      {editing ? (
+        <CourseFormDialog
+          open
+          onOpenChange={(open) => !open && setEditing(null)}
+          course={{
+            id: editing.id,
+            name: editing.name,
+            code: editing.code,
+            slug: editing.slug,
+          }}
+        />
+      ) : null}
 
       {/* Same boolean as the query above, for the reasons argued there. */}
       {canReviewRequests ? (

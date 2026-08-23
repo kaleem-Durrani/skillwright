@@ -80,7 +80,8 @@ export function AdminOverviewPage() {
       label: 'Departments',
       icon: Building2,
       value: stats.data?.departments,
-      to: null,
+      to: '/admin/departments' as const,
+      search: { page: 1 } as const,
     },
     {
       key: 'audit',

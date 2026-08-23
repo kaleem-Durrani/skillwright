@@ -119,6 +119,29 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The rule tag a policy denial carries, as the API spells it inside `detail`.
+ *
+ * HOW A RULE TAG REACHES THE CLIENT: `forbidden()` (apps/api/src/lib/errors.ts:52-55)
+ * appends `(rule: provenance:DEMO)` to the problem's `detail`, and `ApiError` keeps
+ * that string verbatim — there is no structured field for it. The PRIMARY way this
+ * app answers "is delete disabled for me" is therefore client-side and structural:
+ * `usePolicy().check(action, subject).rule` runs the identical policy module in the
+ * browser. This helper is the DEFENSIVE second line, for the race where the cached
+ * actor says PASSWORD but the server — the authority — answers for a DEMO session.
+ * It maps that refusal to calm copy instead of an error-shaped dead end.
+ */
+const DEMO_RULE_TAG = '(rule: provenance:DEMO)';
+
+/** True when a 403 came back stamped as a demo-environment denial. */
+export function isDemoDenial(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    error.code === 'FORBIDDEN' &&
+    (error.problem.detail ?? '').includes(DEMO_RULE_TAG)
+  );
+}
+
 /** Build a synthetic Problem for failures that never reached the server. */
 export function transportProblem(detail: string): Problem {
   return {
