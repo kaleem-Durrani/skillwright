@@ -1,13 +1,24 @@
+import { useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { Building2, ScrollText, ShieldAlert, Users } from 'lucide-react';
+/*
+ * `Paginated<T>`, from the package that DEFINES the envelope: `GET /audit-events`
+ * validates its own response against `paginated(auditEventSchema)`
+ * (audit.routes.ts:38) before it sends it, the same argument Courses.tsx makes for
+ * importing this rather than hand-declaring it.
+ */
+import type { Paginated } from '@skillwright/shared/schema';
 import { api } from '@/lib/api';
+import { qk } from '@/lib/query';
 import { usePolicy } from '@/lib/policy';
 import { formatRelative } from '@/lib/format';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card, CardTitle } from '@/components/ui/Card';
+import { DataList } from '@/components/ui/DataList';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { SkeletonList, SkeletonStats } from '@/components/ui/Skeleton';
+import { Pagination } from '@/components/ui/Pagination';
+import { SkeletonStats } from '@/components/ui/Skeleton';
 
 interface AdminStats {
   users: number;
@@ -27,6 +38,7 @@ interface AuditEntry {
 
 export function AdminOverviewPage() {
   const policy = usePolicy();
+  const [auditPage, setAuditPage] = useState(1);
 
   const stats = useQuery({
     queryKey: ['admin', 'stats'],
@@ -34,9 +46,12 @@ export function AdminOverviewPage() {
   });
 
   const audit = useQuery({
-    queryKey: ['admin', 'audit', 'recent'],
-    queryFn: () => api.get<{ data: AuditEntry[] }>('/audit-events', { query: { limit: 8 } }),
+    queryKey: qk.auditEvents({ page: auditPage }),
+    queryFn: () =>
+      api.get<Paginated<AuditEntry>>('/audit-events', { query: { page: auditPage, limit: 20 } }),
     enabled: policy.can('audit:read'),
+    // Keeps the previous page on screen while the next one loads, same as Courses.tsx.
+    placeholderData: (previous) => previous,
   });
 
   // `/admin/users` declares `page` as a required search param, so every link into
@@ -122,36 +137,67 @@ export function AdminOverviewPage() {
             Recent activity
           </h2>
 
-          {audit.isPending ? (
-            <SkeletonList rows={5} />
-          ) : (audit.data?.data.length ?? 0) === 0 ? (
-            <EmptyState
-              variant="empty"
-              compact
-              title="Nothing recorded yet"
-              description="Every create, update, delete and sign-in lands here automatically."
+          <DataList
+            items={audit.data?.data ?? []}
+            loading={audit.isPending}
+            skeletonRows={5}
+            caption="Recent activity"
+            getKey={(entry) => entry.id}
+            columns={[
+              { id: 'actor', header: 'Actor', cell: (entry) => entry.actorName ?? 'system' },
+              { id: 'action', header: 'Action', cell: (entry) => entry.action },
+              {
+                id: 'entity',
+                header: 'Entity',
+                cell: (entry) => (
+                  <span className="font-mono text-2xs text-fg-tertiary">
+                    {entry.entityType} · {entry.entityId}
+                  </span>
+                ),
+                secondary: true,
+              },
+              {
+                id: 'time',
+                header: 'Time',
+                align: 'end',
+                cell: (entry) => formatRelative(entry.createdAt),
+              },
+            ]}
+            renderCard={(entry) => (
+              <Card className="flex flex-col gap-1">
+                <div className="flex items-baseline justify-between gap-3">
+                  <CardTitle className="text-sm">
+                    {entry.action} · {entry.entityType}
+                  </CardTitle>
+                  <span className="shrink-0 text-2xs text-fg-tertiary">
+                    {formatRelative(entry.createdAt)}
+                  </span>
+                </div>
+                <p className="truncate font-mono text-2xs text-fg-tertiary">
+                  {entry.actorName ?? 'system'} → {entry.entityId}
+                </p>
+              </Card>
+            )}
+            empty={
+              <EmptyState
+                variant="empty"
+                compact
+                title="Nothing recorded yet"
+                description="Every create, update, delete and sign-in lands here automatically."
+              />
+            }
+          />
+
+          {audit.data ? (
+            <Pagination
+              label="Recent activity pagination"
+              page={audit.data.meta.page}
+              totalPages={audit.data.meta.totalPages}
+              total={audit.data.meta.total}
+              limit={audit.data.meta.limit}
+              onPageChange={setAuditPage}
             />
-          ) : (
-            <ul className="flex flex-col gap-2">
-              {audit.data?.data.map((entry) => (
-                <li key={entry.id}>
-                  <Card className="flex flex-col gap-1">
-                    <div className="flex items-baseline justify-between gap-3">
-                      <CardTitle className="text-sm">
-                        {entry.action} · {entry.entityType}
-                      </CardTitle>
-                      <span className="shrink-0 text-2xs text-fg-tertiary">
-                        {formatRelative(entry.createdAt)}
-                      </span>
-                    </div>
-                    <p className="truncate font-mono text-2xs text-fg-tertiary">
-                      {entry.actorName ?? 'system'} → {entry.entityId}
-                    </p>
-                  </Card>
-                </li>
-              ))}
-            </ul>
-          )}
+          ) : null}
         </section>
       ) : null}
     </div>

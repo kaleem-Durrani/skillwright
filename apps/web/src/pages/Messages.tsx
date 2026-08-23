@@ -25,6 +25,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button, IconButton } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { Pagination } from '@/components/ui/Pagination';
 import { SkeletonList, SkeletonThread } from '@/components/ui/Skeleton';
 import { Textarea } from '@/components/ui/Textarea';
 import { toast } from '@/components/ui/Toast';
@@ -45,6 +46,11 @@ export function MessagesPage() {
   const navigate = useNavigate({ from: Route.fullPath });
   // Needed to answer "which of these participants is not me" — see `counterparts`.
   const { user } = useSession();
+  // Local, not a search param: `MessagesSearch` (routes/_app/messages.tsx) carries
+  // only `conversationId` — opening a thread must stay linkable on its own — and
+  // this page does not own that route file. A page flip is not a link anyone needs
+  // to share, so component state is the right home for it.
+  const [page, setPage] = useState(1);
 
   /*
    * No `enabled: policy.can('conversation:read')` here, deliberately — the client-side
@@ -67,8 +73,17 @@ export function MessagesPage() {
    * every role — a bare allow/deny, e.g. 'conversation:create' (policy.ts:405-410).
    */
   const conversations = useQuery({
-    queryKey: qk.conversations,
-    queryFn: () => api.get<Paginated<ConversationDto>>('/conversations'),
+    // `qk.conversations` (lib/query.ts) has no parameter slot for a page — it
+    // predates this list needing one. Extended here rather than there, since this
+    // page does not own that file; the `send` mutation's
+    // `invalidateQueries({ queryKey: qk.conversations })` below still reaches this
+    // key, because TanStack Query matches by PREFIX and `qk.conversations` is this
+    // key's first element.
+    queryKey: ['conversations', { page }],
+    queryFn: () =>
+      api.get<Paginated<ConversationDto>>('/conversations', { query: { page, limit: 20 } }),
+    // Keeps the previous page on screen while the next one loads, same as Courses.tsx.
+    placeholderData: (previous) => previous,
     refetchInterval: 30_000,
   });
 
@@ -167,6 +182,17 @@ export function MessagesPage() {
               })}
             </ul>
           )}
+
+          {conversations.data ? (
+            <Pagination
+              label="Conversations pagination"
+              page={conversations.data.meta.page}
+              totalPages={conversations.data.meta.totalPages}
+              total={conversations.data.meta.total}
+              limit={conversations.data.meta.limit}
+              onPageChange={setPage}
+            />
+          ) : null}
         </section>
 
         <section
@@ -239,28 +265,82 @@ function Thread({ conversationId, onBack }: { conversationId: string; onBack: ()
   });
 
   /**
-   * Oldest first, which is not how the page arrives.
+   * History fetched by "Load older messages", kept OUTSIDE the `messages` query's
+   * cache entry rather than merged into it. `send`'s `onSuccess` below invalidates
+   * `qk.messages(conversationId)` on every send, which refetches this query's own
+   * `queryFn` — latest 50, no cursor — and REPLACES whatever was cached. Merging
+   * older pages into that same cache entry would have them vanish the next time
+   * anyone in the thread sent a message.
+   *
+   * `null` (from `meta.nextCursor`, pagination.ts:82-83) means history is exhausted;
+   * `undefined` means "not learned yet" — distinct so the button does not flash
+   * before the first fetch resolves.
+   */
+  const [olderPages, setOlderPages] = useState<MessageDto[]>([]);
+  const [olderCursor, setOlderCursor] = useState<string | null | undefined>(undefined);
+
+  // `Thread` is not remounted when `conversationId` changes — there is no `key` on
+  // it in the parent — so switching threads must clear the PREVIOUS thread's history
+  // by hand, or the next one would open with someone else's older messages spliced in.
+  useEffect(() => {
+    setOlderPages([]);
+    setOlderCursor(undefined);
+  }, [conversationId]);
+
+  // Learns the cursor once, from the first window this conversation loads. Guarded
+  // so a later poll (`refetchInterval` above) or the send mutation's own cache write
+  // cannot stomp on progress `loadOlder` has already made.
+  useEffect(() => {
+    if (messages.data && olderCursor === undefined) {
+      setOlderCursor(messages.data.meta.nextCursor);
+    }
+  }, [messages.data, olderCursor]);
+
+  const loadOlder = useMutation({
+    mutationFn: () => {
+      // The trigger below only renders while `olderCursor` is a real string; this
+      // guard is what lets TypeScript narrow it past that point rather than a claim
+      // this code cannot prove.
+      if (!olderCursor) return Promise.reject(new Error('No older messages to load'));
+      return api.get<CursorPaginated<MessageDto>>(`/conversations/${conversationId}/messages`, {
+        query: { limit: 50, cursor: olderCursor },
+      });
+    },
+    onSuccess: (page) => {
+      setOlderPages((current) => [...current, ...page.data]);
+      setOlderCursor(page.meta.nextCursor);
+    },
+    onError: (error) => toast.fromError(error, 'Could not load older messages'),
+  });
+
+  /**
+   * Oldest first, which is not how either page arrives.
    *
    * Without `after`, the endpoint pages BACKWARDS through history — `orderBy: { seq:
-   * 'desc' }` (conversations.service.ts:494-505) — so the newest message is at index 0.
-   * Rendering the array as it comes puts the end of the conversation at the top of a pane
-   * that then scrolls to its bottom.
+   * 'desc' }` (conversations.service.ts:494-505) — so the newest message in each
+   * fetched window is at index 0. Rendering as fetched puts the end of the
+   * conversation at the top of a pane that then scrolls to its bottom.
    *
    * `seq` is a Postgres bigint delivered as a STRING (bigIntStringSchema, common.ts:51-53)
    * and is compared as a BigInt, never coerced to Number: past 2^53 two distinct messages
    * would round to the same value and the comparison would start tying.
    */
   const thread = useMemo(() => {
-    const rows = messages.data?.data ?? [];
+    const rows = [...olderPages, ...(messages.data?.data ?? [])];
     return [...rows].sort((a, b) => {
       if (a.seq === b.seq) return 0;
       return BigInt(a.seq) < BigInt(b.seq) ? -1 : 1;
     });
-  }, [messages.data]);
+  }, [messages.data, olderPages]);
 
+  // Keyed on the NEWEST message rather than the whole array, so loading older
+  // history — which prepends to `thread` without changing its last element — does
+  // not yank the view back down to the bottom right after the user asked to see
+  // the past.
+  const newestId = thread[thread.length - 1]?.id;
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: 'end' });
-  }, [thread]);
+  }, [newestId]);
 
   const send = useMutation({
     // `SendMessageInput` is the server's own body type (message.ts:31-38), so a missing or
@@ -326,37 +406,50 @@ function Thread({ conversationId, onBack }: { conversationId: string; onBack: ()
             description="Say something to get this started."
           />
         ) : (
-          thread.map((message) => {
-            // `messageSchema` has no `senderId` and no `senderName`; it nests the person
-            // as `sender: UserSummary` (message.ts:14). Reading the flat names left `mine`
-            // false for every row, so the whole thread rendered as somebody else's.
-            const mine = message.sender.id === user?.id;
-            return (
-              <div
-                key={message.id}
-                className={cn('flex flex-col gap-0.5', mine ? 'items-end' : 'items-start')}
+          <>
+            {olderCursor ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                loading={loadOlder.isPending}
+                onClick={() => loadOlder.mutate()}
+                className="mx-auto"
               >
+                Load older messages
+              </Button>
+            ) : null}
+            {thread.map((message) => {
+              // `messageSchema` has no `senderId` and no `senderName`; it nests the person
+              // as `sender: UserSummary` (message.ts:14). Reading the flat names left `mine`
+              // false for every row, so the whole thread rendered as somebody else's.
+              const mine = message.sender.id === user?.id;
+              return (
                 <div
-                  className={cn(
-                    'w-[min(85%,32rem)] rounded-xl px-3 py-2 text-sm',
-                    mine
-                      ? 'rounded-br-sm bg-brand text-fg-on-brand'
-                      : 'rounded-bl-sm bg-sunken text-fg',
-                  )}
+                  key={message.id}
+                  className={cn('flex flex-col gap-0.5', mine ? 'items-end' : 'items-start')}
                 >
-                  {!mine ? (
-                    <span className="mb-0.5 block text-2xs font-semibold text-fg-tertiary">
-                      {message.sender.name}
-                    </span>
-                  ) : null}
-                  <p className="break-words whitespace-pre-wrap">{message.content}</p>
+                  <div
+                    className={cn(
+                      'w-[min(85%,32rem)] rounded-xl px-3 py-2 text-sm',
+                      mine
+                        ? 'rounded-br-sm bg-brand text-fg-on-brand'
+                        : 'rounded-bl-sm bg-sunken text-fg',
+                    )}
+                  >
+                    {!mine ? (
+                      <span className="mb-0.5 block text-2xs font-semibold text-fg-tertiary">
+                        {message.sender.name}
+                      </span>
+                    ) : null}
+                    <p className="break-words whitespace-pre-wrap">{message.content}</p>
+                  </div>
+                  <span className="px-1 text-2xs text-fg-tertiary">
+                    {formatTime(message.createdAt)}
+                  </span>
                 </div>
-                <span className="px-1 text-2xs text-fg-tertiary">
-                  {formatTime(message.createdAt)}
-                </span>
-              </div>
-            );
-          })
+              );
+            })}
+          </>
         )}
         <div ref={endRef} />
       </div>

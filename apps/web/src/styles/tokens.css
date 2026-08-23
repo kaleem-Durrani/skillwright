@@ -206,6 +206,26 @@
      decision and produced 3.99:1 — the exact failure the direction was chosen to
      avoid. Dark ink on ember-500 is 5.67:1. */
   --text-on-brand: var(--color-iron-950);
+
+  /*
+   * The ink for a SOLID DANGER fill, which is not the ink for the brand fill.
+   *
+   * The danger button read `text-fg-on-brand`, and `--text-on-brand` is iron-950 —
+   * the dark ink the design direction chose for AMBER. On oxide red that is 3.91:1,
+   * which axe caught on the announcement detail and which applied to every
+   * destructive button in the app.
+   *
+   * The two themes need different answers, because the solid differs between them.
+   * Measured across the ramp rather than guessed (LESSONS-LEARNED #23):
+   *
+   *   fill        white ink   dark ink   vs its own page
+   *   oxide-500      3.58       5.06          5.06  (dark theme)
+   *   oxide-600      4.65       3.90          4.65  (light theme)
+   *
+   * So light gets white on oxide-600 and dark gets iron-950 on oxide-500, and all
+   * four constraints — ink on fill, and fill against its own page — clear.
+   */
+  --text-on-danger: #ffffff;
   --text-on-status: #ffffff;
 
   /* borders */
@@ -311,6 +331,8 @@
      decision and produced 3.99:1 — the exact failure the direction was chosen to
      avoid. Dark ink on ember-500 is 5.67:1. */
     --text-on-brand: var(--color-iron-950);
+    /* oxide-500 in this theme: white is 3.58, the dark ink is 5.06. */
+    --text-on-danger: var(--color-iron-950);
     --text-on-status: var(--color-iron-950);
 
     --border-subtle: rgb(255 255 255 / 0.09);
@@ -396,6 +418,7 @@
      decision and produced 3.99:1 — the exact failure the direction was chosen to
      avoid. Dark ink on ember-500 is 5.67:1. */
   --text-on-brand: var(--color-iron-950);
+  --text-on-danger: var(--color-iron-950);
   --text-on-status: var(--color-iron-950);
 
   --border-subtle: rgb(255 255 255 / 0.09);
@@ -564,6 +587,7 @@
   --color-fg-brand: var(--text-brand);
   --color-fg-link: var(--text-link);
   --color-fg-on-brand: var(--text-on-brand);
+  --color-fg-on-danger: var(--text-on-danger);
   --color-fg-on-status: var(--text-on-status);
 
   --color-line: var(--border-default);

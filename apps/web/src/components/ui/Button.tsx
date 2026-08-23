@@ -32,7 +32,9 @@ const buttonVariants = cva(
         primary: 'bg-brand text-fg-on-brand shadow-e1 hover:bg-brand-hover active:bg-brand-active',
         secondary: 'bg-surface text-fg border border-line hover:bg-hover active:bg-active',
         ghost: 'bg-transparent text-fg-secondary hover:bg-hover hover:text-fg active:bg-active',
-        danger: 'bg-danger text-fg-on-brand shadow-e1 hover:brightness-110 active:brightness-95',
+        // `text-fg-on-danger`, NOT `text-fg-on-brand`: the brand ink is the dark one
+        // chosen for amber, and on oxide red it measures 3.91:1. See the token's note.
+        danger: 'bg-danger text-fg-on-danger shadow-e1 hover:brightness-110 active:brightness-95',
         link: 'bg-transparent text-fg-link underline underline-offset-4 decoration-1 hover:decoration-2',
       },
       size: {
