@@ -7,9 +7,10 @@ import {
   type ReactElement,
   type RefObject,
 } from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, useFieldArray, type Path } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Plus } from 'lucide-react';
 import { z } from 'zod';
 /**
  * The schema VALUES (they run in this resolver and build the wire bodies) come
@@ -80,10 +81,36 @@ function toIso(value: string): string {
  * two meet.
  *
  * `code` and `slug` exist on the CREATE path only; on edit they are shown read-only
- * (`updateCourseSchema` accepts neither — packages/shared/src/schema/course.ts:120-135),
+ * (`updateCourseSchema` accepts neither — packages/shared/src/schema/course.ts),
  * but keeping them in ONE value type is what lets `reset` and `dirtyFields` behave
  * identically on both paths, the same argument ResourceFormDialog makes for its file.
+ *
+ * `offerings` is the Phase 9 intake list: a course is created WITH at least one run
+ * (`createCourseSchema` takes `.min(1)` — dates and seats have nowhere else to live).
+ * On EDIT the array is carried but not rendered: `updateCourseSchema` no longer
+ * accepts any of an intake's fields, and retuning a run is PATCH
+ * /courses/:id/offerings/:id through the course page's Intakes section.
  */
+const offeringRowShape = {
+  capacity: z
+    .string()
+    .trim()
+    .refine((value) => /^\d+$/.test(value) && Number(value) >= 1, {
+      message: 'Capacity must be a whole number of at least 1.',
+    }),
+  /**
+   * The second bound (Phase 7). Blank means UNBOUND — a lecture-only intake — which
+   * is a legitimate answer, not an omission: create omits the field. The schema's
+   * ceiling of 10 000 is the server's to refuse; this refine only does what its
+   * sibling `capacity` does.
+   */
+  workshopCapacity: z.string().trim().refine(isPlacesOrBlank, {
+    message: 'Workshop places must be a whole number of at least 1.',
+  }),
+  startDate: z.string(),
+  endDate: z.string(),
+};
+
 const formShape = z.object({
   code: z.string(),
   slug: z.string(),
@@ -102,26 +129,9 @@ const formShape = z.object({
       message: 'Enter a whole number of at least 1.',
     }),
   durationUnit: durationUnitSchema,
-  capacity: z
-    .string()
-    .trim()
-    .refine((value) => /^\d+$/.test(value) && Number(value) >= 1, {
-      message: 'Capacity must be a whole number of at least 1.',
-    }),
-  /**
-   * The second bound (Phase 7). Blank means UNBOUND — a lecture-only course — which
-   * is a legitimate answer, not an omission: create omits the field, update sends
-   * explicit `null` to clear it (`updateCourseSchema` is nullable, not just optional).
-   * The schema's ceiling of 10 000 is the server's to refuse; this refine only does
-   * what its sibling `capacity` does.
-   */
-  workshopCapacity: z.string().trim().refine(isPlacesOrBlank, {
-    message: 'Workshop places must be a whole number of at least 1.',
-  }),
+  offerings: z.array(z.object(offeringRowShape)),
   /** The ladder rung. `''` is "none" — never sent on create, `null` on a clearing PATCH. */
   prerequisiteCourseId: z.string(),
-  startDate: z.string(),
-  endDate: z.string(),
   syllabus: z.instanceof(File).nullable(),
 });
 
@@ -132,15 +142,29 @@ function isPlacesOrBlank(value: string): boolean {
 
 type CourseFormValues = z.infer<typeof formShape>;
 
-/** What react-hook-form reports as touched-and-changed, for this flat form. */
-type DirtyCourseFields = { readonly [K in keyof CourseFormValues]?: boolean };
+/** Per-row dirtiness for one intake row, as react-hook-form reports it. */
+type DirtyOfferingRow = {
+  readonly [P in keyof CourseFormValues['offerings'][number]]?: boolean;
+};
+
+/**
+ * What react-hook-form reports as touched-and-changed. The `offerings` entry mirrors
+ * RHF's per-row dirtiness (an array, one entry per row), which `toUpdate` never
+ * reads — intake fields are not on the template PATCH.
+ */
+type DirtyCourseFields = {
+  readonly [K in keyof CourseFormValues]?: K extends 'offerings'
+    ? readonly (DirtyOfferingRow | undefined)[]
+    : boolean;
+};
 
 /**
  * Create-only rules, applied by guarding rather than by building a second schema:
  * `code` must match the shared pattern, `slug` may be empty (the server derives it
- * from the name), and the end date must come after the start. Each rule APPENDS its
- * own issue — none of them may skip the ones after it, or a form could carry one
- * visible problem while hiding another on a field the user already filled.
+ * from the name), and each intake's end date must come after its start. Each rule
+ * APPENDS its own issue at a PER-ROW path — none of them may skip the ones after
+ * it, or a form could carry one visible problem while hiding another on a field the
+ * user already filled.
  */
 function buildFormSchema(isEditing: boolean) {
   return formShape.superRefine((values, ctx) => {
@@ -174,18 +198,28 @@ function buildFormSchema(isEditing: boolean) {
           });
         }
       }
+
+      if (values.offerings.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['offerings'],
+          message: 'Add at least one intake — dates and seats live on it.',
+        });
+      }
     }
 
-    if (
-      values.startDate !== '' &&
-      values.endDate !== '' &&
-      new Date(values.endDate).getTime() <= new Date(values.startDate).getTime()
-    ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['endDate'],
-        message: 'The end date must come after the start date.',
-      });
+    for (const [index, row] of values.offerings.entries()) {
+      if (
+        row.startDate !== '' &&
+        row.endDate !== '' &&
+        new Date(row.endDate).getTime() <= new Date(row.startDate).getTime()
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['offerings', index, 'endDate'],
+          message: 'The end date must come after the start date.',
+        });
+      }
     }
 
     if (values.syllabus !== null) {
@@ -202,6 +236,8 @@ function buildFormSchema(isEditing: boolean) {
 /**
  * Server field paths mapped onto the control that owns them. Dot-joined paths
  * include `(root)`-style issues that name no control; those belong to the toast.
+ * Intake paths (`offerings.0.capacity`) are NOT here: they already ARE react-hook-
+ * form paths, and `onError` sets them verbatim.
  */
 const FIELD_FOR_PATH: Readonly<Record<string, keyof CourseFormValues>> = {
   code: 'code',
@@ -210,11 +246,7 @@ const FIELD_FOR_PATH: Readonly<Record<string, keyof CourseFormValues>> = {
   description: 'description',
   departmentId: 'departmentId',
   teacherId: 'teacherId',
-  capacity: 'capacity',
-  workshopCapacity: 'workshopCapacity',
   prerequisiteCourseId: 'prerequisiteCourseId',
-  startDate: 'startDate',
-  endDate: 'endDate',
   syllabusUploadId: 'syllabus',
   'duration.value': 'durationValue',
   'duration.unit': 'durationUnit',
@@ -238,12 +270,19 @@ function toFormValues(detail: CourseDetail | undefined): CourseFormValues {
     teacherId: detail?.teacher.id ?? '',
     durationValue: detail ? String(detail.duration.value) : '',
     durationUnit: detail?.duration.unit ?? 'WEEK',
-    capacity: detail ? String(detail.capacity) : '',
-    // Null (unbound) reads back as the blank box, exactly as it was typed.
-    workshopCapacity: detail?.workshopCapacity != null ? String(detail.workshopCapacity) : '',
+    // Create starts with ONE empty intake row; edit seeds the served intakes so the
+    // value shape matches even though the controls are not rendered on this path.
+    offerings:
+      detail === undefined
+        ? [{ capacity: '', workshopCapacity: '', startDate: '', endDate: '' }]
+        : detail.offerings.map((offering) => ({
+            capacity: String(offering.capacity),
+            workshopCapacity:
+              offering.workshopCapacity !== null ? String(offering.workshopCapacity) : '',
+            startDate: toDateTimeLocal(offering.startDate),
+            endDate: toDateTimeLocal(offering.endDate),
+          })),
     prerequisiteCourseId: detail?.prerequisiteCourseId ?? '',
-    startDate: toDateTimeLocal(detail?.startDate),
-    endDate: toDateTimeLocal(detail?.endDate),
     // A chosen file is always a NEW syllabus; the attached one cannot be read back
     // into a File object, and `syllabusUploadId` on the row says whether one exists.
     syllabus: null,
@@ -261,15 +300,19 @@ function toCreate(
     ...(values.slug.trim() === '' ? {} : { slug: values.slug.trim() }),
     ...(values.description === '' ? {} : { description: values.description.trim() }),
     departmentId: values.departmentId,
-    // `teacherId` is an admin-only field (course.ts:109); a teacher always gets
+    // `teacherId` is an admin-only field (course.ts); a teacher always gets
     // themself, and an admin leaving it empty gets themself too (courses.service).
     ...(isAdmin && values.teacherId !== '' ? { teacherId: values.teacherId } : {}),
     duration: { value: Number(values.durationValue), unit: values.durationUnit },
-    capacity: Number(values.capacity),
-    // Omitted, not null — `createCourseSchema` has no bound at all until given one.
-    ...(values.workshopCapacity === ''
-      ? {}
-      : { workshopCapacity: Number(values.workshopCapacity) }),
+    // One intake minimum — the schema's `.min(1)`; the form's own refine enforces it.
+    offerings: values.offerings.map((row) => ({
+      capacity: Number(row.capacity),
+      // Omitted, not null — `createCourseOfferingInputSchema` has no bound at all
+      // until given one.
+      ...(row.workshopCapacity === '' ? {} : { workshopCapacity: Number(row.workshopCapacity) }),
+      ...(row.startDate === '' ? {} : { startDate: toIso(row.startDate) }),
+      ...(row.endDate === '' ? {} : { endDate: toIso(row.endDate) }),
+    })),
     /*
      * NO `prerequisiteCourseId` here, deliberately: `createCourseSchema` does not
      * accept the field (packages/shared/src/schema/course.ts), so a control on this
@@ -277,17 +320,20 @@ function toCreate(
      * where `updateCourseSchema` takes it — the same split as code/slug, pointed
      * the other way round.
      */
-    ...(values.startDate === '' ? {} : { startDate: toIso(values.startDate) }),
-    ...(values.endDate === '' ? {} : { endDate: toIso(values.endDate) }),
   };
 }
 
 /**
- * The PATCH body: only what actually changed. `description` and the dates are
- * `.nullable()` there, so an emptied box becomes `null` ("clear this") — the same
- * translation Settings.tsx makes, so saving a name can never blank a description.
- * There is no `code` and no `slug`: the schema accepts neither, and the form does
- * not offer them on this path.
+ * The PATCH body: only what actually changed. `description` is `.nullable()` there,
+ * so an emptied box becomes `null` ("clear this") — the same translation
+ * Settings.tsx makes, so saving a name can never blank a description. There is no
+ * `code` and no `slug`: the schema accepts neither, and the form does not offer them
+ * on this path.
+ *
+ * NO intake fields either, deliberately: since Phase 9 the template carries neither
+ * seats nor dates. Retuning one happens through the course page's Intakes section
+ * (PATCH /courses/:courseId/offerings/:offeringId), which is where the per-intake
+ * facts are already on screen.
  */
 function toUpdate(
   values: CourseFormValues,
@@ -311,19 +357,7 @@ function toUpdate(
           },
         }
       : {}),
-    ...(dirty.capacity ? { capacity: Number(values.capacity) } : {}),
-    /*
-     * Nullable on the wire, not just optional: an emptied box is an explicit
-     * `null` — "unbind this workshop" — never "leave unchanged". Unchanged rows
-     * are already kept out by the `dirty` guard, so the two meanings cannot
-     * collide.
-     */
-    ...(dirty.workshopCapacity
-      ? {
-          workshopCapacity: values.workshopCapacity === '' ? null : Number(values.workshopCapacity),
-        }
-      : {}),
-    // Same nullable contract as the bound above: choosing "None" PATCHes explicit
+    // Same nullable contract as before: choosing "None" PATCHes explicit
     // null to clear the rung. The API refuses self-references and cycles with a
     // 422 on this path; `FIELD_FOR_PATH` lands that back on this control.
     ...(dirty.prerequisiteCourseId
@@ -332,10 +366,6 @@ function toUpdate(
             values.prerequisiteCourseId === '' ? null : values.prerequisiteCourseId,
         }
       : {}),
-    ...(dirty.startDate
-      ? { startDate: values.startDate === '' ? null : toIso(values.startDate) }
-      : {}),
-    ...(dirty.endDate ? { endDate: values.endDate === '' ? null : toIso(values.endDate) } : {}),
   };
 }
 
@@ -425,6 +455,9 @@ export function CourseFormDialog({
     resolver: zodResolver(schema),
     defaultValues: toFormValues(undefined),
   });
+  // The intake rows. `fields` carries the stable per-row keys remounts are keyed on;
+  // append/remove are the only two mutations a create needs.
+  const { fields, append, remove } = useFieldArray({ control: form.control, name: 'offerings' });
   const { clearErrors, reset, setError, setValue } = form;
 
   /**
@@ -488,6 +521,12 @@ export function CourseFormDialog({
     onError: (error) => {
       if (error instanceof ApiError) {
         for (const [path, message] of Object.entries(error.byField)) {
+          // Intake paths (`offerings.0.capacity`) already ARE react-hook-form paths —
+          // set verbatim. Everything else goes through the flat map above.
+          if (path.startsWith('offerings.')) {
+            setError(path as Path<CourseFormValues>, { message });
+            continue;
+          }
           const field = FIELD_FOR_PATH[path];
           if (field) setError(field, { message });
         }
@@ -525,7 +564,7 @@ export function CourseFormDialog({
         title={isEditing ? 'Edit course' : 'Add a course'}
         description={
           isEditing
-            ? 'The details of the course. Its code and web address cannot change.'
+            ? 'The details of the course. Its code and web address cannot change, and its intakes are managed on the course page.'
             : 'New courses start unpublished — publish from the courses list when ready.'
         }
         footer={
@@ -768,47 +807,125 @@ export function CourseFormDialog({
                 </Select>
               </div>
             </FormField>
-
-            <FormField label="Capacity" required error={errors.capacity?.message}>
-              <Input
-                inputMode="numeric"
-                placeholder="12"
-                disabled={locked}
-                {...form.register('capacity')}
-              />
-            </FormField>
-
-            <FormField
-              label="Workshop places"
-              hint="Optional — leave empty for lecture-only courses."
-              error={errors.workshopCapacity?.message}
-            >
-              {/*
-                The second bound on the SAME approved-count (Phase 7). Blank is a
-                meaningful answer — unbound — so nothing here nudges the user
-                toward filling it in.
-              */}
-              <Input
-                inputMode="numeric"
-                placeholder="None"
-                disabled={locked}
-                {...form.register('workshopCapacity')}
-              />
-            </FormField>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <FormField label="Starts" hint="Optional." error={errors.startDate?.message}>
-              <Input type="datetime-local" disabled={locked} {...form.register('startDate')} />
-            </FormField>
-            <FormField
-              label="Ends"
-              hint="Optional — after the start."
-              error={errors.endDate?.message}
-            >
-              <Input type="datetime-local" disabled={locked} {...form.register('endDate')} />
-            </FormField>
-          </div>
+          {/*
+            CREATE ONLY, and not as an oversight: since Phase 9 the template carries
+            neither seats nor dates. A course is created WITH its first intake(s)
+            (`createCourseSchema` takes `.min(1)`); retuning one later means PATCH
+            /courses/:courseId/offerings/:offeringId, offered inline on the course
+            page's Intakes section — where each row's seats are already on screen.
+          */}
+          {!isEditing ? (
+            <section className="flex flex-col gap-3 rounded-md border border-line-subtle p-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-medium">Intakes</span>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  leadingIcon={<Plus aria-hidden="true" className="size-4" />}
+                  disabled={locked}
+                  onClick={() =>
+                    append({ capacity: '', workshopCapacity: '', startDate: '', endDate: '' })
+                  }
+                >
+                  Add another intake
+                </Button>
+              </div>
+
+              {fields.map((field, index) => (
+                <fieldset
+                  key={field.id}
+                  className="relative flex flex-col gap-3 rounded-md bg-sunken p-3"
+                >
+                  <legend className="sr-only">Intake {index + 1}</legend>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <FormField
+                      label={`Places (intake ${index + 1})`}
+                      required
+                      error={errors.offerings?.[index]?.capacity?.message}
+                    >
+                      <Input
+                        inputMode="numeric"
+                        placeholder="12"
+                        disabled={locked}
+                        {...form.register(`offerings.${index}.capacity` as const)}
+                      />
+                    </FormField>
+                    <FormField
+                      label={`Workshop places (intake ${index + 1})`}
+                      hint="Optional — leave empty for lecture-only runs."
+                      error={errors.offerings?.[index]?.workshopCapacity?.message}
+                    >
+                      <Input
+                        inputMode="numeric"
+                        placeholder="None"
+                        disabled={locked}
+                        {...form.register(`offerings.${index}.workshopCapacity` as const)}
+                      />
+                    </FormField>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <FormField
+                      label={`Starts (intake ${index + 1})`}
+                      hint="Optional."
+                      error={errors.offerings?.[index]?.startDate?.message}
+                    >
+                      <Input
+                        type="datetime-local"
+                        disabled={locked}
+                        {...form.register(`offerings.${index}.startDate` as const)}
+                      />
+                    </FormField>
+                    <FormField
+                      label={`Ends (intake ${index + 1})`}
+                      hint="Optional — after the start."
+                      error={errors.offerings?.[index]?.endDate?.message}
+                    >
+                      <Input
+                        type="datetime-local"
+                        disabled={locked}
+                        {...form.register(`offerings.${index}.endDate` as const)}
+                      />
+                    </FormField>
+                  </div>
+                  {fields.length > 1 ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="self-end"
+                      disabled={locked}
+                      onClick={() => remove(index)}
+                    >
+                      Remove this intake
+                    </Button>
+                  ) : null}
+                </fieldset>
+              ))}
+
+              {(() => {
+                // The `.min(1)` issue lands ON `offerings` itself; a FieldArray's
+                // error may surface as root or as the object's own message.
+                const arrayError = errors.offerings;
+                const message =
+                  typeof arrayError?.message === 'string'
+                    ? arrayError.message
+                    : arrayError?.root?.message;
+                return typeof message === 'string' && message !== '' ? (
+                  <p role="status" className="text-xs text-danger-fg">
+                    {message}
+                  </p>
+                ) : null;
+              })()}
+            </section>
+          ) : (
+            <p className="rounded-md border border-line-subtle bg-sunken px-3 py-2.5 text-xs text-fg-secondary">
+              Intakes — dates, places and workshop bounds — are managed on the course page, in the
+              Intakes section.
+            </p>
+          )}
 
           <FormField
             label="Syllabus"

@@ -14,10 +14,11 @@ import {
   Video,
   type LucideIcon,
 } from 'lucide-react';
-import { rejectEnrollmentSchema } from '@skillwright/shared/schema';
+import { rejectEnrollmentSchema, MAX_PAGE_SIZE } from '@skillwright/shared/schema';
 import { api, type Paginated } from '@/lib/api';
 import { qk } from '@/lib/query';
 import { subject, useCompletedCourseIds, usePolicy, type PolicySubject } from '@/lib/policy';
+import { courseViewerStatus, formatOfferingDates } from '@/lib/offerings';
 import { ApiError } from '@/lib/problem';
 import { useSession } from '@/lib/session';
 import { formatBytes, formatDate, formatDuration, formatRelative } from '@/lib/format';
@@ -31,6 +32,7 @@ import type {
 import { PageHeader } from '@/components/layout/PageHeader';
 import { AttendanceRegister } from '@/components/attendance/AttendanceRegister';
 import { EnrollmentAttendance } from '@/components/attendance/EnrollmentAttendance';
+import { CourseOfferings } from '@/components/courses/CourseOfferings';
 import { RegisterExportButtons } from '@/components/courses/RegisterExportButtons';
 import { ResourceFormDialog } from '@/components/resources/ResourceFormDialog';
 import { Avatar } from '@/components/ui/Avatar';
@@ -46,6 +48,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/DropdownMenu';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { FormField } from '@/components/ui/FormField';
+import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/Select';
 import { SkeletonCard, SkeletonList } from '@/components/ui/Skeleton';
 import { StatusChip } from '@/components/ui/StatusChip';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
@@ -78,13 +82,16 @@ const RESOURCE_ICON: Record<ResourceTypeValue, LucideIcon> = {
  *   - `courseTeacherId`, never `teacherId` — `ownsCourse` reads the former
  *     (combinators.ts:55-59). With `teacherId` the owning teacher got no "Edit course",
  *     no Students tab and no Approve button on their own course.
- *   - `enrollmentStatus`, never `viewerEnrollmentStatus` — `enrolledApproved` reads the
+ *   - `enrollmentStatus`, never the DTO's field name — `enrolledApproved` reads the
  *     former (combinators.ts:62-65). With the DTO's name an approved student was denied
- *     `resource:read`, so the Resources tab never even fetched.
+ *     `resource:read`, so the Resources tab never even fetched. Since Phase 9 the
+ *     per-intake statuses live in `offerings`; the COURSE-level answer is DERIVED from
+ *     them (`courseViewerStatus`), because that is what the server's own loader does:
+ *     APPROVED on any live intake wins.
  *
  * `capacity` and `approvedCount` are gone because no rule reads them: seats are checked
- * by the service under SERIALIZABLE, not by the policy, and `isFull` on the DTO is what
- * the button disables on.
+ * by the service under SERIALIZABLE, not by the policy, and the offerings' `isFull`
+ * flags are what the enrol buttons disable on.
  *
  * `prerequisiteCourseId` and `completedCourseIds` are BACK, because a rule now reads
  * them: `enrollment:request` composes `and(isPublished, hasCompletedPrerequisite)`, and
@@ -98,7 +105,7 @@ const RESOURCE_ICON: Record<ResourceTypeValue, LucideIcon> = {
  * `studentId` is deliberately NOT set. The server adds it for a STUDENT so
  * `isEnrolledStudent` passes and the enrollments service then narrows the rows to that
  * student's own; on the client the same subject would open a "Students" roster that
- * shows one person their own request, which the header's StatusChip already says. Being
+ * shows one person their own request, which the intakes section already says. Being
  * NARROWER than the server hides nothing a student needs and renders no button that
  * would 403 — the failure this layer exists to prevent.
  */
@@ -112,7 +119,9 @@ function courseSubject(
     courseTeacherId: course.teacher.id,
     departmentId: course.department.id,
     publishedAt: course.publishedAt,
-    enrollmentStatus: course.viewerEnrollmentStatus,
+    // Derived from the per-intake statuses — APPROVED anywhere wins, which is every
+    // rule's reading of this field (only `enrolledApproved` consumes it).
+    enrollmentStatus: courseViewerStatus(course.offerings),
     // Explicit null means "ungated" — the DTO always carries the field, so the
     // subject must too. An ABSENT key would deny even an ungated course.
     prerequisiteCourseId: course.prerequisiteCourseId,
@@ -145,7 +154,8 @@ function resourceSubject(resource: ResourceDto, course: CourseDetail): PolicySub
     // here would hide the Download button from people the API would serve — the
     // client-side half of LESSONS-LEARNED #31.
     publishedAt: course.publishedAt,
-    enrollmentStatus: course.viewerEnrollmentStatus,
+    // Derived per intake → course, exactly as `courseSubject` does.
+    enrollmentStatus: courseViewerStatus(course.offerings),
   });
 }
 
@@ -195,6 +205,13 @@ export function CourseDetailPage() {
    */
   const [resourceForm, setResourceForm] = useState<ResourceDto | 'new' | null>(null);
   const [deletingResource, setDeletingResource] = useState<ResourceDto | null>(null);
+  /**
+   * The intake whose register and exports are on screen. Null means "the soonest
+   * live one" — resolved below against THIS course's offerings, so a stale id left
+   * over from another course's visit can never pin a register to an intake that is
+   * not on the page.
+   */
+  const [registerOfferingId, setRegisterOfferingId] = useState<string | null>(null);
 
   // `GET /courses/:id` serves `courseDetailSchema` (courses.routes.ts:70-79) — the
   // summary plus the blurb, the dates, the syllabus and the viewer's own enrollment.
@@ -204,14 +221,13 @@ export function CourseDetailPage() {
   });
 
   /**
-   * The viewer's completed rungs, fetched only when the enrolment decision is live:
-   * a signed-in student looking at a course they hold no row for. Every other case
-   * — teachers, admins, a student already seated or already rejected — is decided
-   * without this field, and spending the request would buy data nothing reads.
+   * The viewer's completed rungs, fetched whenever a STUDENT is on screen: since
+   * Phase 9 every open intake carries its own enrol affordance, and each of those
+   * decisions reads this list (`hasCompletedPrerequisite`). A student already seated
+   * on one intake can still apply to the next, so "already approved" no longer
+   * spares anyone the lookup.
    */
-  const completed = useCompletedCourseIds(
-    isStudent && course.data?.viewerEnrollmentStatus === null,
-  );
+  const completed = useCompletedCourseIds(isStudent);
 
   /**
    * The policy subject is built from what THIS screen has loaded — teacher,
@@ -255,18 +271,9 @@ export function CourseDetailPage() {
     enabled: policy.can('enrollment:read', viewerSubject),
   });
 
-  // The path owns the course, so the body is empty; the route declares it `.nullish()`
-  // for exactly this call (courses.routes.ts:154-167) and answers with the new row.
-  const requestEnrollment = useMutation({
-    mutationFn: () => api.post<EnrollmentDto>(`/courses/${courseId}/enrollments`),
-    onSuccess: async () => {
-      toast.success('Request sent', {
-        description: 'The teacher will review it. You will be notified either way.',
-      });
-      await client.invalidateQueries({ queryKey: qk.course(courseId) });
-    },
-    onError: (error) => toast.fromError(error, 'Could not send that request'),
-  });
+  // The path owns the course, so the body used to be empty; since Phase 9 the POST
+  // requires an `offeringId`, and naming the intake is the offerings section's job —
+  // one affordance per row, where the seats and dates actually live.
 
   const decide = useMutation({
     mutationFn: (decision: Decision) =>
@@ -281,25 +288,27 @@ export function CourseDetailPage() {
         client.invalidateQueries({ queryKey: qk.course(courseId) }),
       ]);
     },
-    onError: (error) => {
+    onError: (error, decision) => {
       /*
        * CAPACITY_EXCEEDED maps to one sentence per code (problem.ts ERROR_COPY:
        * "This course is full."), and the 409's distinguishing `detail` is
        * diagnostics, not user copy — the SPA renders errors by code, never by
        * detail (LESSONS-LEARNED #25). Which bound fired is not a mystery to THIS
-       * screen, though: the cached row carries both bounds and the derived
-       * remainder. When the workshop is the exhausted one, the teacher gets that
-       * sentence instead of a wrong "course full"; anything else keeps the
-       * code-mapped default.
+       * screen, though: the cached enrolment row carries its intake, and that
+       * intake knows both bounds and the derived remainder. When the workshop is
+       * the exhausted one on THAT INTAKE, the teacher gets that sentence instead
+       * of a wrong "course full"; anything else keeps the code-mapped default.
        */
-      if (
-        error instanceof ApiError &&
-        error.is('CAPACITY_EXCEEDED') &&
-        course.data?.workshopCapacity !== null &&
-        course.data?.workshopSeatsRemaining === 0
-      ) {
-        toast.error('The workshop for this course is full');
-        return;
+      if (error instanceof ApiError && error.is('CAPACITY_EXCEEDED')) {
+        const row = enrollments.data?.data.find((entry) => entry.id === decision.id);
+        if (
+          row !== undefined &&
+          row.offering.workshopCapacity !== null &&
+          row.offering.workshopSeatsRemaining === 0
+        ) {
+          toast.error('The workshop for this intake is full');
+          return;
+        }
       }
       toast.fromError(error, 'Could not record that decision');
     },
@@ -385,54 +394,24 @@ export function CourseDetailPage() {
   }
 
   const data = course.data;
-  // Derived server-side and shipped on the DTO (course.ts:37-39). The SPA never redoes
-  // capacity arithmetic, because two answers to "is it full" is one answer too many.
-  const isFull = data.isFull;
   const pendingCount =
     enrollments.data?.data.filter((entry) => entry.status === 'PENDING').length ?? 0;
 
   /*
-   * Enrolment refusals, computed from DATA so they can be SHOWN rather than acted
-   * on by vanishing. The button's policy Gate below stays exactly what it was;
-   * these only decide whether the affordance sits disabled with a reason beside it.
+   * Enrolment refusal, computed from DATA so it can be SHOWN rather than acted on
+   * by vanishing. Scoped to a STUDENT with the lookup ANSWERED, mirroring where the
+   * server loader puts `completedCourseIds`. Before `ready` the state is unknown,
+   * not unmet: refusing on data not yet received would disable enrolment on a guess,
+   * which is LESSONS-LEARNED #15's failure pointed the other way.
    *
-   * Unmet prerequisite — scoped to a STUDENT with the lookup ANSWERED, mirroring
-   * where the server loader puts `completedCourseIds`. Before `ready` the state is
-   * unknown, not unmet: refusing on data not yet received would disable enrolment
-   * on a guess, which is LESSONS-LEARNED #15's failure pointed the other way.
+   * The rung is a COURSE fact — every intake's gate reads the same one — so this
+   * single answer feeds every row of the intakes section below.
    */
   const prerequisiteUnmet =
     isStudent &&
     completed.ready &&
     data.prerequisite !== null &&
     !completed.completedCourseIds?.includes(data.prerequisite.id);
-
-  // The second bound from Phase 7: ordinary seats may remain while every workshop
-  // place is taken. Derived like `isFull`, never recomputed here.
-  const workshopFull = data.workshopCapacity !== null && data.workshopSeatsRemaining === 0;
-
-  const enrolBlocker =
-    prerequisiteUnmet && data.prerequisite !== null
-      ? `Requires ${data.prerequisite.code}`
-      : workshopFull
-        ? 'Workshop is full'
-        : isFull
-          ? 'Course is full'
-          : null;
-
-  /*
-   * Visible-but-refusing: an unmet prerequisite used to take the whole button away,
-   * which read as "this course does not take enrolments" rather than "not yet". The
-   * affordance stays on screen, disabled, naming the rung it needs — the same honest
-   * pattern as `isFull`, and why the OR branch exists at all: for an unmet student
-   * `can('enrollment:request')` is now FALSE (the server would 403), but a disabled
-   * button performs nothing; the Gate still rules every enabled action.
-   *
-   * The two guard terms keep today's behaviour everywhere else: anonymous visitors
-   * see no button (their denial is the session, not the rung), and a DRAFT course
-   * stays silent because publication still gates through `can()` alone.
-   */
-  const showEnrolRefusal = prerequisiteUnmet && user !== null && data.publishedAt !== null;
 
   /*
    * `resource:create` is COURSE-scoped — `ownsCourse` for a teacher, with no publication
@@ -441,6 +420,17 @@ export function CourseDetailPage() {
    * calls for one decision is two places for one of them to be given the wrong subject.
    */
   const canAddResource = policy.can('resource:create', viewerSubject);
+
+  /*
+   * The register's intake. The wire requires an `offeringId` on every attendance
+   * read/write/export, so when a course runs several intakes the tab shows a
+   * selector; the default is the SOONEST LIVE one (the payload's first row), which
+   * for this tab's only permitted viewer — the owning teacher or an admin — is the
+   * intake they are teaching next. A student never sees this tab, so "the viewer's
+   * own intake" has no one to mean here.
+   */
+  const selectedOffering =
+    data.offerings.find((offering) => offering.id === registerOfferingId) ?? data.offerings[0];
 
   // `'new'` and `null` both mean "no row to edit". Narrowing here once keeps the two
   // props the dialog reads — `key` and `resource` — from disagreeing about which it is.
@@ -464,20 +454,13 @@ export function CourseDetailPage() {
         description={data.description ?? undefined}
         actions={
           <>
-            {data.viewerEnrollmentStatus ? (
-              <StatusChip status={data.viewerEnrollmentStatus} />
-            ) : policy.can('enrollment:request', viewerSubject) || showEnrolRefusal ? (
-              <Button
-                block
-                className="sm:w-auto"
-                disabled={enrolBlocker !== null}
-                loading={requestEnrollment.isPending}
-                onClick={() => requestEnrollment.mutate()}
-              >
-                {enrolBlocker ?? 'Request enrolment'}
-              </Button>
-            ) : null}
-
+            {/*
+              The enrol affordance lives in the Intakes section below, one per open
+              intake — since Phase 9 a request NAMES an intake, so a header button
+              would have to guess which one the student means. The section's
+              disabled-with-reason rows carry the same visible-but-refusing pattern
+              this header used to.
+            */}
             {policy.can('course:update', viewerSubject) ? (
               <Button variant="secondary" block className="sm:w-auto">
                 Edit course
@@ -519,29 +502,29 @@ export function CourseDetailPage() {
         <Fact label="Department" value={data.department.name} />
         <Fact label="Teacher" value={data.teacher.name} />
         <Fact label="Duration" value={formatDuration(data.duration.value, data.duration.unit)} />
-        <Fact label="Starts" value={formatDate(data.startDate)} />
-        <Fact label="Ends" value={formatDate(data.endDate)} />
-        <Fact label="Places" value={`${data.approvedCount} / ${data.capacity}`} />
         {/*
           Data-driven, viewer-independent: the rung this course names, shown to
           everyone whenever it names one. Whether the VIEWER has met it is the
-          enrol button's business above, not a fact about the course.
+          enrol buttons' business in the intakes section, not a fact about the
+          template.
         */}
         {data.prerequisite !== null ? (
           <Fact label="Requires" value={`${data.prerequisite.code} · ${data.prerequisite.name}`} />
         ) : null}
-        {/*
-          The second bound, beside the first and only when it exists — an unbound
-          course renders no workshop fact at all, not a "none" row.
-        */}
-        {data.workshopCapacity !== null ? (
-          <Fact
-            label="Workshop"
-            value={`${data.workshopSeatsRemaining} of ${data.workshopCapacity} places left`}
-          />
-        ) : null}
         <Fact label="Visibility" value={data.publishedAt ? 'Published' : 'Draft'} />
       </dl>
+
+      {/*
+        The intakes — dates and seats live here since Phase 9, one row per scheduled
+        run, with the per-intake enrol affordance for students and inline manage for
+        the teacher or admin. Between the facts and the tabs because choosing an
+        intake precedes everything else a visitor does on this page.
+      */}
+      <CourseOfferings
+        course={data}
+        viewerSubject={viewerSubject}
+        prerequisiteUnmet={prerequisiteUnmet}
+      />
 
       <Tabs defaultValue="resources">
         <TabsList>
@@ -727,7 +710,7 @@ export function CourseDetailPage() {
                   description={
                     canAddResource
                       ? 'Nothing has been added to this course yet.'
-                      : data.viewerEnrollmentStatus === 'APPROVED'
+                      : courseViewerStatus(data.offerings) === 'APPROVED'
                         ? 'The teacher has not published anything for this course yet.'
                         : 'Nothing public has been published here. Enrolled students may see more.'
                   }
@@ -743,19 +726,45 @@ export function CourseDetailPage() {
         {policy.can('enrollment:read', viewerSubject) ? (
           <TabsContent value="students">
             {/*
-              Phase 8's register exports, at the top of the tab that lists the same
-              data. The component asks the policy itself (`enrollment:read` /
-              `attendance:read` with the COURSE subject — the shapes the export
-              endpoints are gated by server-side), so a viewer who may not read one of
-              the registers is not shown its file.
+              Phase 8's register exports, beside the intake they are scoped to. The
+              component asks the policy itself (`enrollment:read` / `attendance:read`
+              with the COURSE subject — the shapes the export endpoints are gated by
+              server-side), so a viewer who may not read one of the registers is not
+              shown its file. Both hrefs carry the selected intake's `offeringId` —
+              the attendance export REQUIRES it, and an enrolment export mixing two
+              intakes would not be a register.
             */}
-            <div className="flex flex-col pb-4 sm:flex-row sm:justify-end">
-              <RegisterExportButtons courseId={courseId} teacherId={data.teacher.id} />
+            <div className="flex flex-col gap-3 pb-4 md:flex-row md:items-end md:justify-end">
+              {data.offerings.length > 1 ? (
+                <FormField label="Intake" className="md:w-72">
+                  <Select
+                    value={selectedOffering.id}
+                    onValueChange={(next) => setRegisterOfferingId(next)}
+                  >
+                    <SelectTrigger aria-label="Intake" />
+                    <SelectContent>
+                      {data.offerings.map((offering) => (
+                        <SelectItem key={offering.id} value={offering.id}>
+                          {formatOfferingDates(offering)}
+                          {offering.isFull ? ' · full' : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </FormField>
+              ) : null}
+              <RegisterExportButtons
+                courseId={courseId}
+                teacherId={data.teacher.id}
+                offeringId={selectedOffering.id}
+              />
             </div>
 
             {/*
               The register, and deliberately ABOVE the roster list: it is this tab's
-              working surface, while the list below is approvals bookkeeping.
+              working surface, while the list below is approvals bookkeeping. It reads
+              ONE intake — two intakes of a course never share a teaching day — so it
+              follows the selection above.
 
               Gated on `attendance:mark` asked with the COURSE subject — the shape the
               server loads for both register endpoints (`loadCourseSubject`,
@@ -767,7 +776,7 @@ export function CourseDetailPage() {
             */}
             {policy.can('attendance:mark', viewerSubject) ? (
               <div className="pb-6">
-                <AttendanceRegister courseId={courseId} />
+                <AttendanceRegister courseId={courseId} offeringId={selectedOffering.id} />
               </div>
             ) : null}
 
@@ -803,6 +812,12 @@ export function CourseDetailPage() {
                   secondary: true,
                 },
                 {
+                  id: 'intake',
+                  header: 'Intake',
+                  cell: (entry) => formatOfferingDates(entry.offering),
+                  secondary: true,
+                },
+                {
                   id: 'status',
                   header: 'Status',
                   cell: (entry) => <StatusChip status={entry.status} />,
@@ -834,7 +849,8 @@ export function CourseDetailPage() {
                     <div className="flex min-w-0 flex-1 flex-col">
                       <span className="truncate text-sm font-medium">{entry.student.name}</span>
                       <span className="truncate text-2xs text-fg-tertiary">
-                        Requested {formatRelative(entry.requestedAt)}
+                        Intake {formatOfferingDates(entry.offering)} · requested{' '}
+                        {formatRelative(entry.requestedAt)}
                       </span>
                     </div>
                     <StatusChip status={entry.status} />
@@ -930,40 +946,66 @@ export function CourseDetailPage() {
 }
 
 /**
- * The signed-in viewer's own attendance on THIS course.
+ * The signed-in viewer's own attendance on THIS course — one summary PER INTAKE they
+ * hold an APPROVED seat on, since a student may sit in several intakes and each
+ * keeps its own register.
  *
- * The gate is deliberately NOT a role read: `viewerEnrollmentStatus` is served only
- * for STUDENT viewers — the server sends it as null for everyone else
- * (courses.service.ts:196) — so "APPROVED" here already means "an approved student".
- * A visitor without an APPROVED enrolment renders nothing at all: no heading, no
- * card, no request for data they are not entitled to.
+ * The gate is deliberately NOT a role read: the per-intake `viewerEnrollmentStatus`
+ * is served only for STUDENT viewers — the server sends it as null for everyone else
+ * (courses.service.ts) — so "APPROVED anywhere" here already means "an approved
+ * student". A visitor without an APPROVED enrolment renders nothing at all.
  *
- * Finding their OWN enrolment id is a lookup, not an assumption: `GET /enrollments`
- * has no per-subject policy gate because it self-scopes (`visibilityWhere` narrows
- * a student's rows to `studentId = actor.id`, enrollments.routes.ts:38-40), and the
- * same scoping is what makes it safe to call with just the course filter. The row
- * that comes back is what `EnrollmentAttendance` builds its enrollment-shaped
- * subject from — the shape `attendance:read`'s `isEnrolledStudent` cell demands.
+ * Finding their OWN enrolment rows is a lookup, not an assumption: `GET /enrollments`
+ * has no per-subject policy gate because it self-scopes (`visibilityWhere` narrows a
+ * student's rows to `studentId = actor.id`, enrollments.routes.ts:38-40), and the
+ * same scoping is what makes it safe to call with just the course filter. Each row
+ * is what `EnrollmentAttendance` builds its enrollment-shaped subject from. Read at
+ * the schema's page ceiling, not at 1 — several intakes legitimately hold APPROVED
+ * rows for one student, and truncating would silently drop their other registers.
  */
 function ViewerAttendanceSection({ course }: { course: CourseDetail }) {
-  const approved = course.viewerEnrollmentStatus === 'APPROVED';
+  const approvedAnywhere = courseViewerStatus(course.offerings) === 'APPROVED';
 
   const mine = useQuery({
-    queryKey: qk.enrollments({ courseId: course.id, status: 'APPROVED', limit: 1 }),
+    queryKey: qk.enrollments({ courseId: course.id, status: 'APPROVED', limit: MAX_PAGE_SIZE }),
     queryFn: () =>
       api.get<Paginated<EnrollmentDto>>('/enrollments', {
-        query: { courseId: course.id, status: 'APPROVED', limit: 1 },
+        query: { courseId: course.id, status: 'APPROVED', limit: MAX_PAGE_SIZE },
       }),
-    enabled: approved,
+    enabled: approvedAnywhere,
   });
 
-  const own = approved ? mine.data?.data.find((entry) => entry.status === 'APPROVED') : undefined;
+  if (!approvedAnywhere) return null;
 
-  if (!own) return null;
+  const rows = mine.data?.data.filter((entry) => entry.status === 'APPROVED') ?? [];
+  // Loaded-or-nothing: a skeleton under "Your attendance" for a query that has not
+  // answered yet reads better than a section that pops in late.
+  if (rows.length === 0 && !mine.isSuccess) {
+    return (
+      <div className="pt-8">
+        <SkeletonCard />
+      </div>
+    );
+  }
+  if (rows.length === 0) return null;
 
   return (
-    <div className="pt-8">
-      <EnrollmentAttendance enrollment={own} title="Your attendance" />
+    <div className="pt-8 flex flex-col gap-3">
+      {/*
+        One seat: exactly the old card, old heading. Several: each names its intake,
+        because "Your attendance" twice says nothing about which register is which.
+      */}
+      {rows.map((row) => (
+        <EnrollmentAttendance
+          key={row.id}
+          enrollment={row}
+          title={
+            rows.length === 1
+              ? 'Your attendance'
+              : `Your attendance · ${formatOfferingDates(row.offering)}`
+          }
+        />
+      ))}
     </div>
   );
 }

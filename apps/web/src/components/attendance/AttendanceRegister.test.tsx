@@ -44,6 +44,7 @@ import { ApiError } from '@/lib/problem';
 
 /** ULIDs — `idSchema` accepts a cuid or a ULID and nothing else. */
 const COURSE_ID = '01JGXDFAM0K2Z1GYCSNM5F5RCX';
+const OFFERING_ID = '01JGXDFAM0K2Z1GYCSNM5F5RD9';
 const ENROLLMENT_A = '01JGXDFAM0K2Z1GYCSNM5F5RD1';
 const ENROLLMENT_B = '01JGXDFAM0K2Z1GYCSNM5F5RD2';
 const ENROLLMENT_C = '01JGXDFAM0K2Z1GYCSNM5F5RD3';
@@ -119,7 +120,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   apiGet.mockImplementation((path, options) => {
     if (path === `/courses/${COURSE_ID}/attendance`) {
-      const query = (options ?? {}) as { query?: { date?: string } };
+      const query = (options ?? {}) as { query?: { date?: string; offeringId?: string } };
       return Promise.resolve(registerFor(query.query?.date ?? TODAY));
     }
     return Promise.resolve({});
@@ -132,7 +133,7 @@ function renderRegister(): void {
   });
   render(
     <QueryClientProvider client={client}>
-      <AttendanceRegister courseId={COURSE_ID} />
+      <AttendanceRegister courseId={COURSE_ID} offeringId={OFFERING_ID} />
     </QueryClientProvider>,
   );
 }
@@ -146,6 +147,16 @@ async function renderedDate(): Promise<string> {
 }
 
 describe('AttendanceRegister — rendering', () => {
+  it('fetches the register for ITS intake, naming the offering on every read', async () => {
+    renderRegister();
+
+    await screen.findByRole('group', { name: 'Attendance for Ada Okafor' });
+
+    expect(apiGet).toHaveBeenCalledWith(`/courses/${COURSE_ID}/attendance`, {
+      query: { offeringId: OFFERING_ID, date: await renderedDate() },
+    });
+  });
+
   it('renders one named radio group per seat on the APPROVED roster', async () => {
     renderRegister();
 
@@ -251,6 +262,7 @@ describe('AttendanceRegister — marking and saving', () => {
 
     await waitFor(() => expect(apiPut).toHaveBeenCalledTimes(1));
     expect(apiPut).toHaveBeenCalledWith(`/courses/${COURSE_ID}/attendance`, {
+      offeringId: OFFERING_ID,
       date,
       marks: [
         {
@@ -282,7 +294,7 @@ describe('AttendanceRegister — marking and saving', () => {
 
     await waitFor(() =>
       expect(apiGet).toHaveBeenCalledWith(`/courses/${COURSE_ID}/attendance`, {
-        query: { date: '2026-08-20' },
+        query: { offeringId: OFFERING_ID, date: '2026-08-20' },
       }),
     );
     // The other day's roster replaced this one's.
@@ -316,7 +328,7 @@ describe('AttendanceRegister — marking and saving', () => {
     await userEvent.click(screen.getByRole('button', { name: /load the current register/i }));
     await waitFor(() =>
       expect(apiGet).toHaveBeenCalledWith(`/courses/${COURSE_ID}/attendance`, {
-        query: { date: TODAY },
+        query: { offeringId: OFFERING_ID, date: TODAY },
       }),
     );
     // Reloaded means usable again: the conflict panel is gone, the roster is back.

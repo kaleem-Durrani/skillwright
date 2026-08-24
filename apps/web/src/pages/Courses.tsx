@@ -18,20 +18,42 @@ import { useCompletedCourseIds, usePolicy } from '@/lib/policy';
 import { useSession } from '@/lib/session';
 import { formatDuration } from '@/lib/format';
 /*
+ * The offering readings the seats display is built from: the wire orders intakes
+ * soonest-start first, so "first open" IS "soonest open", and the viewer's
+ * COURSE-level chip derives from the per-intake statuses.
+ */
+import { courseViewerStatus, formatOfferingDates, soonestOpenOffering } from '@/lib/offerings';
+/*
  * The catalogue row is `CourseListItem`, NOT `CourseSummary`.
  *
  * `GET /courses` serves `paginated(courseListItemSchema)` (courses.routes.ts:49-58):
- * every field of the summary plus `description` and `viewerEnrollmentStatus`
- * (course.ts:77-81). Those two are what the cards below render — the blurb, and the
- * chip that tells a student which courses they have already applied to.
- *
- * They are a third schema rather than two more fields on `courseSummarySchema`
- * because the summary is embedded as `enrollmentSchema.course`, where a
- * viewer-relative status would read as a second, contradictory status on a row that
- * already has one. Naming `CourseSummary` here would therefore be a lie in both
- * directions: too narrow for this response, and unfixable at its own definition.
+ * every field of the summary plus `description` and an `offerings` array whose
+ * entries each carry THE VIEWER'S status on that intake. The blurb below renders
+ * from the first; the seats line reads the soonest OPEN intake; the status chip
+ * derives from the per-intake statuses. They are a third schema rather than fields
+ * on `courseSummarySchema` because the summary is embedded as
+ * `enrollmentSchema.course`, where a viewer-relative status would read as a second,
+ * contradictory status on a row that already has one.
  */
 import type { CourseListItem } from '@/lib/types';
+
+/**
+ * The catalogue row's seats line: the SOONEST OPEN intake, in `hasSeats` semantics —
+ * "some live intake still has seats". A template has no capacity of its own to show;
+ * when every intake is full the row says so rather than inventing a number, and a
+ * course with no intakes at all says nothing numeric at all.
+ */
+function nextIntakeCell(course: CourseListItem): { label: string; seats: string | null } {
+  const open = soonestOpenOffering(course.offerings);
+  if (open !== undefined) {
+    return {
+      label: formatOfferingDates(open),
+      seats: `${open.seatsRemaining} of ${open.capacity} places left`,
+    };
+  }
+  if (course.offerings.length > 0) return { label: 'All intakes full', seats: null };
+  return { label: 'No intakes scheduled', seats: null };
+}
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/Button';
 import { Card, CardTitle } from '@/components/ui/Card';
@@ -197,29 +219,41 @@ export function CoursesPage() {
             secondary: true,
           },
           {
-            id: 'places',
-            header: 'Places',
+            id: 'intake',
+            header: 'Next intake',
             align: 'end',
-            cell: (course) => (
-              <span className="tabular-nums">
-                {course.approvedCount}/{course.capacity}
-              </span>
-            ),
+            cell: (course) => {
+              const intake = nextIntakeCell(course);
+              return (
+                <span className="flex flex-col text-xs">
+                  <span>{intake.label}</span>
+                  {intake.seats !== null ? (
+                    <span className="tabular-nums">{intake.seats}</span>
+                  ) : null}
+                </span>
+              );
+            },
           },
           {
             id: 'status',
             header: 'Status',
             align: 'end',
-            cell: (course) =>
-              course.viewerEnrollmentStatus ? (
-                <StatusChip status={course.viewerEnrollmentStatus} />
+            cell: (course) => {
+              // The per-intake statuses derive the course-level chip; teachers and
+              // admins receive null on every intake, so their rows keep publish state.
+              const viewerStatus = courseViewerStatus(course.offerings);
+              return viewerStatus ? (
+                <StatusChip status={viewerStatus} />
               ) : (
                 <StatusChip status={course.publishedAt ? 'PUBLISHED' : 'DRAFT'} />
-              ),
+              );
+            },
           },
         ]}
         renderCard={(course) => {
           const requires = requiresLabel(course);
+          const intake = nextIntakeCell(course);
+          const viewerStatus = courseViewerStatus(course.offerings);
           return (
             <Card interactive className="relative flex flex-col gap-2">
               <div className="flex items-start justify-between gap-3">
@@ -232,8 +266,8 @@ export function CoursesPage() {
                     {course.name}
                   </Link>
                 </CardTitle>
-                {course.viewerEnrollmentStatus ? (
-                  <StatusChip status={course.viewerEnrollmentStatus} />
+                {viewerStatus ? (
+                  <StatusChip status={viewerStatus} />
                 ) : (
                   <StatusChip status={course.publishedAt ? 'PUBLISHED' : 'DRAFT'} />
                 )}
@@ -264,9 +298,12 @@ export function CoursesPage() {
                   </dd>
                 </div>
                 <div className="flex gap-1">
-                  <dt>Places:</dt>
-                  <dd className="text-fg-secondary tabular-nums">
-                    {course.approvedCount}/{course.capacity}
+                  <dt>Next intake:</dt>
+                  <dd className="text-fg-secondary">
+                    {intake.label}
+                    {intake.seats !== null ? (
+                      <span className="tabular-nums"> · {intake.seats}</span>
+                    ) : null}
                   </dd>
                 </div>
               </dl>

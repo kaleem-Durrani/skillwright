@@ -72,23 +72,30 @@ export type {
  *
  * `CourseSummary` NESTS what the old local type flattened. There is no
  * `departmentName`, `teacherName`, `durationValue` or `durationUnit`: it carries
- * `department: DepartmentSummary`, `teacher: UserSummary` and
- * `duration: { value, unit }`. It also ships `seatsRemaining` and `isFull`
- * pre-computed, so no screen redoes capacity arithmetic and drifts from the
- * server's answer.
+ * `department: DepartmentSummary`, `teacher: UserSummary` and `duration: { value,
+ * unit }`.
  *
- * `description`, `startDate`, `endDate` and `viewerEnrollmentStatus` are on
- * `CourseDetail`, not on the summary — `GET /courses` returns summaries and
- * `GET /courses/:id` returns the detail (courses.routes.ts:49, :68).
+ * SINCE PHASE 9 it is a TEMPLATE: identity and description only. Every seat number
+ * and date moved onto `CourseOffering` (an INTAKE — one scheduled run), which is
+ * where they repeat: a course has many intakes, each with its own capacity, its own
+ * approved count and its own derived `seatsRemaining`/`isFull`, all pre-computed
+ * server-side so no screen redoes the arithmetic.
+ *
+ * `description`, `offerings` and the per-intake `viewerEnrollmentStatus` are on
+ * `CourseDetail` / `CourseListItem`, not on the summary — the summary is embedded as
+ * `EnrollmentDto.course`, where a viewer-relative field would contradict the row's
+ * own status.
  */
 export type {
   CourseDetail,
   CourseListItem,
+  CourseOffering,
   CourseSummary,
   DepartmentDetail,
   DepartmentSummary,
   Duration,
   DurationUnitValue,
+  ViewerCourseOffering,
 } from '@skillwright/shared/schema';
 
 // ---------------------------------------------------------------------------
@@ -100,11 +107,13 @@ export type {
  * (enrollments.routes.ts:46, :71, :85, :101, :118 and courses.routes.ts:131).
  *
  * It nests: `student: UserSummary`, `course: CourseSummary`,
- * `decidedBy: UserSummary | null`. There is no `studentName`, `studentEmail`,
- * `courseId` or `courseName` — and no `studentEmail` anywhere, because
- * `UserSummary` does not carry an email at all (see above). A screen that wants
- * the student's email is asking for `UserDetail`, which this payload does not
- * include and `enrollment:read` does not entitle it to.
+ * `offering: CourseOffering` — THE INTAKE the seat is requested for, carrying the
+ * dates and guarded numbers since Phase 9; a student may hold several rows across
+ * one course's intakes, one per offering — plus `decidedBy: UserSummary | null`.
+ * There is no `studentName`, `studentEmail`, `courseId` or `courseName` — and no
+ * `studentEmail` anywhere, because `UserSummary` does not carry an email at all (see
+ * above). A screen that wants the student's email is asking for `UserDetail`, which
+ * this payload does not include and `enrollment:read` does not entitle it to.
  */
 export type { EnrollmentDto, EnrollmentStatusValue } from '@skillwright/shared/schema';
 
@@ -113,12 +122,14 @@ export type { EnrollmentDto, EnrollmentStatusValue } from '@skillwright/shared/s
 // ---------------------------------------------------------------------------
 
 /**
- * `AttendanceRegisterDto` is the body of BOTH `GET /courses/:id/attendance?date=`
- * and `PUT /courses/:id/attendance` — marking answers with the register as it now
- * reads. Its `rows` are the CURRENT APPROVED roster joined with that date's
- * records: a seat with no record yet carries `status: null`, `note: null`,
- * `markedBy: null`. There is no row for a PENDING request — the register reads
- * who may be in the room, not who has asked to be.
+ * `AttendanceRegisterDto` is the body of BOTH
+ * `GET /courses/:id/attendance?offeringId=&date=` and `PUT /courses/:id/attendance`
+ * — marking answers with the register as it now reads. Both name ONE INTAKE
+ * (`offeringId` is required since Phase 9): two intakes of the same course never
+ * share a teaching day. Its `rows` are the CURRENT APPROVED roster of that intake,
+ * joined with that date's records: a seat with no record yet carries `status: null`,
+ * `note: null`, `markedBy: null`. There is no row for a PENDING request — the
+ * register reads who may be in the room, not who has asked to be.
  *
  * `AttendanceSummaryDto` is the body of `GET /enrollments/:id/attendance` —
  * counts by status, the total, and up to ten `recent` records newest-first.

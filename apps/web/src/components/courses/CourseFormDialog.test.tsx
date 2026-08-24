@@ -7,7 +7,9 @@
  *
  * What THIS file exists to pin, beyond the shared dialog contract:
  * - create and edit are different FORMS: code and slug exist on create only,
- *   because `updateCourseSchema` accepts neither (course.ts:120-135);
+ *   because `updateCourseSchema` accepts neither, and since Phase 9 so do the
+ *   intakes — a course is created WITH at least one offering, while retuning one
+ *   happens on the course page's Intakes section;
  * - the syllabus picker validates against the SYLLABUS purpose's own limits
  *   before any round trip;
  * - an edit PATCHes only what changed.
@@ -68,6 +70,21 @@ function viewer(overrides: Partial<SessionUser> = {}): SessionUser {
   };
 }
 
+/** The served intake on the edit fixture — template edits never touch it now. */
+const OFFERING = {
+  id: '01JGXDFAM0K2Z1GYCSNM5F5RD7',
+  startDate: '2026-09-01T09:00:00.000Z',
+  endDate: null,
+  capacity: 12,
+  workshopCapacity: null,
+  approvedCount: 3,
+  seatsRemaining: 9,
+  isFull: false,
+  workshopSeatsRemaining: null,
+  // Detail payloads carry the viewer's status per intake; a teacher sees null.
+  viewerEnrollmentStatus: null,
+};
+
 const EXISTING_COURSE: CourseDetail = {
   id: COURSE_ID,
   code: 'WELD-101',
@@ -77,21 +94,13 @@ const EXISTING_COURSE: CourseDetail = {
   department: { id: DEPARTMENT_ID, name: 'Welding', slug: 'welding' },
   teacher: { id: TEACHER_ID, name: 'Dana Okafor', role: 'TEACHER', avatarUrl: null },
   duration: { value: 6, unit: 'WEEK' },
-  capacity: 12,
-  approvedCount: 3,
-  seatsRemaining: 9,
-  workshopCapacity: null,
-  workshopSeatsRemaining: null,
-  isFull: false,
   publishedAt: null,
-  startDate: '2026-09-01T09:00:00.000Z',
-  endDate: null,
   syllabusUploadId: null,
   syllabusUrl: null,
   resourceCount: 0,
-  viewerEnrollmentStatus: null,
   prerequisiteCourseId: null,
   prerequisite: null,
+  offerings: [OFFERING],
   createdAt: '2026-08-01T09:00:00.000Z',
   updatedAt: '2026-08-01T09:00:00.000Z',
 };
@@ -319,16 +328,12 @@ describe('CourseFormDialog — syllabus upload', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Workshop places — Phase 7
+// Intakes — Phase 9: a course is created WITH at least one offering
 // ---------------------------------------------------------------------------
 
-describe('CourseFormDialog — workshop places', () => {
-  it('omits workshopCapacity from a create body when the box is left blank', async () => {
-    const user = userEvent.setup();
-    const dialog = await openDialog();
-
-    // Everything else the create schema requires, so the only variable below is
-    // the workshop box.
+describe('CourseFormDialog — intakes on create', () => {
+  /** Everything else the create schema requires, so the only variable is the intake row. */
+  async function fillCreateBasics(user: UserEvent, dialog: HTMLElement): Promise<void> {
     await user.type(within(dialog).getByRole('textbox', { name: /^code/i }), 'WELD-101');
     await user.type(within(dialog).getByRole('textbox', { name: /name/i }), 'Mig Welding Basics');
     await chooseOption(
@@ -337,55 +342,79 @@ describe('CourseFormDialog — workshop places', () => {
       'Welding',
     );
     await user.type(within(dialog).getByRole('textbox', { name: /^duration/i }), '6');
-    await user.type(within(dialog).getByRole('textbox', { name: /^capacity/i }), '12');
+  }
+
+  it('omits workshopCapacity from the intake when the box is left blank', async () => {
+    const user = userEvent.setup();
+    const dialog = await openDialog();
+
+    await fillCreateBasics(user, dialog);
+    // The one intake row starts on the form; only its PLACES box is filled.
+    await user.type(within(dialog).getByRole('textbox', { name: /^places/i }), '12');
 
     await user.click(submitButton(dialog));
 
     const bodies = bodiesOf([...apiPost.mock.calls], /^\/courses$/);
     await waitFor(() => expect(bodies).toHaveLength(1));
-    // Blank means UNBOUND — a lecture-only course — so the key stays OFF the
-    // optional create field rather than arriving as a null it does not accept.
-    expect(bodies[0]).not.toHaveProperty('workshopCapacity');
+    expect(bodies[0]?.offerings).toEqual([{ capacity: 12 }]);
   });
 
-  it('sends workshopCapacity as a number when the box is filled', async () => {
+  it('sends the intake’s workshopCapacity as a number when the box is filled', async () => {
     const user = userEvent.setup();
     const dialog = await openDialog();
 
-    await user.type(within(dialog).getByRole('textbox', { name: /^code/i }), 'WELD-102');
-    await user.type(within(dialog).getByRole('textbox', { name: /name/i }), 'CNC Practice');
-    await chooseOption(
-      user,
-      within(dialog).getByRole('combobox', { name: /department/i }),
-      'Welding',
-    );
-    await user.type(within(dialog).getByRole('textbox', { name: /^duration/i }), '6');
-    await user.type(within(dialog).getByRole('textbox', { name: /^capacity/i }), '10');
+    await fillCreateBasics(user, dialog);
+    await user.type(within(dialog).getByRole('textbox', { name: /^places/i }), '10');
     await user.type(within(dialog).getByRole('textbox', { name: /workshop places/i }), '4');
 
     await user.click(submitButton(dialog));
 
     const bodies = bodiesOf([...apiPost.mock.calls], /^\/courses$/);
     await waitFor(() => expect(bodies).toHaveLength(1));
-    expect(bodies[0]).toMatchObject({ capacity: 10, workshopCapacity: 4 });
+    expect(bodies[0]?.offerings).toEqual([{ capacity: 10, workshopCapacity: 4 }]);
   });
 
-  it('unbinds the workshop with an explicit null when the box is emptied on edit', async () => {
-    servedDetail = { ...EXISTING_COURSE, workshopCapacity: 4, workshopSeatsRemaining: 1 };
+  it('appends and removes intake rows, sending every live one', async () => {
     const user = userEvent.setup();
-    const dialog = await openDialog({ course: { id: COURSE_ID, name: EXISTING_COURSE.name } });
+    const dialog = await openDialog();
 
-    const box = within(dialog).getByRole('textbox', { name: /workshop places/i });
-    expect(box).toHaveValue('4');
-    await user.clear(box);
+    await fillCreateBasics(user, dialog);
+    await user.type(within(dialog).getByRole('textbox', { name: /^places \(intake 1\)/i }), '12');
+
+    await user.click(within(dialog).getByRole('button', { name: /add another intake/i }));
+    await user.type(within(dialog).getByRole('textbox', { name: /^places \(intake 2\)/i }), '8');
+
+    // Two rows now, each carrying its own remove control — take the second row off.
+    const removeButtons = within(dialog).getAllByRole('button', { name: /remove this intake/i });
+    await user.click(removeButtons[removeButtons.length - 1] as HTMLElement);
 
     await user.click(submitButton(dialog));
 
-    await waitFor(() => expect(apiPatch).toHaveBeenCalledTimes(1));
-    const [, body] = apiPatch.mock.calls[0] as [string, Record<string, unknown>];
-    // updateCourseSchema takes null where create takes omission: explicit null is
-    // what CLEARS the bound.
-    expect(body).toEqual({ workshopCapacity: null });
+    const bodies = bodiesOf([...apiPost.mock.calls], /^\/courses$/);
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    // The second row was removed BEFORE submit — one intake travels.
+    expect(bodies[0]?.offerings).toEqual([{ capacity: 12 }]);
+  });
+
+  it('refuses an intake-less create with a per-row message before any POST', async () => {
+    const user = userEvent.setup();
+    const dialog = await openDialog();
+
+    // Code, name, department, duration — but NO places on the intake row.
+    await user.type(within(dialog).getByRole('textbox', { name: /^code/i }), 'WELD-103');
+    await user.type(within(dialog).getByRole('textbox', { name: /name/i }), 'TIG Welding Basics');
+    await chooseOption(
+      user,
+      within(dialog).getByRole('combobox', { name: /department/i }),
+      'Welding',
+    );
+    await user.type(within(dialog).getByRole('textbox', { name: /^duration/i }), '6');
+
+    await user.click(submitButton(dialog));
+
+    expect(await within(dialog).findByText(/whole number of at least 1/i)).toBeInTheDocument();
+    // Nothing reached the wire — the intake row is a required part of a course.
+    expect(bodiesOf([...apiPost.mock.calls], /^\/courses$/)).toHaveLength(0);
   });
 });
 

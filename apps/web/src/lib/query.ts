@@ -140,12 +140,13 @@ export const qk = {
   course: (courseId: string) => ['courses', courseId] as QueryKey,
   courseResources: (courseId: string) => ['courses', courseId, 'resources'] as QueryKey,
   courseEnrollments: (courseId: string) => ['courses', courseId, 'enrollments'] as QueryKey,
-  // One slot PER DATE under the same `courses/:id/attendance` head. A register is a
-  // day's answer, so the date rides in the key and switching dates is a cache miss
-  // that refetches rather than a stale read; invalidating the two-element prefix
-  // would sweep dates the save never touched.
-  courseAttendance: (courseId: string, date: string) =>
-    ['courses', courseId, 'attendance', { date }] as QueryKey,
+  // One slot PER INTAKE AND DATE under the same `courses/:id/attendance` head. A
+  // register is one intake's day-answer since Phase 9 (the endpoints REQUIRE an
+  // `offeringId`), so both ride in the key and switching either is a cache miss that
+  // refetches rather than a stale read; invalidating the three-element prefix would
+  // sweep intakes and dates the save never touched.
+  courseAttendance: (courseId: string, offeringId: string, date: string) =>
+    ['courses', courseId, 'attendance', { offeringId, date }] as QueryKey,
   enrollmentAttendance: (enrollmentId: string) =>
     ['enrollments', enrollmentId, 'attendance'] as QueryKey,
   enrollments: (params: Record<string, unknown> = {}) => ['enrollments', params] as QueryKey,

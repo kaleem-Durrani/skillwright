@@ -157,10 +157,17 @@ function RegisterRow({
 
 export interface AttendanceRegisterProps {
   courseId: string;
+  /**
+   * The intake whose register this is. Required since Phase 9 — the GET, the PUT
+   * and the export all demand an `offeringId`, because two intakes of one course
+   * never share a teaching day. WHICH intake is on screen is the caller's decision
+   * (the Students tab's selector); this component only names what it was given.
+   */
+  offeringId: string;
 }
 
 /**
- * The whole register for one session, saved as ONE action.
+ * The whole register for one session of ONE intake, saved as ONE action.
  *
  * The API is bulk (`PUT /courses/:id/attendance`), so the UI is too: the teacher
  * works down the roster choosing present/absent/late, and a single Save sends one
@@ -175,16 +182,18 @@ export interface AttendanceRegisterProps {
  * they were approved — so the server's answer always wins, and the 409 path below
  * says so out loud when it happens mid-save.
  */
-export function AttendanceRegister({ courseId }: AttendanceRegisterProps) {
+export function AttendanceRegister({ courseId, offeringId }: AttendanceRegisterProps) {
   const client = useQueryClient();
   const [date, setDate] = useState(todayISO);
   const [conflict, setConflict] = useState(false);
   const [draft, setDraft] = useState<RegisterDraft>({});
 
   const register = useQuery({
-    queryKey: qk.courseAttendance(courseId, date),
+    queryKey: qk.courseAttendance(courseId, offeringId, date),
     queryFn: () =>
-      api.get<AttendanceRegisterDto>(`/courses/${courseId}/attendance`, { query: { date } }),
+      api.get<AttendanceRegisterDto>(`/courses/${courseId}/attendance`, {
+        query: { offeringId, date },
+      }),
   });
 
   useEffect(() => {
@@ -206,9 +215,9 @@ export function AttendanceRegister({ courseId }: AttendanceRegisterProps) {
       api.put<AttendanceRegisterDto>(`/courses/${courseId}/attendance`, input),
     onSuccess: (saved) => {
       // The response IS the register as it now reads — same schema as the GET —
-      // so it becomes the cached answer for this date and the reseed below runs
-      // against server truth (notes included) without a second round trip.
-      client.setQueryData(qk.courseAttendance(courseId, date), saved);
+      // so it becomes the cached answer for this intake and date and the reseed
+      // below runs against server truth (notes included) without a second round trip.
+      client.setQueryData(qk.courseAttendance(courseId, offeringId, date), saved);
       toast.success('Register saved', {
         description: `Attendance for ${formatDate(date)} has been recorded.`,
       });
@@ -247,6 +256,7 @@ export function AttendanceRegister({ courseId }: AttendanceRegisterProps) {
 
   /** Exactly the seats with a chosen mark — the body the wire schema actually allows. */
   const markedInput = (): MarkRegisterInput => ({
+    offeringId,
     date,
     marks: rows.flatMap((row) => {
       const entry = draft[row.enrollmentId];

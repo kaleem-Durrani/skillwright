@@ -6,11 +6,10 @@ import { ArrowRight, BookOpen, FileText, MessagesSquare, Plus, UserRoundCheck } 
 /*
  * The catalogue row and the page envelope, taken from the package that DEFINES them.
  *
- * `GET /courses` serves `paginated(courseListItemSchema)` (courses.routes.ts:49-58), not
- * the `courseSummarySchema` this file used to name. `CourseListItem` is the summary plus
- * `description` and `viewerEnrollmentStatus` (course.ts:77-81), so every field read below
- * is unchanged — the type now just says what the wire actually sends instead of a
- * narrower guess at it.
+ * `GET /courses` serves `paginated(courseListItemSchema)` (courses.routes.ts:49-58),
+ * not the `courseSummarySchema` this file used to name: the summary plus
+ * `description` and an `offerings` array — since Phase 9 the seats line under each of
+ * these cards reads the soonest OPEN intake, because a template has no capacity.
  *
  * It comes from this specifier rather than `@/lib/types` only because that barrel does
  * not re-export it yet and this change may not edit it; the specifier is the same one
@@ -28,6 +27,7 @@ import { useMotionKit } from '@/lib/motion';
 import { subject, usePolicy } from '@/lib/policy';
 import { useSession } from '@/lib/session';
 import { formatDuration, formatRelative } from '@/lib/format';
+import { soonestOpenOffering, formatOfferingDates } from '@/lib/offerings';
 import type { DashboardStats, EnrollmentDto } from '@/lib/types';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card, CardTitle } from '@/components/ui/Card';
@@ -294,10 +294,11 @@ export function DashboardPage() {
                       </Link>
                     </CardTitle>
                     {/*
-                      The row is a `courseListItem`, so `viewerEnrollmentStatus` IS on it
-                      (course.ts:77-81) — but the server sends it as null for everyone who
-                      is not a STUDENT (courses.service.ts:196), so it cannot be the badge
-                      on a card three roles read. Publish state is carried for all of them.
+                      The row is a `courseListItem`, but the per-intake
+                      `viewerEnrollmentStatus` is served only for STUDENT viewers — null
+                      for everyone else — and this card is read by three roles. Publish
+                      state is carried for all of them; a student's own seat shows on
+                      the course page's intakes.
                     */}
                     <StatusChip status={course.publishedAt ? 'PUBLISHED' : 'DRAFT'} />
                   </div>
@@ -314,12 +315,13 @@ export function DashboardPage() {
                     {course.teacher.name} ·{' '}
                     {formatDuration(course.duration.value, course.duration.unit)}
                   </p>
-                  <CapacityBar
-                    approved={course.approvedCount}
-                    capacity={course.capacity}
-                    seatsRemaining={course.seatsRemaining}
-                    isFull={course.isFull}
-                  />
+                  {/*
+                    The seats line reads the SOONEST OPEN intake — a template has no
+                    capacity of its own. Every intake full: the next intake's dates
+                    beside an honest "Full". No intakes: no bar at all, because there
+                    is nothing to count.
+                  */}
+                  <NextIntakeBar course={course} />
                   {/*
                     The manage affordances for the course's own teacher. The wrapper
                     must be POSITIONED and late in DOM order to paint above the title
@@ -406,7 +408,13 @@ export function DashboardPage() {
                     <div className="flex min-w-0 flex-col">
                       <span className="truncate text-sm font-medium">{request.student.name}</span>
                       <span className="truncate text-xs text-fg-tertiary">
-                        {request.course.name} · asked {formatRelative(request.requestedAt)}
+                        {/*
+                          The INTAKE beside the course — since Phase 9 a request names
+                          one, and two intakes of the same course can both have a
+                          waiting list. Dates, not ids.
+                        */}
+                        {request.course.name} · intake {formatOfferingDates(request.offering)} ·
+                        asked {formatRelative(request.requestedAt)}
                       </span>
                     </div>
                     <Button asChild variant="secondary" size="sm" className="shrink-0">
@@ -426,46 +434,51 @@ export function DashboardPage() {
 }
 
 /**
- * `seatsRemaining` and `isFull` are served pre-computed on every course payload
- * (course.ts:37-39) precisely so no screen recomputes them and drifts from the answer
- * the enrol button is gated on. Only the bar's WIDTH is derived here, because a
- * percentage is presentation rather than a domain fact.
+ * The seats line under a "Your courses" card, fed by the SOONEST OPEN intake —
+ * `seatsRemaining`/`isFull` are served pre-computed on every offering
+ * (course.ts:38-52) precisely so no screen recomputes them. Only the bar's WIDTH is
+ * derived here, because a percentage is presentation rather than a domain fact.
+ *
+ * A course with no open intake shows its next dates beside an honest "Full"; one
+ * with no intakes at all renders nothing — there is nothing to count.
  */
-function CapacityBar({
-  approved,
-  capacity,
-  seatsRemaining,
-  isFull,
-}: {
-  approved: number;
-  capacity: number;
-  seatsRemaining: number;
-  isFull: boolean;
-}) {
-  const ratio = capacity > 0 ? Math.min(1, approved / capacity) : 0;
+function NextIntakeBar({ course }: { course: CourseListItem }) {
+  const open = soonestOpenOffering(course.offerings);
+
+  if (open === undefined) {
+    if (course.offerings.length === 0) return null;
+    const next = course.offerings[0];
+    return (
+      <p className="pt-1 text-2xs text-fg-tertiary">
+        {formatOfferingDates(next)} · <span className="font-semibold text-danger-fg">Full</span>
+      </p>
+    );
+  }
+
+  const ratio = open.capacity > 0 ? Math.min(1, open.approvedCount / open.capacity) : 0;
 
   return (
     <div className="flex flex-col gap-1.5 pt-1">
       <div className="flex items-center justify-between text-2xs text-fg-tertiary">
-        <span>
-          {approved} of {capacity} places taken
-        </span>
-        {isFull ? (
+        <span>{formatOfferingDates(open)}</span>
+        {open.isFull ? (
           <span className="font-semibold text-danger-fg">Full</span>
         ) : (
-          <span>{seatsRemaining} left</span>
+          <span className="tabular-nums">
+            {open.seatsRemaining} of {open.capacity} places left
+          </span>
         )}
       </div>
       <div
         role="progressbar"
-        aria-valuenow={approved}
+        aria-valuenow={open.approvedCount}
         aria-valuemin={0}
-        aria-valuemax={capacity}
-        aria-label="Enrolment capacity"
+        aria-valuemax={open.capacity}
+        aria-label={`Enrolment capacity for ${formatOfferingDates(open)}`}
         className="h-1.5 w-full overflow-hidden rounded-full bg-sunken"
       >
         <div
-          className={cn('h-full rounded-full', isFull ? 'bg-danger' : 'bg-brand')}
+          className={cn('h-full rounded-full', open.isFull ? 'bg-danger' : 'bg-brand')}
           style={{ inlineSize: `${ratio * 100}%` }}
         />
       </div>

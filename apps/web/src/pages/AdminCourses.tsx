@@ -8,6 +8,10 @@ import { qk } from '@/lib/query';
 import { usePolicy } from '@/lib/policy';
 import type { CourseListItem } from '@/lib/types';
 import { formatDuration } from '@/lib/format';
+// Same seats line as the catalogue: soonest OPEN intake, in `hasSeats` semantics.
+// No viewer-status chip here: an ADMIN receives null per intake, so rows keep
+// publish state, exactly as before the split.
+import { formatOfferingDates, soonestOpenOffering } from '@/lib/offerings';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/Button';
 import { Card, CardTitle } from '@/components/ui/Card';
@@ -21,6 +25,33 @@ import { CourseFormDialog } from '@/components/courses/CourseFormDialog';
 import { CoursePublishButton } from '@/components/courses/CoursePublishButton';
 import { CourseRowActions } from '@/components/courses/CourseRowActions';
 import { Route } from '@/routes/_app/admin.courses';
+
+/**
+ * The seats line for one admin row: the soonest intake that still has seats, with
+ * the workshop bound beside it when that intake binds one. An admin sees the same
+ * `hasSeats` reading the catalogue does — a template has no capacity of its own.
+ */
+function nextIntakeCell(course: CourseListItem): {
+  label: string;
+  places: string | null;
+  workshop: string | null;
+} {
+  const open = soonestOpenOffering(course.offerings);
+  if (open !== undefined) {
+    return {
+      label: formatOfferingDates(open),
+      places: `${open.seatsRemaining} of ${open.capacity} places left`,
+      workshop:
+        open.workshopCapacity !== null
+          ? `${open.workshopSeatsRemaining} of ${open.workshopCapacity} workshop places left`
+          : null,
+    };
+  }
+  if (course.offerings.length > 0) {
+    return { label: 'All intakes full', places: null, workshop: null };
+  }
+  return { label: 'No intakes scheduled', places: null, workshop: null };
+}
 
 /**
  * The ADMIN view of every course — created or not, published or not. It reads the
@@ -144,24 +175,28 @@ export function AdminCoursesPage() {
             secondary: true,
           },
           {
-            id: 'places',
-            header: 'Places',
+            id: 'intake',
+            header: 'Next intake',
             align: 'end',
-            cell: (course) => (
-              <span className="tabular-nums">
-                {course.approvedCount}/{course.capacity}
-                {/*
-                  The second bound, only when it exists — an unbound (lecture)
-                  course says nothing about a workshop it does not have.
-                */}
-                {course.workshopCapacity !== null ? (
-                  <span className="block text-xs text-fg-tertiary">
-                    {course.workshopSeatsRemaining} of {course.workshopCapacity} workshop places
-                    left
-                  </span>
-                ) : null}
-              </span>
-            ),
+            cell: (course) => {
+              const intake = nextIntakeCell(course);
+              return (
+                <span className="flex flex-col text-xs">
+                  <span>{intake.label}</span>
+                  {intake.places !== null ? (
+                    <span className="tabular-nums">{intake.places}</span>
+                  ) : null}
+                  {/*
+                    The second bound, only when the shown intake binds one — an
+                    unbound (lecture) intake says nothing about a workshop it does
+                    not have.
+                  */}
+                  {intake.workshop !== null ? (
+                    <span className="tabular-nums text-fg-tertiary">{intake.workshop}</span>
+                  ) : null}
+                </span>
+              );
+            },
           },
           {
             id: 'status',
@@ -191,69 +226,67 @@ export function AdminCoursesPage() {
             ),
           },
         ]}
-        renderCard={(course) => (
-          <Card className="flex flex-col gap-2">
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex min-w-0 flex-col">
-                <CardTitle className="text-base">
-                  <Link
-                    to="/courses/$courseId"
-                    params={{ courseId: course.id }}
-                    className="hover:text-fg-brand"
-                  >
-                    {course.name}
-                  </Link>
-                </CardTitle>
-                <p className="text-xs text-fg-tertiary">
-                  {course.code} · {course.department.name}
-                </p>
+        renderCard={(course) => {
+          const intake = nextIntakeCell(course);
+          return (
+            <Card className="flex flex-col gap-2">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex min-w-0 flex-col">
+                  <CardTitle className="text-base">
+                    <Link
+                      to="/courses/$courseId"
+                      params={{ courseId: course.id }}
+                      className="hover:text-fg-brand"
+                    >
+                      {course.name}
+                    </Link>
+                  </CardTitle>
+                  <p className="text-xs text-fg-tertiary">
+                    {course.code} · {course.department.name}
+                  </p>
+                </div>
+                <StatusChip status={course.publishedAt ? 'PUBLISHED' : 'DRAFT'} size="sm" />
               </div>
-              <StatusChip status={course.publishedAt ? 'PUBLISHED' : 'DRAFT'} size="sm" />
-            </div>
-            <dl className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-fg-tertiary">
-              <div className="flex gap-1">
-                <dt>Teacher:</dt>
-                <dd className="text-fg-secondary">{course.teacher.name}</dd>
-              </div>
-              <div className="flex gap-1">
-                <dt>Duration:</dt>
-                <dd className="text-fg-secondary">
-                  {formatDuration(course.duration.value, course.duration.unit)}
-                </dd>
-              </div>
-              <div className="flex gap-1">
-                <dt>Places:</dt>
-                <dd className="text-fg-secondary tabular-nums">
-                  {course.approvedCount}/{course.capacity}
-                </dd>
-              </div>
-              {course.workshopCapacity !== null ? (
+              <dl className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-fg-tertiary">
                 <div className="flex gap-1">
-                  <dt>Workshop:</dt>
-                  <dd className="text-fg-secondary tabular-nums">
-                    {course.workshopSeatsRemaining} of {course.workshopCapacity} places left
+                  <dt>Teacher:</dt>
+                  <dd className="text-fg-secondary">{course.teacher.name}</dd>
+                </div>
+                <div className="flex gap-1">
+                  <dt>Duration:</dt>
+                  <dd className="text-fg-secondary">
+                    {formatDuration(course.duration.value, course.duration.unit)}
                   </dd>
                 </div>
-              ) : null}
-            </dl>
-            <div className="relative z-10 flex items-center justify-end gap-1 pt-1">
-              {/* Positioned above nothing here — the card title's link is not an
-                  overlay in this rendering — but kept in one piece with the table's
-                  action column so both stay the same controls. */}
-              <CoursePublishButton
-                course={{
-                  id: course.id,
-                  publishedAt: course.publishedAt,
-                  teacherId: course.teacher.id,
-                }}
-              />
-              <CourseRowActions
-                course={{ id: course.id, name: course.name, teacherId: course.teacher.id }}
-                onEdit={() => setEditing(course)}
-              />
-            </div>
-          </Card>
-        )}
+                <div className="flex gap-1">
+                  <dt>Next intake:</dt>
+                  <dd className="text-fg-secondary">
+                    {intake.label}
+                    {intake.places !== null ? (
+                      <span className="tabular-nums"> · {intake.places}</span>
+                    ) : null}
+                  </dd>
+                </div>
+              </dl>
+              <div className="relative z-10 flex items-center justify-end gap-1 pt-1">
+                {/* Positioned above nothing here — the card title's link is not an
+                    overlay in this rendering — but kept in one piece with the table's
+                    action column so both stay the same controls. */}
+                <CoursePublishButton
+                  course={{
+                    id: course.id,
+                    publishedAt: course.publishedAt,
+                    teacherId: course.teacher.id,
+                  }}
+                />
+                <CourseRowActions
+                  course={{ id: course.id, name: course.name, teacherId: course.teacher.id }}
+                  onEdit={() => setEditing(course)}
+                />
+              </div>
+            </Card>
+          );
+        }}
         empty={
           isFiltered ? (
             <EmptyState

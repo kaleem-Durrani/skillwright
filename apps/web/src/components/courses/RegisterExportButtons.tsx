@@ -18,6 +18,13 @@ function courseSubject(courseId: string, teacherId: string) {
 export interface RegisterExportButtonsProps {
   courseId: string;
   teacherId: string;
+  /**
+   * The intake both exports are scoped to. The attendance export REQUIRES an
+   * `offeringId` (attendanceExportQuerySchema) and the enrolment export accepts one,
+   * so the buttons ride whatever intake the Students tab has selected — an export
+   * mixing two intakes would not be a register.
+   */
+  offeringId: string;
 }
 
 /**
@@ -37,7 +44,11 @@ export interface RegisterExportButtonsProps {
  * page rendered — the buttons are hidden otherwise — so the anchor rides the exact
  * gates the server enforces.
  */
-export function RegisterExportButtons({ courseId, teacherId }: RegisterExportButtonsProps) {
+export function RegisterExportButtons({
+  courseId,
+  teacherId,
+  offeringId,
+}: RegisterExportButtonsProps) {
   const policy = usePolicy();
   const viewerSubject = courseSubject(courseId, teacherId);
 
@@ -50,7 +61,7 @@ export function RegisterExportButtons({ courseId, teacherId }: RegisterExportBut
       {mayReadEnrollments ? (
         <Button variant="secondary" size="sm" asChild>
           <a
-            href={apiUrl('/enrollments/export', { courseId })}
+            href={apiUrl('/enrollments/export', { courseId, offeringId })}
             download="enrollments.csv"
             aria-label="Export the enrolment register as CSV"
           >
@@ -62,7 +73,7 @@ export function RegisterExportButtons({ courseId, teacherId }: RegisterExportBut
       {mayReadAttendance ? (
         <Button variant="secondary" size="sm" asChild>
           <a
-            href={apiUrl(`/courses/${courseId}/attendance/export`)}
+            href={apiUrl(`/courses/${courseId}/attendance/export`, { offeringId })}
             download="attendance.csv"
             aria-label="Export the attendance register as CSV"
           >

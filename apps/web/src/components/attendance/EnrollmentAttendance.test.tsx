@@ -53,6 +53,19 @@ const VIEWER: SessionUser = {
   totpEnabled: false,
 };
 
+/** The intake this enrolment names — required on every row since Phase 9. */
+const OFFERING = {
+  id: '01JGXDFAM0K2Z1GYCSNM5F5RD6',
+  startDate: '2026-09-01T09:00:00.000Z',
+  endDate: '2026-12-15T17:00:00.000Z',
+  capacity: 12,
+  workshopCapacity: null,
+  approvedCount: 3,
+  seatsRemaining: 9,
+  isFull: false,
+  workshopSeatsRemaining: null,
+};
+
 function enrollment(overrides: Partial<EnrollmentDto> = {}): EnrollmentDto {
   return {
     id: ENROLLMENT_ID,
@@ -70,14 +83,10 @@ function enrollment(overrides: Partial<EnrollmentDto> = {}): EnrollmentDto {
       department: { id: '01JGXDFAM0K2Z1GYCSNM5F5RD4', name: 'Welding', slug: 'welding' },
       teacher: { id: TEACHER_ID, name: 'Dana Okafor', role: 'TEACHER', avatarUrl: null },
       duration: { value: 6, unit: 'WEEK' },
-      capacity: 12,
-      approvedCount: 3,
-      seatsRemaining: 9,
-      workshopCapacity: null,
-      workshopSeatsRemaining: null,
-      isFull: false,
       publishedAt: '2026-08-01T09:00:00.000Z',
     },
+    // The intake the seat belongs to — dates and guarded numbers live here now.
+    offering: OFFERING,
     ...overrides,
   };
 }

@@ -67,6 +67,23 @@ const TEACHER_ID = '01JGXDFAM0K2Z1GYCSNM5F5RCZ';
 const STUDENT_ID = '01JGXDFAM0K2Z1GYCSNM5F5RD1';
 const RUNG_ID = '01JGXDFAM0K2Z1GYCSNM5F5RD9';
 
+/** The intake every catalogue row carries since Phase 9 — soonest-start first. */
+function offering(overrides: Partial<CourseListItem['offerings'][number]> = {}) {
+  return {
+    id: '01JGXDFAM0K2Z1GYCSNM5F5RC3',
+    startDate: '2026-09-01T09:00:00.000Z',
+    endDate: null,
+    capacity: 12,
+    workshopCapacity: null,
+    approvedCount: 3,
+    seatsRemaining: 9,
+    isFull: false,
+    workshopSeatsRemaining: null,
+    viewerEnrollmentStatus: null,
+    ...overrides,
+  };
+}
+
 const VIEWER: SessionUser = {
   id: STUDENT_ID,
   email: 'student@example.edu',
@@ -91,15 +108,9 @@ function listItem(overrides: Partial<CourseListItem> = {}): CourseListItem {
     department: { id: DEPARTMENT_ID, name: 'Welding', slug: 'welding' },
     teacher: { id: TEACHER_ID, name: 'Dana Okafor', role: 'TEACHER', avatarUrl: null },
     duration: { value: 6, unit: 'WEEK' },
-    capacity: 12,
-    approvedCount: 3,
-    seatsRemaining: 9,
-    workshopCapacity: null,
-    workshopSeatsRemaining: null,
-    isFull: false,
     publishedAt: '2026-08-01T09:00:00.000Z',
     description: 'Strikes, beads and safety.',
-    viewerEnrollmentStatus: null,
+    offerings: [offering()],
     prerequisiteCourseId: null,
     prerequisite: null,
     ...overrides,
