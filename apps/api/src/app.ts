@@ -27,6 +27,7 @@ import authRoutes from './modules/auth/auth.routes.js';
 import departmentsRoutes from './modules/departments/departments.routes.js';
 import coursesRoutes from './modules/courses/courses.routes.js';
 import enrollmentsRoutes from './modules/enrollments/enrollments.routes.js';
+import attendanceRoutes from './modules/attendance/attendance.routes.js';
 import resourcesRoutes from './modules/resources/resources.routes.js';
 import announcementsRoutes from './modules/announcements/announcements.routes.js';
 import commentsRoutes from './modules/comments/comments.routes.js';
@@ -118,6 +119,9 @@ export async function buildApp(): Promise<AppInstance> {
   await app.register(departmentsRoutes, { prefix: `${API_PREFIX}/departments` });
   await app.register(coursesRoutes, { prefix: `${API_PREFIX}/courses` });
   await app.register(enrollmentsRoutes, { prefix: `${API_PREFIX}/enrollments` });
+  // Attendance spans /courses/:id/attendance and /enrollments/:id/attendance, so it
+  // registers at the API root and spells its full paths (attendance.routes.ts).
+  await app.register(attendanceRoutes, { prefix: API_PREFIX });
   await app.register(resourcesRoutes, { prefix: `${API_PREFIX}/resources` });
   await app.register(announcementsRoutes, { prefix: `${API_PREFIX}/announcements` });
   await app.register(commentsRoutes, { prefix: `${API_PREFIX}/comments` });

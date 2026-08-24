@@ -11,9 +11,9 @@ calling `can()`. Nothing here was written by hand, which is why it cannot
 disagree with the code — and if it ever did, the `permissions-doc` job in CI
 would fail before the change could merge.
 
-- **46** actions, derived from the policy object's own keys
-- **184** cells in the role matrix
-- **230** cells in the state matrix
+- **48** actions, derived from the policy object's own keys
+- **192** cells in the role matrix
+- **240** cells in the state matrix
 - Asserted independently in `packages/shared/test/policy-matrix.test.ts`
 
 ## Reading a cell
@@ -41,6 +41,8 @@ rule reads named fields off `Subject` and denies when they are absent.
 | `announcement:publish` | ✗ deny | ✗ deny | `isAuthor` | ✓ allow |
 | `announcement:read` | `isPublished` | `isPublished` | `or(isPublished, isAuthor)` | ✓ allow |
 | `announcement:update` | ✗ deny | ✗ deny | `isAuthor` | ✓ allow |
+| `attendance:mark` | ✗ deny | ✗ deny | `ownsCourse` | ✓ allow |
+| `attendance:read` | ✗ deny | `isEnrolledStudent` | `ownsCourse` | ✓ allow |
 | `audit:read` | ✗ deny | ✗ deny | ✗ deny | ✓ allow |
 | `comment:create` | ✗ deny | ✓ allow | ✓ allow | ✓ allow |
 | `comment:delete` | ✗ deny | `isAuthor` | `or(isAuthor, ownsCourse)` | ✓ allow |
@@ -111,6 +113,8 @@ demo: reads and ordinary mutations pass, deletions and suspensions do not.
 | `announcement:publish` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `announcement:read` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `announcement:update` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
+| `attendance:mark` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
+| `attendance:read` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `audit:read` | ✗ `TEACHER:deny` | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✗ `TEACHER:deny` |
 | `comment:create` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `comment:delete` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✗ `provenance:DEMO` |

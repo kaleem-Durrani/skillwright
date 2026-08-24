@@ -105,6 +105,20 @@ const ENROLLMENT_S2_IN_B: Subject = {
   enrollmentStatus: 'PENDING',
 };
 
+/** An attendance row as its ENROLLMENT — the shape a personal summary is gated on. */
+const ATTENDANCE_OF_S1_IN_A: Subject = {
+  id: 'e_1',
+  studentId: STUDENT_IN.id,
+  courseId: 'c_a',
+  courseTeacherId: TEACHER_A.id,
+};
+const ATTENDANCE_OF_S2_IN_B: Subject = {
+  id: 'e_2',
+  studentId: STUDENT_OUT.id,
+  courseId: 'c_b',
+  courseTeacherId: TEACHER_B.id,
+};
+
 /*
  * `publishedAt` is the COURSE's, carried on the resource subject: a resource is never
  * more visible than the course it hangs off, so the public branch of `resource:read`
@@ -417,6 +431,59 @@ const ENROLLMENT_CELLS: readonly Cell[] = [
     ENROLLMENT_S1_IN_A,
   ),
   ok('admin withdraws any enrollment', ADMIN, 'enrollment:withdraw', ENROLLMENT_S1_IN_A),
+];
+
+const ATTENDANCE_CELLS: readonly Cell[] = [
+  ok('teacher marks the register of their own course', TEACHER_A, 'attendance:mark', COURSE_A_LIVE),
+  no(
+    "teacher marks another teacher's register",
+    TEACHER_A,
+    'attendance:mark',
+    'TEACHER:ownsCourse',
+    COURSE_B_LIVE,
+  ),
+  no('student marks a register', STUDENT_IN, 'attendance:mark', 'STUDENT:deny', COURSE_A_LIVE),
+  ok('admin marks any register', ADMIN, 'attendance:mark', COURSE_B_LIVE),
+
+  // The subject here is the ENROLLMENT row, so `isEnrolledStudent` passes only for
+  // the student's own summary.
+  ok(
+    'student reads their own attendance summary',
+    STUDENT_IN,
+    'attendance:read',
+    ATTENDANCE_OF_S1_IN_A,
+  ),
+  no(
+    "student reads another student's attendance summary",
+    STUDENT_IN,
+    'attendance:read',
+    'STUDENT:isEnrolledStudent',
+    ATTENDANCE_OF_S2_IN_B,
+  ),
+  // On the COURSE shape — the whole register — a student's rule reads an absent
+  // `studentId` and denies even though they are enrolled. A class list is not
+  // assembled one personal summary at a time.
+  no(
+    'an enrolled student still cannot read the whole register',
+    STUDENT_IN,
+    'attendance:read',
+    'STUDENT:isEnrolledStudent',
+    COURSE_A_LIVE_APPROVED,
+  ),
+  ok('teacher reads the register of their own course', TEACHER_A, 'attendance:read', COURSE_A_LIVE),
+  no(
+    "teacher reads another teacher's register or summaries",
+    TEACHER_A,
+    'attendance:read',
+    'TEACHER:ownsCourse',
+    ATTENDANCE_OF_S2_IN_B,
+  ),
+  ok(
+    'admin reads any register or attendance summary',
+    ADMIN,
+    'attendance:read',
+    ATTENDANCE_OF_S2_IN_B,
+  ),
 ];
 
 const RESOURCE_CELLS: readonly Cell[] = [
@@ -1021,6 +1088,7 @@ const PLATFORM_CELLS: readonly Cell[] = [
 const MATRIX: readonly Cell[] = [
   ...COURSE_CELLS,
   ...ENROLLMENT_CELLS,
+  ...ATTENDANCE_CELLS,
   ...RESOURCE_CELLS,
   ...ANNOUNCEMENT_CELLS,
   ...COMMENT_CELLS,
@@ -1100,6 +1168,7 @@ function runCell(cell: Cell): void {
 const groups: ReadonlyArray<readonly [string, readonly Cell[]]> = [
   ['course', COURSE_CELLS],
   ['enrollment', ENROLLMENT_CELLS],
+  ['attendance', ATTENDANCE_CELLS],
   ['resource', RESOURCE_CELLS],
   ['announcement', ANNOUNCEMENT_CELLS],
   ['comment', COMMENT_CELLS],

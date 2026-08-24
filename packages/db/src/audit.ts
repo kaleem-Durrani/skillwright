@@ -53,6 +53,7 @@ export const AUDITED_MODELS: ReadonlySet<string> = new Set([
   'Department',
   'Course',
   'Enrollment',
+  'AttendanceRecord',
   'Resource',
   'Announcement',
   'Comment',

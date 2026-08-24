@@ -64,6 +64,14 @@ enum EnrollmentStatus {
   COMPLETED
 }
 
+/// Presence is a record of fact, not a judgement of work — which is why the set
+/// stops at three and reserves nothing for assessment (see ResourceType).
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+}
+
 /// Set explicitly by the creator. Never inferred from a MIME type — inferring is
 /// what made this enum meaningless in the previous system.
 /// ASSIGNMENT and QUIZ are deliberately absent: the assessment engine is out of
@@ -168,6 +176,7 @@ model User {
   coursesTaught     Course[]                  @relation("CourseTeacher")
   enrollments       Enrollment[]              @relation("EnrollmentStudent")
   enrollmentsDecided Enrollment[]             @relation("EnrollmentDecidedBy")
+  attendanceMarked  AttendanceRecord[]        @relation("AttendanceMarkedBy")
   resourcesAuthored Resource[]                @relation("ResourceAuthor")
   announcements     Announcement[]            @relation("AnnouncementAuthor")
   comments          Comment[]                 @relation("CommentAuthor")
@@ -343,8 +352,8 @@ model Course {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  enrollments Enrollment[]
-  resources   Resource[]
+  enrollments       Enrollment[]
+  resources         Resource[]
 
   @@index([departmentId])
   @@index([teacherId])
@@ -374,12 +383,48 @@ model Enrollment {
 
   updatedAt DateTime @updatedAt
 
+  attendanceRecords AttendanceRecord[]
+
   /// One enrollment row per (student, course), forever. A withdrawn student who
   /// re-applies updates this row rather than creating a second one.
   @@unique([studentId, courseId])
   @@index([courseId, status])
   @@index([studentId, status])
   @@index([decidedById])
+}
+
+/// One row per (enrollment, session date). Marking a register twice for the same
+/// day CORRECTS the row rather than duplicating it — the same discipline as
+/// `Enrollment @@unique([studentId, courseId])`.
+///
+/// A satellite on Enrollment, not on (User, Course): presence only means anything
+/// about a seat someone actually holds.
+model AttendanceRecord {
+  id String @id @default(cuid())
+
+  enrollment   Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  enrollmentId String
+
+  /// The teaching day this row is about — a bare calendar date, not an instant.
+  sessionDate DateTime @db.Date
+
+  status AttendanceStatus
+
+  /// Which teacher or admin marked it. Kept even if they later leave, exactly like
+  /// Enrollment.decidedById.
+  markedBy   User?  @relation("AttendanceMarkedBy", fields: [markedById], references: [id], onDelete: SetNull)
+  markedById String?
+
+  /// Free text: "left early for an apprenticeship", not a grade.
+  note String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// The unique pair IS the read path for per-enrollment history; the date index
+  /// serves per-course-by-date reads that arrive through the enrollment join.
+  @@unique([enrollmentId, sessionDate])
+  @@index([sessionDate])
 }
 
 // ---------------------------------------------------------------------------

@@ -37,6 +37,9 @@ export type Action =
   | 'enrollment:approve'
   | 'enrollment:reject'
   | 'enrollment:withdraw'
+  // attendance
+  | 'attendance:mark'
+  | 'attendance:read'
   // resource
   | 'resource:read'
   | 'resource:create'
@@ -207,6 +210,32 @@ export const POLICY: PolicyTable = definePolicy({
     // A teacher removing a student is a rejection, not a withdrawal; separate verb,
     // separate audit action, separate notification.
     TEACHER: deny,
+    ADMIN: allow,
+  },
+
+  // -------------------------------------------------------------------------
+  // Attendance
+  //
+  // One action, two subject shapes, exactly as `enrollment:read` has one rule
+  // and two loaders:
+  //   - the COURSE, for marking and reading a whole register — `ownsCourse`
+  //     scopes the teacher; a student's `isEnrolledStudent` reads an absent
+  //     `studentId` there and denies, so nobody reads a class list one row at
+  //     a time by guessing ids;
+  //   - the ENROLLMENT row, for a student's own summary — `isEnrolledStudent`
+  //     passes only when the summary is theirs.
+  // -------------------------------------------------------------------------
+
+  'attendance:mark': {
+    anonymous: deny,
+    STUDENT: deny,
+    TEACHER: ownsCourse,
+    ADMIN: allow,
+  },
+  'attendance:read': {
+    anonymous: deny,
+    STUDENT: isEnrolledStudent,
+    TEACHER: ownsCourse,
     ADMIN: allow,
   },
 
