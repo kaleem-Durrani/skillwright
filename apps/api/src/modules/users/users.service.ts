@@ -1,6 +1,14 @@
 import { prisma, type Prisma } from '@skillwright/db';
-import { paginationMeta, toSkipTake, type Actor, type Paginated } from '@skillwright/shared';
-import { notFound } from '../../lib/errors.js';
+import {
+  paginationMeta,
+  toSkipTake,
+  type Actor,
+  type FieldError,
+  type Paginated,
+  type Role,
+} from '@skillwright/shared';
+import { ulid } from 'ulid';
+import { conflict, notFound, validationFailed } from '../../lib/errors.js';
 import { baseLogger } from '../../lib/logger.js';
 import { presignGet, safeFilename } from '../../lib/storage.js';
 /*
@@ -22,6 +30,7 @@ import { toUserDetail } from '../auth/auth.service.js';
 import { assertUploadClaimable } from '../uploads/uploads.service.js';
 import { destroyAllSessions } from '../auth/session.service.js';
 import type {
+  CreateUserInput,
   ListUsersQuery,
   SuspendUserInput,
   UpdateUserInput,
@@ -86,7 +95,7 @@ async function withAvatarUrl(
 }
 
 /**
- * user.ts:123 — "Suspension always carries a reason; it lands in the audit row and the
+ * user.ts:141 — "Suspension always carries a reason; it lands in the audit row and the
  * email." The SPA posts no body at all (AdminUsers.tsx:67), so the route binds
  * `suspendUserSchema.nullish()` and an absent reason becomes this.
  *
@@ -153,7 +162,7 @@ async function detailById(id: string): Promise<UserDetail> {
 // ---------------------------------------------------------------------------
 
 /**
- * `user:list` is role-only (policy.ts:319-324: anonymous/STUDENT/TEACHER deny, ADMIN
+ * `user:list` is role-only (policy.ts:355-360: anonymous/STUDENT/TEACHER deny, ADMIN
  * allow), so — unlike `GET /enrollments` or `GET /courses` — this list has NO
  * `visibilityWhere`. There is no row scoping to mirror, because the only role that
  * reaches the handler may see every row. The clause below is caller FILTERS plus the
@@ -266,7 +275,7 @@ export function getSelf(actor: Actor): Promise<UserDetail> {
 // ---------------------------------------------------------------------------
 
 /**
- * `PATCH /users/me`. `updateUserSchema` (user.ts:70-80) carries no `role` and no
+ * `PATCH /users/me`. `updateUserSchema` (user.ts:80-98) carries no `role` and no
  * `status` by design, so there is nothing to strip here: privilege changes are admin
  * verbs with their own actions, and this body cannot express one.
  */
@@ -283,28 +292,300 @@ export async function updateSelf(actor: Actor, input: UpdateUserInput): Promise<
    * key prefix, which is the only record of a purpose that exists. Without the purpose
    * half, an upload presigned as a RESOURCE — up to 512 MB of any MIME the purpose
    * accepts — could be attached as a face and served through an <img> tag.
+   *
+   * This check lives HERE rather than in the shared writer below because ownership is
+   * a CALLER question: on the `/me` path the caller is the target, which is what makes
+   * `actor` the right argument to assertUploadClaimable.
    */
   if (input.avatarUploadId !== undefined && input.avatarUploadId !== null) {
     await assertUploadClaimable(input.avatarUploadId, actor, 'avatarUploadId', 'AVATAR');
   }
 
-  await prisma.user.update({
-    where: { id: actor.id },
+  await applyUserUpdate(actor.id, actor.role, input);
+  // Re-read rather than `include` on the write: detailById is where the soft-delete
+  // filter lives and the one place the two profile joins are spelled.
+  return detailById(actor.id);
+}
+
+/**
+ * `PATCH /users/:id` — the admin path through the same `user:update` action and the
+ * same body schema as `/me`. The subject is the TARGET (users.routes.ts), so policy
+ * already refuses STUDENT and TEACHER callers before this runs; what the service adds
+ * is the target's identity and role, which decide whose row changes and which profile
+ * fields are legitimate for them.
+ */
+export async function update(id: string, input: UpdateUserInput): Promise<UserDetail> {
+  /*
+   * An upload can only be attached by its owner: `assertUploadClaimable` checks the
+   * CALLER's ownership, which on this path is the wrong person unless admin == target,
+   * and an admin planting their own face on someone else's account is not a flow that
+   * exists. Refusing the field outright beats silently ignoring it.
+   */
+  if (input.avatarUploadId !== undefined) {
+    throw validationFailed([
+      {
+        path: 'avatarUploadId',
+        message:
+          'Avatars are attached by their owner; sign in as that person and use PATCH /users/me.',
+      },
+    ]);
+  }
+
+  const target = await prisma.user.findFirst({
+    where: { id, deletedAt: null },
+    select: { id: true, role: true },
+  });
+  if (!target) throw notFound('User');
+
+  await applyUserUpdate(target.id, target.role, input);
+  return detailById(id);
+}
+
+/**
+ * The write half shared by `/me` and `/:id`. Sequential awaits, NOT one interactive
+ * transaction — `User` is audited and the extension writes from a second pool inside
+ * any transaction window (the suspend comment below records the P2024 shape that buys).
+ * Nothing here needs atomicity: a profile edit split from its name edit by a crash
+ * leaves two half-truths an operator can see, not a corrupt invariant.
+ */
+async function applyUserUpdate(userId: string, role: Role, input: UpdateUserInput): Promise<void> {
+  rejectMismatchedProfileFields(role, input);
+
+  const hasUserScalars =
+    input.name !== undefined ||
+    input.phoneNumber !== undefined ||
+    input.bio !== undefined ||
+    input.avatarUploadId !== undefined;
+
+  if (hasUserScalars) {
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.phoneNumber !== undefined ? { phoneNumber: input.phoneNumber } : {}),
+        ...(input.bio !== undefined ? { bio: input.bio } : {}),
+        ...(input.avatarUploadId !== undefined ? { avatarUploadId: input.avatarUploadId } : {}),
+      },
+    });
+    // The audit row is written by the Prisma extension (User is in AUDITED_MODELS,
+    // audit.ts:51-59); writing one here too would double every edit.
+  }
+
+  await applyProfileUpdate(userId, role, input);
+}
+
+/**
+ * Which profile columns belong to which role. A field sent by the wrong role is a
+ * field-level 422, never a silent ignore — a silent ignore reads as success while the
+ * caller's qualification lands nowhere, which is exactly the failure mode the SPA
+ * cannot distinguish from a saved form.
+ *
+ * Annotated as a full Record rather than `as const`: the per-key literal tuples would
+ * make `.includes(role)` on a keyed union take a `never` argument.
+ */
+const PROFILE_FIELD_ROLES: Readonly<
+  Record<'qualification' | 'specialization' | 'staffNo' | 'enrollmentNo', readonly Role[]>
+> = {
+  qualification: ['TEACHER'],
+  specialization: ['TEACHER'],
+  staffNo: ['TEACHER'],
+  enrollmentNo: ['STUDENT'],
+};
+
+/** Structurally satisfied by both `UpdateUserInput` and `CreateUserInput`. */
+type ProfileFieldSource = Partial<Record<keyof typeof PROFILE_FIELD_ROLES, unknown>>;
+
+function rejectMismatchedProfileFields(role: Role, fields: ProfileFieldSource): void {
+  const errors: FieldError[] = (
+    Object.keys(PROFILE_FIELD_ROLES) as Array<keyof typeof PROFILE_FIELD_ROLES>
+  )
+    .filter((field) => fields[field] !== undefined && !PROFILE_FIELD_ROLES[field].includes(role))
+    .map((field) => ({
+      path: field,
+      message: `${field} applies to ${PROFILE_FIELD_ROLES[field].join(' and ')} accounts only.`,
+    }));
+  if (errors.length > 0) throw validationFailed(errors);
+}
+
+/**
+ * Creates-or-updates the caller's profile satellite from the schema's profile fields.
+ *
+ * "Upsert" degenerates to update here, and that is not laziness: CREATING a profile
+ * row requires a departmentId, there is no `User.departmentId` column to fall back to,
+ * and department placement is deliberately absent from `updateUserSchema`. A person
+ * without their role's profile row is therefore a data anomaly only an operator can
+ * repair (every provisioned, registered and seeded teacher/student gets one), so the
+ * honest answer is a 409 naming the gap rather than an invented department.
+ *
+ * Profile rows are not in AUDITED_MODELS (audit.ts:51-59): they are satellites of the
+ * User, whose own UPDATE row carries the request when any scalar moved alongside.
+ */
+async function applyProfileUpdate(
+  userId: string,
+  role: Role,
+  input: UpdateUserInput,
+): Promise<void> {
+  if (role === 'TEACHER') {
+    const data = {
+      ...(input.qualification !== undefined ? { qualification: input.qualification } : {}),
+      ...(input.specialization !== undefined ? { specialization: input.specialization } : {}),
+      ...(input.staffNo !== undefined ? { staffNo: input.staffNo } : {}),
+    };
+    if (Object.keys(data).length === 0) return;
+
+    const existing = await prisma.teacherProfile.findUnique({ where: { userId } });
+    if (!existing) throw conflict('This account has no teacher profile to update');
+    await prisma.teacherProfile.update({ where: { userId }, data });
+    return;
+  }
+
+  if (role === 'STUDENT') {
+    if (input.enrollmentNo === undefined) return;
+
+    const existing = await prisma.studentProfile.findUnique({ where: { userId } });
+    if (!existing) throw conflict('This account has no student profile to update');
+    // A number someone else already holds is a P2002 -> 409 from errors.plugin.ts,
+    // the same arbiter registration relies on.
+    await prisma.studentProfile.update({
+      where: { userId },
+      data: { enrollmentNo: input.enrollmentNo },
+    });
+  }
+  // ADMIN: no profile satellite exists to write; the guard above already refused
+  // every profile field an admin could have sent.
+}
+
+/**
+ * Collision-free without a round trip: ULID's 80 random bits, rendered short.
+ * Mirrors auth.service.ts's private generator of the same name; lifting both beside
+ * `toUserDetail` is the TODO(dto) move recorded at the top of this file.
+ */
+function generateEnrollmentNo(): string {
+  return `SW-${new Date().getFullYear()}-${ulid().slice(-8)}`;
+}
+
+/**
+ * Duplicate email, checked BEFORE insert the way register does. The divergence from
+ * register's silent ack is deliberate and audience-shaped: register answers an
+ * anonymous caller, who must not learn whether an address exists, while this route's
+ * caller holds `user:list` and already knows every address in the directory — hiding
+ * the outcome from THEM would only make provisioning unworkable. The mechanism is
+ * still register's (a pre-check that turns the collision into a deliberate branch
+ * rather than a raw P2002); only the branch's answer differs. Unfiltered by deletedAt
+ * because the citext unique index spans soft-deleted rows too, so a deleted account's
+ * address still blocks creation and the 409 must say so truthfully.
+ */
+async function assertEmailAvailable(email: string): Promise<void> {
+  const existing = await prisma.user.findFirst({ where: { email }, select: { id: true } });
+  if (existing) throw conflict('An account with this email already exists');
+}
+
+/**
+ * `POST /users` — provisioning. Binds `createUserSchema` verbatim; gated bare on
+ * `user:create`, which is subject-free (policy.ts), so no loader and no `requireActor`
+ * are needed — `authorize` has thrown for a null actor before the handler runs.
+ *
+ * Password bootstrap invents nothing: the row is created WITHOUT a credential
+ * (`passwordHash` stays null — schema.prisma:133-135 documents exactly this state),
+ * and the person sets their own password through the existing forgot/reset-password
+ * flow (auth.service.ts resetPassword, delivered over Mailpit in dev). That flow also
+ * flips PENDING_VERIFICATION -> ACTIVE on reset, which is why the row is created in
+ * the status default rather than ACTIVE: nobody has proved they hold the mailbox yet.
+ *
+ * The audit CREATE row is written by the Prisma extension off `prisma.user.create`
+ * (before: null, after: the row) — no manual audit call, like every other write. The
+ * profile satellite rides inside the same nested write; profile rows are not audited
+ * models of their own (audit.ts:51-59).
+ */
+export async function create(input: CreateUserInput): Promise<UserDetail> {
+  /*
+   * createUserSchema is bound verbatim, so it validates each field's SHAPE but cannot
+   * fully police the role/field pairing. Anything present-but-inappropriate is refused
+   * at its own path rather than dropped on the floor — the same stance updateSelf takes.
+   */
+  rejectMismatchedProfileFields(input.role, input);
+
+  if (input.role === 'ADMIN') {
+    // Admins have neither profile satellite nor department; there is nowhere for a
+    // departmentId to go, so carrying one is refused rather than ignored.
+    if (input.departmentId !== undefined) {
+      throw validationFailed([
+        { path: 'departmentId', message: 'Administrators do not belong to a department.' },
+      ]);
+    }
+    await assertEmailAvailable(input.email);
+    const admin = await prisma.user.create({
+      data: { email: input.email, name: input.name, role: 'ADMIN' },
+    });
+    return detailById(admin.id);
+  }
+
+  // TEACHER or STUDENT from here. Department validity is public information (the
+  // register argument, auth.service.ts:170-178); failing here turns the Restrict FK's
+  // P2003 into a field-level 422. superRefine guarantees presence for these roles;
+  // the guard is restated because exactOptionalPropertyTypes wants the narrowing.
+  const departmentId = input.departmentId;
+  if (departmentId === undefined) {
+    throw validationFailed([
+      { path: 'departmentId', message: 'Teachers and students must belong to a department.' },
+    ]);
+  }
+  const department = await prisma.department.findFirst({
+    where: { id: departmentId, deletedAt: null },
+    select: { id: true },
+  });
+  if (!department) {
+    throw validationFailed([{ path: 'departmentId', message: 'Unknown department' }]);
+  }
+
+  // Same story as departmentId: superRefine owns this rule at the wire, the service
+  // owns its narrowing.
+  await assertEmailAvailable(input.email);
+
+  // Two branches rather than one ternary-spliced create: the qualification guard can
+  // only narrow `input.qualification` to string inside a branch it controls, and
+  // exactOptionalPropertyTypes refuses `string | undefined` on the NOT NULL column.
+  if (input.role === 'TEACHER') {
+    // Same story as departmentId: superRefine owns this rule at the wire, the
+    // service owns its narrowing.
+    if (input.qualification === undefined) {
+      throw validationFailed([
+        { path: 'qualification', message: 'A teacher requires a qualification.' },
+      ]);
+    }
+    const user = await prisma.user.create({
+      data: {
+        email: input.email,
+        name: input.name,
+        role: 'TEACHER',
+        teacherProfile: {
+          create: {
+            departmentId,
+            qualification: input.qualification,
+            specialization: input.specialization ?? null,
+            staffNo: input.staffNo ?? null,
+          },
+        },
+      },
+    });
+    return detailById(user.id);
+  }
+
+  const user = await prisma.user.create({
     data: {
-      ...(input.name !== undefined ? { name: input.name } : {}),
-      ...(input.phoneNumber !== undefined ? { phoneNumber: input.phoneNumber } : {}),
-      ...(input.bio !== undefined ? { bio: input.bio } : {}),
-      ...(input.avatarUploadId !== undefined ? { avatarUploadId: input.avatarUploadId } : {}),
+      email: input.email,
+      name: input.name,
+      role: 'STUDENT',
+      studentProfile: {
+        create: {
+          departmentId,
+          enrollmentNo: input.enrollmentNo ?? generateEnrollmentNo(),
+        },
+      },
     },
   });
 
-  // The audit row is written by the Prisma extension (User is in AUDITED_MODELS,
-  // audit.ts:51-59); writing one here too would double every edit.
-  //
-  // Re-read rather than `include` on the update: `updateUserSchema` can change a
-  // profile's department in no way at all, but the include is the one place the two
-  // joins are spelled and detailById is where the soft-delete filter lives.
-  return detailById(actor.id);
+  return detailById(user.id);
 }
 
 /**

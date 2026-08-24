@@ -3,6 +3,7 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { paginated, type Subject } from '@skillwright/shared';
 import { authorize, requireActor } from '../../plugins/auth.plugin.js';
 import {
+  createUserSchema,
   idParamSchema,
   listUsersQuerySchema,
   suspendUserSchema,
@@ -38,8 +39,8 @@ function selfSubject(request: FastifyRequest): Subject | undefined {
 /**
  * The subject for the two `/:id` routes: the TARGET, not the caller.
  *
- * This is the whole point of policy.ts:299-303 — `user:read` "stays self-only so that
- * a teacher cannot enumerate the directory one id at a time" — and of policy.ts:312-318,
+ * This is the whole point of policy.ts:323-331 — `user:read` "stays self-only so that
+ * a teacher cannot enumerate the directory one id at a time" — and of policy.ts:348-354,
  * where `not(isSelf)` stops an admin suspending themself and locking the last admin out
  * of the instance. Putting the ACTOR's id here instead would silently invert both.
  *
@@ -57,7 +58,7 @@ const usersRoutes: FastifyPluginAsync = async (fastify) => {
 
   /*
    * A BARE `authorize('user:list')`, with no subject loader, is a COMPLETE gate here:
-   * policy.ts:319-324 is anonymous deny / STUDENT deny / TEACHER deny / ADMIN allow, and
+   * policy.ts:355-360 is anonymous deny / STUDENT deny / TEACHER deny / ADMIN allow, and
    * every cell is a terminal rule that reads no Subject field. That is the
    * departments.routes.ts:15-29 argument, and it is why this list needs neither the
    * `visibilityWhere` clause `GET /enrollments` grew nor a `requireActor` in the handler
@@ -80,6 +81,26 @@ const usersRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   /*
+   * Provisioning, Phase 4b. `user:create` is subject-free (policy.ts:338-347 — every
+   * cell is a terminal allow/deny decided by role alone, before any target exists to
+   * load a subject for), so a BARE `authorize()` is a complete gate here, exactly as
+   * for `user:list` above and for every departments route.
+   *
+   * `createUserSchema` is bound VERBATIM — its superRefine already makes departmentId
+   * mandatory for teachers and students and qualification mandatory for teachers, so
+   * the wire refuses those before this handler runs and the service only restates the
+   * narrowing it needs for exactOptionalPropertyTypes.
+   */
+  app.post(
+    '/',
+    {
+      schema: { body: createUserSchema, response: { 201: userDetailSchema } },
+      preHandler: authorize('user:create'),
+    },
+    async (request, reply) => reply.status(201).send(await userService.create(request.body)),
+  );
+
+  /*
    * '/me' is declared before '/:id' for the reader only. Fastify's find-my-way
    * prioritises a static segment over a parametric one regardless of declaration
    * order, so 'me' can never be parsed as an id — which matters because `idSchema`
@@ -96,8 +117,10 @@ const usersRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   /*
-   * `updateUserSchema` is bound UNCHANGED, and that is a decision about a live SPA bug
-   * rather than an omission. Settings.tsx:84 seeds react-hook-form with
+   * `updateUserSchema` is bound exactly as shared defines it — Phase 4b added its
+   * profile fields additively, and role/status remain absent BY DESIGN. What follows
+   * is a decision about a live SPA bug rather than an omission. Settings.tsx:84 seeds
+   * react-hook-form with
    * `{ phoneNumber: '', bio: '' }`, so an untouched form PATCHes `phoneNumber: ''`;
    * `updateUserSchema.phoneNumber` is `phoneSchema.nullable()` and phoneSchema
    * (common.ts:60-63) requires /^\+?[0-9\s()-]{7,20}$/, so the empty string is a 422
@@ -117,7 +140,7 @@ const usersRoutes: FastifyPluginAsync = async (fastify) => {
     async (request) => userService.updateSelf(requireActor(request), request.body),
   );
 
-  // policy.ts:297-305 — STUDENT and TEACHER are `isSelf`, ADMIN is `allow`. The subject
+  // policy.ts:323-331 — STUDENT and TEACHER are `isSelf`, ADMIN is `allow`. The subject
   // is the target, so a teacher asking for someone else's id is 403 (never 404, which
   // would confirm the account exists) and 200 only for their own.
   app.get(
@@ -130,12 +153,35 @@ const usersRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   /*
+   * The admin half of `user:update` (Phase 4b): the SAME action and the SAME
+   * `updateUserSchema` body as `/me` above, with the subject pointed at the TARGET.
+   * The role cells do all the gating — a teacher or student addressing another id is
+   * refused by `isSelf` before any handler code runs — so this route adds no second
+   * check of its own. Profile fields in the body are judged against the TARGET's role
+   * inside the service (`rejectMismatchedProfileFields(target.role, ...)`), which is
+   * what stops an admin writing a staffNo onto a student account; `avatarUploadId` is
+   * refused outright there because an upload belongs to its owner.
+   */
+  app.patch(
+    '/:id',
+    {
+      schema: {
+        params: idParamSchema,
+        body: updateUserSchema,
+        response: { 200: userDetailSchema },
+      },
+      preHandler: authorize('user:update', targetSubject),
+    },
+    async (request) => userService.update(request.params.id, request.body),
+  );
+
+  /*
    * `suspendUserSchema.nullish()`, NOT `.optional()`.
    *
    * The SPA sends no body at all — `api.post<void>(`/users/${id}/suspend`)`,
    * AdminUsers.tsx:67 — and Fastify hands a bodyless POST to the validator as `null`,
    * which `.optional()` rejects. Binding `suspendUserSchema` directly (its `reason` is
-   * mandatory, user.ts:124-126) would answer the SPA's own call with 422 BEFORE the
+   * mandatory, user.ts:142-144) would answer the SPA's own call with 422 BEFORE the
    * policy preHandler ever ran: precisely the defect the last batch shipped. The
    * handler therefore passes `request.body ?? undefined` — the courses.routes.ts:154-176
    * pattern — and the service supplies the default reason.
@@ -159,17 +205,10 @@ const usersRoutes: FastifyPluginAsync = async (fastify) => {
   /*
    * NOT BUILT, deliberately:
    *
-   *   POST /users            — `createUserSchema` exists (user.ts:84) but there is no
-   *                            `user:create` in the Action union (policy.ts:26-82) and
-   *                            the SPA never calls it. Building it would mean inventing
-   *                            an action, which costs matrix rows in
-   *                            apps/api/test/policy-matrix.test.ts including the
-   *                            denials, plus `pnpm docs:permissions` and a regenerated
-   *                            docs/permissions.md (CONTRIBUTING.md:40-46).
    *   POST /users/:id/reinstate — `reinstateUserSchema` exists (user.ts:129), there is no
    *                            `user:reinstate` action, and the SPA never calls it. If it
    *                            is ever needed, `user:suspend` is the closest existing
-   *                            gate: identical ADMIN-only cell (policy.ts:312-318) and
+   *                            gate: identical ADMIN-only cell (policy.ts:348-354) and
    *                            `not(isSelf)` is harmless there, since an admin cannot be
    *                            suspended and reinstating oneself is not a thing a
    *                            suspended session can reach anyway.

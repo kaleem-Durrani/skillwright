@@ -66,13 +66,31 @@ export const userDetailSchema = z.object({
 });
 export type UserDetail = z.infer<typeof userDetailSchema>;
 
-/** Self-service edits. Role and status are absent by design — those are admin verbs. */
+/**
+ * Self-service edits. Role and status are absent by design — those are admin verbs.
+ *
+ * The four profile fields are additive (Phase 4b): `qualification`,
+ * `specialization` and `staffNo` shape a TeacherProfile, `enrollmentNo` a
+ * StudentProfile. Which of them a caller may send is decided by the ACTOR's role,
+ * which the body does not carry — the users service refuses role-inappropriate
+ * fields with a field-level 422 rather than silently ignoring them. Department
+ * membership is deliberately absent: there is no `User.departmentId` column, and
+ * placement is an admin concern, not a self-service one.
+ */
 export const updateUserSchema = z
   .object({
     name: nameSchema,
     phoneNumber: phoneSchema.nullable(),
     bio: z.string().trim().max(2000).nullable(),
     avatarUploadId: idSchema.nullable(),
+    // TeacherProfile columns. qualification is NOT NULL, so it can be changed but
+    // never cleared; the two nullable columns accept null to clear.
+    qualification: z.string().trim().min(2).max(200),
+    specialization: z.string().trim().max(200).nullable(),
+    staffNo: z.string().trim().max(40).nullable(),
+    // StudentProfile.enrollmentNo is NOT NULL and @unique — claiming someone
+    // else's number is a P2002 turned 409, exactly as at registration.
+    enrollmentNo: z.string().trim().max(40),
   })
   .partial()
   .refine((body) => Object.keys(body).length > 0, {

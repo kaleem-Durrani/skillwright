@@ -14,12 +14,14 @@
  * unlike courses/enrollments, which needed a `{ courseId }` shape shared has no export
  * for (courses.schema.ts:49-55). Adding one here would be restating a rule that exists.
  *
- * `createUserSchema` (user.ts:84) and `reinstateUserSchema` (user.ts:129) exist in
- * shared and are NOT re-exported here: there is no `user:create` and no `user:reinstate`
- * action in the Action union (policy.ts:26-82), and the SPA calls neither. Naming them
- * here would advertise a wire surface this module does not serve.
+ * `reinstateUserSchema` (user.ts:147) exists in shared and is NOT re-exported here:
+ * there is no `user:reinstate` action in the Action union (policy.ts:27-84) and the SPA
+ * does not call it. Naming it here would advertise a wire surface this module does not
+ * serve. `createUserSchema` IS re-exported since Phase 4b wired `POST /users` behind
+ * the `user:create` action.
  */
 export {
+  createUserSchema,
   listUsersQuerySchema,
   suspendUserSchema,
   updateUserSchema,
@@ -29,6 +31,7 @@ export {
 } from '@skillwright/shared';
 
 export type {
+  CreateUserInput,
   ListUsersQuery,
   SuspendUserInput,
   UpdateUserInput,

@@ -753,6 +753,11 @@ const COMMENT_CELLS: readonly Cell[] = [
 ];
 
 const USER_CELLS: readonly Cell[] = [
+  no('anonymous provisions a user', ANON, 'user:create', 'anonymous:deny'),
+  no('student provisions a user', STUDENT_IN, 'user:create', 'STUDENT:deny'),
+  no('teacher provisions a user', TEACHER_A, 'user:create', 'TEACHER:deny'),
+  ok('admin provisions a user', ADMIN, 'user:create'),
+
   no('anonymous reads a user', ANON, 'user:read', 'anonymous:deny', SELF_STUDENT),
   ok('student reads their own record', STUDENT_IN, 'user:read', SELF_STUDENT),
   no('student reads another user', STUDENT_IN, 'user:read', 'STUDENT:isSelf', OTHER_USER),

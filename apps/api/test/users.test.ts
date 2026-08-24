@@ -680,3 +680,383 @@ describe('POST /users/:id/suspend', () => {
     expect(response.json().code).toBe('NOT_FOUND');
   });
 });
+
+// --- Phase 4b: provisioning --------------------------------------------------
+
+describe('POST /users (provisioning)', () => {
+  /** The body every happy-path test starts from; individual tests override fields. */
+  function teacherBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      email: 'nora@example.com',
+      name: 'Nora Teacher',
+      role: 'TEACHER',
+      departmentId,
+      qualification: 'CSWIP 3.1 Senior Welding Inspector',
+      specialization: 'Underwater welding',
+      staffNo: 'STF-0042',
+      ...overrides,
+    };
+  }
+
+  it('provisions a teacher with profile fields, no password, and a CREATE audit row', async () => {
+    const adminId = await createAccount('provisioner@example.com', 'ADMIN', 'Ada Admin');
+    const admin = await login('provisioner@example.com');
+
+    const response = await send('POST', '', teacherBody(), admin);
+    expect(response.statusCode).toBe(201);
+
+    // The existing user detail shape, with the profile projected from the request.
+    const body = response.json();
+    expect(body).toMatchObject({
+      email: 'nora@example.com',
+      name: 'Nora Teacher',
+      role: 'TEACHER',
+      teacherProfile: {
+        departmentId,
+        departmentName: 'Department welding',
+        qualification: 'CSWIP 3.1 Senior Welding Inspector',
+        specialization: 'Underwater welding',
+        staffNo: 'STF-0042',
+      },
+      studentProfile: null,
+    });
+
+    // No credential is invented: the person sets their own password through the
+    // existing forgot/reset-password flow (Mailpit in dev), which also flips the
+    // status default to ACTIVE once they have proved they hold the mailbox.
+    expect(body.status).toBe('PENDING_VERIFICATION');
+    const row = await prisma.user.findUniqueOrThrow({
+      where: { id: body.id },
+      include: { teacherProfile: true },
+    });
+    expect(row.passwordHash).toBeNull();
+    expect(row.teacherProfile?.staffNo).toBe('STF-0042');
+
+    // Written by the Prisma extension off `prisma.user.create` — one CREATE row whose
+    // actor is the provisioning admin. resetDatabase() does not clear AuditEvent, so
+    // the count is scoped to this fixture's id.
+    const audits = await prisma.auditEvent.findMany({
+      where: { entityType: 'User', entityId: body.id },
+    });
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({ action: 'CREATE', actorId: adminId });
+  });
+
+  it('provisions a student, honoring an enrollmentNo and generating one when absent', async () => {
+    const admin = await signedIn('student-provisioner@example.com', 'ADMIN');
+
+    const explicit = await send(
+      'POST',
+      '',
+      {
+        email: 'enrolled@example.com',
+        name: 'Enrolled Person',
+        role: 'STUDENT',
+        departmentId,
+        enrollmentNo: 'SW-ENR-0001',
+      },
+      admin,
+    );
+    expect(explicit.statusCode).toBe(201);
+    expect(explicit.json().studentProfile).toMatchObject({
+      departmentId,
+      departmentName: 'Department welding',
+      enrollmentNo: 'SW-ENR-0001',
+    });
+
+    const generated = await send(
+      'POST',
+      '',
+      { email: 'generated@example.com', name: 'Generated Person', role: 'STUDENT', departmentId },
+      admin,
+    );
+    expect(generated.statusCode).toBe(201);
+    expect(generated.json().studentProfile.enrollmentNo).toMatch(/^SW-\d{4}-/);
+  });
+
+  it('answers 409 on a duplicate email and creates nothing', async () => {
+    const admin = await signedIn('dup-admin@example.com', 'ADMIN');
+    await createAccount('taken@example.com', 'STUDENT', 'Taken Person', 'student');
+
+    const response = await send(
+      'POST',
+      '',
+      { email: 'taken@example.com', name: 'Second Person', role: 'STUDENT', departmentId },
+      admin,
+    );
+    expect(response.statusCode).toBe(409);
+    expect(response.json().code).toBe('CONFLICT');
+
+    // Exactly one row for that address — the pre-existing one.
+    const rows = await prisma.user.findMany({ where: { email: 'taken@example.com' } });
+    expect(rows).toHaveLength(1);
+  });
+
+  it('refuses a teacher with the rule tag, and nothing is created', async () => {
+    const teacher = await signedIn('hiring@example.com', 'TEACHER', 'Hiring Teacher', 'teacher');
+
+    const response = await send('POST', '', teacherBody({ email: 'sneak@example.com' }), teacher);
+    expect(response.statusCode).toBe(403);
+    expect(response.json().code).toBe('FORBIDDEN');
+    expect(response.json().detail).toContain('rule: TEACHER:deny');
+
+    const rows = await prisma.user.findMany({ where: { email: 'sneak@example.com' } });
+    expect(rows).toHaveLength(0);
+  });
+
+  it('refuses a student with the rule tag', async () => {
+    const student = await signedIn('selfhire@example.com', 'STUDENT', 'Self Hire', 'student');
+
+    const response = await send(
+      'POST',
+      '',
+      {
+        email: 'selfhire-target@example.com',
+        name: 'Self Hire Target',
+        role: 'STUDENT',
+        departmentId,
+      },
+      student,
+    );
+    expect(response.statusCode).toBe(403);
+    expect(response.json().detail).toContain('rule: STUDENT:deny');
+  });
+
+  it('refuses an anonymous caller before any validation of the body matters', async () => {
+    const response = await send('POST', '', teacherBody());
+    expect(response.statusCode).toBe(401);
+    expect(response.json().code).toBe('UNAUTHENTICATED');
+  });
+
+  it('refuses role-inappropriate profile fields at their own path', async () => {
+    const admin = await signedIn('field-admin@example.com', 'ADMIN');
+
+    // A STUDENT has no TeacherProfile to hold a qualification.
+    const studentWithQualification = await send(
+      'POST',
+      '',
+      teacherBody({
+        email: 'mismatched@example.com',
+        role: 'STUDENT',
+        qualification: 'MSc Welding',
+      }),
+      admin,
+    );
+    expect(studentWithQualification.statusCode).toBe(422);
+    expect(studentWithQualification.json().errors).toContainEqual(
+      expect.objectContaining({ path: 'qualification' }),
+    );
+
+    // An admin belongs to no department, so there is nowhere for the id to go.
+    const adminWithDepartment = await send(
+      'POST',
+      '',
+      { email: 'dept-admin@example.com', name: 'Dept Admin', role: 'ADMIN', departmentId },
+      admin,
+    );
+    expect(adminWithDepartment.statusCode).toBe(422);
+    expect(adminWithDepartment.json().errors).toContainEqual(
+      expect.objectContaining({ path: 'departmentId' }),
+    );
+
+    const rows = await prisma.user.findMany({
+      where: { email: { in: ['mismatched@example.com', 'dept-admin@example.com'] } },
+    });
+    expect(rows).toHaveLength(0);
+  });
+
+  it('lets the wire schema refuse a teacher without a qualification, via superRefine', async () => {
+    const admin = await signedIn('wire-admin@example.com', 'ADMIN');
+
+    const response = await send(
+      'POST',
+      '',
+      teacherBody({
+        email: 'unqualified@example.com',
+        qualification: undefined,
+        specialization: undefined,
+        staffNo: undefined,
+      }),
+      admin,
+    );
+    expect(response.statusCode).toBe(422);
+    expect(response.json().errors).toContainEqual(
+      expect.objectContaining({ path: 'qualification' }),
+    );
+  });
+});
+
+// --- Phase 4b: editable profiles ---------------------------------------------
+
+describe('PATCH /users/me profile fields', () => {
+  it('updates a teacher’s own qualifications, specialization and staffNo', async () => {
+    const token = await signedIn('qual@example.com', 'TEACHER', 'Qualified Teacher', 'teacher');
+
+    const response = await send(
+      'PATCH',
+      '/me',
+      { qualification: 'NVQ Level 3 Welding', specialization: 'Pipe', staffNo: 'STF-7777' },
+      token,
+    );
+    expect(response.statusCode).toBe(200);
+    expect(response.json().teacherProfile).toMatchObject({
+      departmentId,
+      qualification: 'NVQ Level 3 Welding',
+      specialization: 'Pipe',
+      staffNo: 'STF-7777',
+    });
+
+    const row = await prisma.teacherProfile.findUniqueOrThrow({
+      where: {
+        userId: (await prisma.user.findFirstOrThrow({ where: { email: 'qual@example.com' } })).id,
+      },
+    });
+    expect(row.qualification).toBe('NVQ Level 3 Welding');
+  });
+
+  it('clears nullable teacher columns with null but not the NOT NULL qualification', async () => {
+    const token = await signedIn('clearable@example.com', 'TEACHER', 'Clearable', 'teacher');
+
+    const cleared = await send('PATCH', '/me', { specialization: null, staffNo: null }, token);
+    expect(cleared.statusCode).toBe(200);
+    expect(cleared.json().teacherProfile).toMatchObject({ specialization: null, staffNo: null });
+
+    const nulled = await send('PATCH', '/me', { qualification: null }, token);
+    expect(nulled.statusCode).toBe(422);
+    expect(nulled.json().code).toBe('VALIDATION_FAILED');
+  });
+
+  it('updates a student’s own enrollmentNo, and 409s a number somebody else holds', async () => {
+    const first = await signedIn('first-enrol@example.com', 'STUDENT', 'First', 'student');
+    const second = await signedIn('second-enrol@example.com', 'STUDENT', 'Second', 'student');
+
+    const response = await send('PATCH', '/me', { enrollmentNo: 'SW-MINE-01' }, first);
+    expect(response.statusCode).toBe(200);
+    expect(response.json().studentProfile).toMatchObject({
+      departmentId,
+      enrollmentNo: 'SW-MINE-01',
+    });
+
+    const clash = await send('PATCH', '/me', { enrollmentNo: 'SW-MINE-01' }, second);
+    expect(clash.statusCode).toBe(409);
+    expect(clash.json().code).toBe('CONFLICT');
+  });
+
+  it('refuses a student teacher fields at their own path, rather than ignoring them', async () => {
+    const student = await signedIn('wrongfields@example.com', 'STUDENT', 'Wrong Fields', 'student');
+
+    const response = await send(
+      'PATCH',
+      '/me',
+      { qualification: 'MSc Welding', staffNo: 'STF-1' },
+      student,
+    );
+    expect(response.statusCode).toBe(422);
+    expect(response.json().errors).toContainEqual(
+      expect.objectContaining({ path: 'qualification' }),
+    );
+    expect(response.json().errors).toContainEqual(expect.objectContaining({ path: 'staffNo' }));
+
+    // Nothing moved.
+    const row = await prisma.studentProfile.findFirstOrThrow({
+      where: { user: { email: 'wrongfields@example.com' } },
+    });
+    expect(row.enrollmentNo).not.toBe('STF-1');
+  });
+
+  it('refuses an admin profile fields — admins have no satellite row', async () => {
+    const admin = await signedIn('admin-profile@example.com', 'ADMIN');
+
+    const response = await send('PATCH', '/me', { qualification: 'MSc' }, admin);
+    expect(response.statusCode).toBe(422);
+    expect(response.json().errors).toContainEqual(
+      expect.objectContaining({ path: 'qualification' }),
+    );
+  });
+
+  it('409s a teacher account with no profile row instead of inventing a department', async () => {
+    // No satellite exists and self-update carries no departmentId BY DESIGN, so there
+    // is nothing to create the row WITH — the honest answer names the gap.
+    const token = await signedIn('satelliteless@example.com', 'TEACHER', 'No Satellite');
+
+    const response = await send('PATCH', '/me', { qualification: 'NVQ Level 3' }, token);
+    expect(response.statusCode).toBe(409);
+    expect(response.json().detail).toContain('no teacher profile');
+  });
+});
+
+describe('PATCH /users/:id (admin edits another user)', () => {
+  it('edits another user’s teacher profile from the same body schema', async () => {
+    const admin = await signedIn('edit-admin@example.com', 'ADMIN', 'Editing Admin');
+    const targetId = await createAccount('edit-target@example.com', 'TEACHER', 'Target', 'teacher');
+
+    const response = await send(
+      'PATCH',
+      `/${targetId}`,
+      { qualification: 'CSWIP 3.2', staffNo: 'STF-9000' },
+      admin,
+    );
+    expect(response.statusCode).toBe(200);
+    expect(response.json().teacherProfile).toMatchObject({
+      qualification: 'CSWIP 3.2',
+      staffNo: 'STF-9000',
+    });
+
+    const row = await prisma.teacherProfile.findUniqueOrThrow({ where: { userId: targetId } });
+    expect(row.qualification).toBe('CSWIP 3.2');
+  });
+
+  it('judges profile fields against the TARGET’s role, not the caller’s', async () => {
+    // The admin may legitimately send teacher fields; the STUDENT target may not
+    // receive them. The refusal is about the target, so the path names the field.
+    const admin = await signedIn('rolefit-admin@example.com', 'ADMIN');
+    const studentId = await createAccount('rolefit@example.com', 'STUDENT', 'Role Fit', 'student');
+
+    const response = await send('PATCH', `/${studentId}`, { staffNo: 'STF-1' }, admin);
+    expect(response.statusCode).toBe(422);
+    expect(response.json().errors).toContainEqual(expect.objectContaining({ path: 'staffNo' }));
+
+    const row = await prisma.studentProfile.findUniqueOrThrow({ where: { userId: studentId } });
+    expect(row.enrollmentNo).not.toBe('STF-1');
+  });
+
+  it('refuses avatarUploadId on the admin path at its own field', async () => {
+    const admin = await signedIn('avatar-admin2@example.com', 'ADMIN');
+    const targetId = await createAccount(
+      'avatar-target@example.com',
+      'STUDENT',
+      'Target',
+      'student',
+    );
+    const owner = await signedIn('avatar-owner2@example.com', 'STUDENT', 'Owner');
+    const file = await storeUpload(owner, { purpose: 'AVATAR' });
+
+    const response = await send('PATCH', `/${targetId}`, { avatarUploadId: file.uploadId }, admin);
+    expect(response.statusCode).toBe(422);
+    expect(response.json().errors).toContainEqual(
+      expect.objectContaining({ path: 'avatarUploadId' }),
+    );
+  });
+
+  it('keeps the policy gate: a teacher cannot edit another user at all', async () => {
+    const teacher = await signedIn('editor-nosy@example.com', 'TEACHER', 'Nosy Editor', 'teacher');
+    const targetId = await createAccount('edit-victim@example.com', 'STUDENT', 'Victim', 'student');
+
+    const response = await send('PATCH', `/${targetId}`, { name: 'Renamed' }, teacher);
+    expect(response.statusCode).toBe(403);
+    expect(response.json().detail).toContain('rule: TEACHER:isSelf');
+
+    const row = await prisma.user.findUniqueOrThrow({ where: { id: targetId } });
+    expect(row.name).toBe('Victim');
+  });
+
+  it('404s an unknown id for an admin and refuses an anonymous caller', async () => {
+    const admin = await signedIn('patch404-admin@example.com', 'ADMIN');
+
+    const missing = await send('PATCH', `/${ABSENT_ID}`, { name: 'Nobody' }, admin);
+    expect(missing.statusCode).toBe(404);
+
+    const anonymous = await send('PATCH', `/${ABSENT_ID}`, { name: 'Nobody' });
+    expect(anonymous.statusCode).toBe(401);
+  });
+});

@@ -57,6 +57,7 @@ export type Action =
   // user
   | 'user:read'
   | 'user:update'
+  | 'user:create'
   | 'user:suspend'
   | 'user:list'
   // department
@@ -334,6 +335,16 @@ export const POLICY: PolicyTable = definePolicy({
     TEACHER: isSelf,
     ADMIN: allow,
   },
+  'user:create': {
+    // The hiring verb. Self-service registration creates STUDENTS only
+    // (auth.routes.ts register), so every teacher and admin in the system has to
+    // arrive through this gate — which is why it is subject-free: provisioning is
+    // decided by role alone, before any target exists to load a subject for.
+    anonymous: deny,
+    STUDENT: deny,
+    TEACHER: deny,
+    ADMIN: allow,
+  },
   'user:suspend': {
     anonymous: deny,
     STUDENT: deny,
@@ -532,6 +543,7 @@ export const SUBJECT_INDEPENDENT_ACTIONS = [
   'announcement:create',
   'comment:read',
   'comment:create',
+  'user:create',
   'user:list',
   'department:read',
   'department:list',
