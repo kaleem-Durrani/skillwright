@@ -460,6 +460,12 @@ export async function approve(
      * load" (line 7). The row lock this UPDATE takes serializes concurrent approvals
      * on that course and nothing else (line 25).
      *
+     * Phase 7 adds the second bound as a second term in the SAME WHERE: a course
+     * with a workshop seats only while BOTH `capacity` and `workshopCapacity`
+     * hold against the one counter. `IS NULL OR` keeps an unbound course (a
+     * lecture) on exactly the old statement; there is no separate workshop
+     * counter and no second increment.
+     *
      * A tagged template, never $executeRawUnsafe, and `courseId` is a bound
      * parameter rather than interpolated text. It returns the affected row count.
      *
@@ -471,12 +477,25 @@ export async function approve(
     const claimed = await tx.$executeRaw`
       UPDATE "Course"
          SET "approvedCount" = "approvedCount" + 1
-       WHERE id = ${current.courseId} AND "approvedCount" < "capacity"`;
+       WHERE id = ${current.courseId}
+         AND "approvedCount" < "capacity"
+         AND ("workshopCapacity" IS NULL OR "approvedCount" < "workshopCapacity")`;
 
-    // Zero rows affected means the course is full. Throwing here rolls the increment
+    // Zero rows affected means a bound is full. Throwing here rolls the increment
     // back and nothing was seated — which is why it is never caught inside the
-    // transaction.
-    if (claimed === 0) throw capacityExceeded('This course is full');
+    // transaction. The read below does NOT gate the seat (the UPDATE above already
+    // refused it); it only names which bound fired so the teacher sees "workshop"
+    // rather than a wrong "course full". Same refusal shape either way.
+    if (claimed === 0) {
+      const course = await tx.course.findUniqueOrThrow({
+        where: { id: current.courseId },
+        select: { approvedCount: true, workshopCapacity: true },
+      });
+      if (course.workshopCapacity !== null && course.approvedCount >= course.workshopCapacity) {
+        throw capacityExceeded('The workshop for this course is full');
+      }
+      throw capacityExceeded('This course is full');
+    }
 
     const updated = await tx.enrollment.update({
       where: { id: enrollmentId },

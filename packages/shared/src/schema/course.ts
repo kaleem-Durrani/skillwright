@@ -34,9 +34,13 @@ export const courseSummarySchema = z.object({
   duration: durationSchema,
   capacity: z.number().int(),
   approvedCount: z.number().int(),
+  /** A second bound on the SAME counter; null means unbound — no workshop. */
+  workshopCapacity: z.number().int().nullable(),
   /** Derived, so the SPA never recomputes capacity arithmetic and drifts. */
   seatsRemaining: z.number().int(),
   isFull: z.boolean(),
+  /** Derived like `seatsRemaining`; null whenever the bound itself is null. */
+  workshopSeatsRemaining: z.number().int().nullable(),
   publishedAt: nullableIsoDateTimeSchema,
 });
 export type CourseSummary = z.infer<typeof courseSummarySchema>;
@@ -130,6 +134,8 @@ export const createCourseSchema = z
     teacherId: idSchema.optional(),
     duration: durationSchema,
     capacity: z.number().int().min(1).max(10_000),
+    /** Same ceiling as `capacity`; omitted means unbound — a lecture course. */
+    workshopCapacity: z.number().int().min(1).max(10_000).optional(),
     startDate: z.string().datetime({ offset: true }).nullish(),
     endDate: z.string().datetime({ offset: true }).nullish(),
     syllabusUploadId: idSchema.optional(),
@@ -146,6 +152,13 @@ export const updateCourseSchema = z
     duration: durationSchema,
     /** Lowering capacity below `approvedCount` is rejected by the DB CHECK, and by the service first. */
     capacity: z.number().int().min(1).max(10_000),
+    /**
+     * The second bound. Nullable, not just optional: explicit null CLEARS it —
+     * a course that loses its workshop degrades to unbound. Lowering it below
+     * `approvedCount` is refused by the service first, exactly like `capacity`
+     * (the CHECK only keeps the number positive).
+     */
+    workshopCapacity: z.number().int().min(1).max(10_000).nullable(),
     startDate: z.string().datetime({ offset: true }).nullable(),
     endDate: z.string().datetime({ offset: true }).nullable(),
     syllabusUploadId: idSchema.nullable(),

@@ -257,6 +257,9 @@ describe('GET /courses', () => {
     expect(summary.teacher).toMatchObject({ name: 'Tessa Teacher', role: 'TEACHER' });
     expect(summary.duration).toEqual({ value: 6, unit: 'WEEK' });
     expect(summary).toMatchObject({ capacity: 12, approvedCount: 0, seatsRemaining: 12 });
+    // No workshop on this course — unbound is null, never a zero-seat count.
+    expect(summary.workshopCapacity).toBeNull();
+    expect(summary.workshopSeatsRemaining).toBeNull();
     expect(summary.isFull).toBe(false);
     expect(summary.slug).toBe('welding-fundamentals');
     expect(summary.publishedAt).toEqual(expect.any(String));
@@ -621,6 +624,43 @@ describe('PATCH /courses/:id', () => {
     });
   });
 
+  /** The same guard, mirrored onto the second bound (Phase 7). */
+  it('refuses to lower workshopCapacity below the approved count', async () => {
+    const owner = await signedIn('workshop@example.com', 'TEACHER');
+    const course = await createCourse(owner, { capacity: 10, workshopCapacity: 8 });
+    await prisma.course.update({ where: { id: course.id }, data: { approvedCount: 4 } });
+
+    const response = await send('PATCH', `/${course.id}`, { workshopCapacity: 3 }, owner);
+    expect(response.statusCode).toBe(422);
+    expect(response.json().errors).toContainEqual({
+      path: 'workshopCapacity',
+      message: 'Workshop capacity cannot be lower than the approved count',
+    });
+
+    // The refusal wrote nothing.
+    const untouched = await prisma.course.findUniqueOrThrow({ where: { id: course.id } });
+    expect(untouched.workshopCapacity).toBe(8);
+  });
+
+  it('exposes the workshop bound and its derivation, and explicit null clears it', async () => {
+    const owner = await signedIn('workshop-null@example.com', 'TEACHER');
+    const course = await createCourse(owner, { capacity: 10, workshopCapacity: 2 });
+
+    const detail = await get(`/${course.id}`, owner).then((response) => response.json());
+    expect(detail.workshopCapacity).toBe(2);
+    expect(detail.workshopSeatsRemaining).toBe(2);
+
+    // Seated directly: the derived arithmetic is under test, not the approval path.
+    await prisma.course.update({ where: { id: course.id }, data: { approvedCount: 1 } });
+    const afterSeat = await get(`/${course.id}`, owner).then((response) => response.json());
+    expect(afterSeat.workshopSeatsRemaining).toBe(1);
+
+    const cleared = await send('PATCH', `/${course.id}`, { workshopCapacity: null }, owner);
+    expect(cleared.statusCode).toBe(200);
+    expect(cleared.json().workshopCapacity).toBeNull();
+    expect(cleared.json().workshopSeatsRemaining).toBeNull();
+  });
+
   it('compares a patched end date against the stored start date', async () => {
     const owner = await signedIn('dates@example.com', 'TEACHER');
     const course = await createCourse(owner, { startDate: '2026-09-01T09:00:00.000Z' });
@@ -763,6 +803,8 @@ describe('enrollments under a course', () => {
 
     const response = await send('POST', `/${course.id}/enrollments`, undefined, student);
     expect(response.statusCode).toBe(403);
-    expect(response.json().detail).toContain('rule: STUDENT:isPublished');
+    expect(response.json().detail).toContain(
+      'rule: STUDENT:and(isPublished, hasCompletedPrerequisite)',
+    );
   });
 });

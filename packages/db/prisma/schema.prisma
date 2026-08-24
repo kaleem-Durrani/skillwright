@@ -335,6 +335,12 @@ model Course {
   durationUnit  DurationUnit
 
   capacity Int
+  /// Workshop seats. Null means unbound — a lecture course has no workshop.
+  /// A second bound on the SAME approvedCount: approval seats only while BOTH
+  /// hold (ADR 0006's conditional increment applied twice in one WHERE).
+  /// Guarded by CHECK (workshopCapacity IS NULL OR workshopCapacity > 0),
+  /// migration 0006_workshop_capacity.
+  workshopCapacity Int?
   /// Denormalised count of APPROVED enrollments, maintained inside the approval
   /// transaction. Guarded by CHECK (approved_count BETWEEN 0 AND capacity) so the
   /// database refuses to oversell even if application code is wrong.

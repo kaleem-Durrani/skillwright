@@ -628,6 +628,7 @@ export async function create(actor: Actor, input: CreateCourseInput): Promise<Co
       durationValue: input.duration.value,
       durationUnit: input.duration.unit,
       capacity: input.capacity,
+      workshopCapacity: input.workshopCapacity ?? null,
       startDate: toDate(input.startDate),
       endDate: toDate(input.endDate),
       syllabusUploadId: input.syllabusUploadId ?? null,
@@ -668,6 +669,23 @@ export async function update(
     ]);
   }
 
+  // The same guard for the second bound. The CHECK `course_workshop_capacity_sane`
+  // (migration 0006) only keeps the number positive; seating already committed is
+  // what a shrink below `approvedCount` would silently strand. Explicit null
+  // clears the bound and strands nothing, so it needs no check.
+  if (
+    input.workshopCapacity !== undefined &&
+    input.workshopCapacity !== null &&
+    input.workshopCapacity < current.approvedCount
+  ) {
+    throw validationFailed([
+      {
+        path: 'workshopCapacity',
+        message: 'Workshop capacity cannot be lower than the approved count',
+      },
+    ]);
+  }
+
   // `course_dates_ordered` (migration 0002:33-35) compares the STORED row. The zod
   // refinement (course.ts:60-77) only ever sees the submitted body, so patching one
   // date alone slips past it.
@@ -701,6 +719,7 @@ export async function update(
         ? { durationValue: input.duration.value, durationUnit: input.duration.unit }
         : {}),
       ...(input.capacity !== undefined ? { capacity: input.capacity } : {}),
+      ...(input.workshopCapacity !== undefined ? { workshopCapacity: input.workshopCapacity } : {}),
       ...(input.startDate !== undefined ? { startDate } : {}),
       ...(input.endDate !== undefined ? { endDate } : {}),
       ...(input.syllabusUploadId !== undefined ? { syllabusUploadId: input.syllabusUploadId } : {}),

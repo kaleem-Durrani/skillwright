@@ -73,6 +73,8 @@ function enrollment(overrides: Partial<EnrollmentDto> = {}): EnrollmentDto {
       capacity: 12,
       approvedCount: 3,
       seatsRemaining: 9,
+      workshopCapacity: null,
+      workshopSeatsRemaining: null,
       isFull: false,
       publishedAt: '2026-08-01T09:00:00.000Z',
     },

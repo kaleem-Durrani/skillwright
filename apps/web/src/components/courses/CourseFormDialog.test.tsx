@@ -77,6 +77,8 @@ const EXISTING_COURSE: CourseDetail = {
   capacity: 12,
   approvedCount: 3,
   seatsRemaining: 9,
+  workshopCapacity: null,
+  workshopSeatsRemaining: null,
   isFull: false,
   publishedAt: null,
   startDate: '2026-09-01T09:00:00.000Z',

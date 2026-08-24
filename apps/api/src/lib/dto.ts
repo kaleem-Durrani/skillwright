@@ -93,7 +93,8 @@ export function toDepartmentSummary(department: Department): DepartmentSummary {
 
 /**
  * The ONLY shape a course is serialised as in a list, and the ONLY place
- * `seatsRemaining` and `isFull` are derived (course.ts:37-39). The SPA never recomputes
+ * `seatsRemaining`, `isFull` and `workshopSeatsRemaining` are derived
+ * (course.ts:37-44). The SPA never recomputes
  * capacity arithmetic, so it can never drift from the server's answer — which is only
  * true while this function is the single definition of it.
  *
@@ -108,6 +109,13 @@ export function toDepartmentSummary(department: Department): DepartmentSummary {
  */
 export function toCourseSummary(course: CourseWithSummaryRelations): CourseSummary {
   const seatsRemaining = Math.max(0, course.capacity - course.approvedCount);
+  // Null stays null — "unbound" must not render as a seat count. The same
+  // Math.max(0, …) guard as the admissions bound above, against the same raw
+  // counter updates.
+  const workshopSeatsRemaining =
+    course.workshopCapacity === null
+      ? null
+      : Math.max(0, course.workshopCapacity - course.approvedCount);
   return {
     id: course.id,
     code: course.code,
@@ -118,8 +126,10 @@ export function toCourseSummary(course: CourseWithSummaryRelations): CourseSumma
     duration: { value: course.durationValue, unit: course.durationUnit },
     capacity: course.capacity,
     approvedCount: course.approvedCount,
+    workshopCapacity: course.workshopCapacity,
     seatsRemaining,
     isFull: seatsRemaining === 0,
+    workshopSeatsRemaining,
     publishedAt: course.publishedAt?.toISOString() ?? null,
   };
 }

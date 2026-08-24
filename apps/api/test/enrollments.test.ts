@@ -108,7 +108,7 @@ async function signIn(email: string, role: Role): Promise<Person> {
 
 async function makeCourse(
   teacherId: string,
-  options: { capacity?: number; published?: boolean } = {},
+  options: { capacity?: number; workshopCapacity?: number; published?: boolean } = {},
 ): Promise<string> {
   sequence += 1;
   const course = await prisma.course.create({
@@ -121,6 +121,7 @@ async function makeCourse(
       durationValue: 6,
       durationUnit: 'WEEK',
       capacity: options.capacity ?? 10,
+      workshopCapacity: options.workshopCapacity ?? null,
       publishedAt: options.published === false ? null : new Date(),
     },
   });
@@ -335,6 +336,138 @@ describe('approval and capacity', () => {
     const real = await prisma.enrollment.count({ where: { courseId, status: 'APPROVED' } });
     expect(await approvedCountOf(courseId)).toBe(30);
     expect(real).toBe(30);
+  });
+});
+
+describe('workshop capacity — the second guarded number', () => {
+  it('seats while BOTH bounds hold and refuses with the seats-full shape when the workshop fills', async () => {
+    const teacher = await signIn('t22@example.com', 'TEACHER');
+    const first = await signIn('s22a@example.com', 'STUDENT');
+    const second = await signIn('s22b@example.com', 'STUDENT');
+    const third = await signIn('s22c@example.com', 'STUDENT');
+    // Admissions allows 10; the workshop has two stations.
+    const courseId = await makeCourse(teacher.id, { capacity: 10, workshopCapacity: 2 });
+
+    const a = await post('/', { courseId }, first.token);
+    const b = await post('/', { courseId }, second.token);
+    const c = await post('/', { courseId }, third.token);
+    expect((await post(`/${a.json().id}/approve`, {}, teacher.token)).statusCode).toBe(200);
+    expect((await post(`/${b.json().id}/approve`, {}, teacher.token)).statusCode).toBe(200);
+
+    // Same refusal shape as the admissions bound (409 CAPACITY_EXCEEDED,
+    // problem+json) — only the detail names which bound fired.
+    const refused = await post(`/${c.json().id}/approve`, {}, teacher.token);
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json().code).toBe('CAPACITY_EXCEEDED');
+    expect(refused.headers['content-type']).toContain('application/problem+json');
+    expect(refused.json().detail).toContain('workshop');
+
+    // The throw rolled nothing back: two seated, the third still PENDING.
+    expect(await approvedCountOf(courseId)).toBe(2);
+    expect((await prisma.enrollment.findUniqueOrThrow({ where: { id: c.json().id } })).status).toBe(
+      'PENDING',
+    );
+  });
+
+  /**
+   * ADR 0006 line 42's concurrency proof, re-run against the second bound: a
+   * course whose ADMISSIONS capacity is 30 but whose workshop holds 5 must seat
+   * EXACTLY 5 under the same 200-at-once load. If the second term ever left the
+   * atomic UPDATE for an application-level compare, this is the test that fails.
+   */
+  it('seats exactly the workshop capacity under 200 concurrent approvals', async () => {
+    const teacher = await signIn('t23@example.com', 'TEACHER');
+    const courseId = await makeCourse(teacher.id, { capacity: 30, workshopCapacity: 5 });
+
+    await prisma.user.createMany({
+      data: Array.from({ length: 200 }, (_unused, index) => ({
+        email: `workshop-load-${index}@example.com`,
+        name: `Workshop Load ${index}`,
+        role: 'STUDENT' as const,
+        status: 'ACTIVE' as const,
+      })),
+    });
+    const students = await prisma.user.findMany({
+      where: { email: { startsWith: 'workshop-load-' } },
+      select: { id: true },
+    });
+    expect(students).toHaveLength(200);
+
+    await prisma.enrollment.createMany({
+      data: students.map((student) => ({ studentId: student.id, courseId })),
+    });
+    const pending = await prisma.enrollment.findMany({ where: { courseId }, select: { id: true } });
+
+    const responses = await Promise.all(
+      pending.map((enrollment) => post(`/${enrollment.id}/approve`, {}, teacher.token)),
+    );
+
+    const seated = responses.filter((response) => response.statusCode === 200);
+    const refused = responses.filter((response) => response.statusCode === 409);
+    expect(seated).toHaveLength(5);
+    expect(refused).toHaveLength(195);
+    expect(new Set(refused.map((response) => response.json().code))).toEqual(
+      new Set(['CAPACITY_EXCEEDED']),
+    );
+
+    // Reconciliation: the one counter equals the real APPROVED count.
+    const real = await prisma.enrollment.count({ where: { courseId, status: 'APPROVED' } });
+    expect(await approvedCountOf(courseId)).toBe(5);
+    expect(real).toBe(5);
+  });
+
+  it('leaves an unbound course on exactly the old behaviour', async () => {
+    const teacher = await signIn('t24@example.com', 'TEACHER');
+    // No workshop bound at all — the IS NULL OR arm of the WHERE.
+    const courseId = await makeCourse(teacher.id, { capacity: 10 });
+
+    await prisma.user.createMany({
+      data: Array.from({ length: 4 }, (_unused, index) => ({
+        email: `unbound-${index}@example.com`,
+        name: `Unbound ${index}`,
+        role: 'STUDENT' as const,
+        status: 'ACTIVE' as const,
+      })),
+    });
+    const students = await prisma.user.findMany({
+      where: { email: { startsWith: 'unbound-' } },
+      select: { id: true },
+    });
+    await prisma.enrollment.createMany({
+      data: students.map((student) => ({ studentId: student.id, courseId })),
+    });
+    const pending = await prisma.enrollment.findMany({
+      where: { courseId },
+      select: { id: true },
+      orderBy: { id: 'asc' },
+    });
+
+    const approvals: Awaited<ReturnType<typeof post>>[] = [];
+    let firstApproval: (typeof approvals)[number] | undefined;
+    for (const enrollment of pending) {
+      const response = await post(`/${enrollment.id}/approve`, {}, teacher.token);
+      firstApproval ??= response;
+      approvals.push(response);
+    }
+    expect(approvals.map((response) => response.statusCode)).toEqual([200, 200, 200, 200]);
+    expect(await approvedCountOf(courseId)).toBe(4);
+
+    // Null stays null on the wire — "unbound", never a seat count of zero.
+    expect(firstApproval?.json().course).toMatchObject({
+      workshopCapacity: null,
+      workshopSeatsRemaining: null,
+    });
+  });
+
+  it('holds the CHECK: a workshop of zero seats is not a legal row', async () => {
+    const teacher = await signIn('t25@example.com', 'TEACHER');
+    const courseId = await makeCourse(teacher.id);
+
+    // course_workshop_capacity_sane (migration 0006) keeps "unbound" distinct
+    // from "full" — clearing the bound is what null is for.
+    await expect(
+      prisma.$executeRaw`UPDATE "Course" SET "workshopCapacity" = 0 WHERE id = ${courseId}`,
+    ).rejects.toThrow(/course_workshop_capacity_sane/);
   });
 });
 
