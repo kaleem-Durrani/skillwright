@@ -376,6 +376,33 @@ export function CourseDetailPage() {
                 Edit course
               </Button>
             ) : null}
+
+            {/*
+              Served inside `courseDetailSchema` as a signed GET against the private
+              bucket, minted by `toCourseDetail` only while the syllabus upload is
+              COMMITTED — presence IS the permission. No policy gate wraps this: the
+              URL reached only viewers who were already entitled to it, and inventing
+              a client-side second answer is how #15/#31 denials get written.
+
+              Null renders nothing — a disabled-looking affordance for a file that does
+              not exist would read as broken, not as absent.
+
+              The anchor is a real download link, not the resource rows'
+              `window.location.assign` dance: there is no API call left to make, so the
+              href can be the signed URL itself and navigation costs nothing. The
+              `download` attribute states the intent for same-origin cases; on this
+              cross-origin href browsers ignore it and do the right thing anyway,
+              because the signed GET carries `ResponseContentDisposition: attachment`
+              (storage.ts) — the page stays put and the file saves.
+            */}
+            {data.syllabusUrl ? (
+              <Button asChild variant="secondary" block className="sm:w-auto">
+                <a href={data.syllabusUrl} download>
+                  <Download aria-hidden="true" className="size-4" />
+                  Download syllabus
+                </a>
+              </Button>
+            ) : null}
           </>
         }
       />

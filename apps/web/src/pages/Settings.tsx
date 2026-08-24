@@ -12,6 +12,7 @@ import { subject, usePolicy } from '@/lib/policy';
 import { ApiError } from '@/lib/problem';
 import { useLogout, useSession } from '@/lib/session';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { AvatarPicker } from '@/components/settings/AvatarPicker';
 import { Avatar } from '@/components/ui/Avatar';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -246,6 +247,24 @@ function ProfileTab({ canEdit, isDemo }: { canEdit: boolean; isDemo: boolean }) 
           </div>
         </div>
       </Card>
+
+      {/*
+        Rendered only once `/me` is loaded, because what it shows IS that record's
+        avatar. Its cache writes go through `onSaved` rather than the picker naming
+        `profileKey` itself — one owner for the `/me` key, and no second cache path.
+      */}
+      {profile.data ? (
+        <AvatarPicker
+          profile={profile.data}
+          disabled={!canEdit}
+          onSaved={async (updated) => {
+            client.setQueryData(profileKey, updated);
+            // The chrome renders the avatar from the session envelope, not from this
+            // record — the same sweep the profile save below performs, for the same reason.
+            await client.invalidateQueries({ queryKey: qk.session });
+          }}
+        />
+      ) : null}
 
       <Card className="flex flex-col gap-4">
         <CardTitle>Personal details</CardTitle>
