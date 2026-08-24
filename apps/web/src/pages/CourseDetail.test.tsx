@@ -19,12 +19,15 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { qk } from '@/lib/query';
+import { ApiError } from '@/lib/problem';
 import type { CourseDetail } from '@/lib/types';
 
 type ApiFetch = (path: string, options?: unknown) => Promise<unknown>;
+type ApiSend = (path: string, body?: unknown, options?: unknown) => Promise<unknown>;
 
-const { apiGet } = vi.hoisted(() => ({
+const { apiGet, apiPost } = vi.hoisted(() => ({
   apiGet: vi.fn<ApiFetch>(),
+  apiPost: vi.fn<ApiSend>(),
 }));
 
 /**
@@ -40,7 +43,7 @@ vi.mock('@/lib/api', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,
-    api: { get: apiGet, post: vi.fn(), patch: vi.fn(), put: vi.fn(), del: vi.fn() },
+    api: { get: apiGet, post: apiPost, patch: vi.fn(), put: vi.fn(), del: vi.fn() },
   };
 });
 
@@ -62,6 +65,9 @@ vi.mock('@tanstack/react-router', async (importOriginal) => {
 
 // Imported after the mocks so the page resolves the stubbed client and route.
 import { CourseDetailPage } from './CourseDetail.js';
+// Mounted beside the page so the toast store's output is assertable: the capacity
+// refusals below speak through `toast()`, which renders nothing without a Toaster.
+import { Toaster } from '@/components/ui/Toast';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -71,6 +77,8 @@ import { CourseDetailPage } from './CourseDetail.js';
 const DEPARTMENT_ID = '01JGXDFAM0K2Z1GYCSNM5F5RCY';
 const TEACHER_ID = '01JGXDFAM0K2Z1GYCSNM5F5RCZ';
 const STUDENT_ID = '01JGXDFAM0K2Z1GYCSNM5F5RD1';
+/** The rung `WELD-101` names in the Phase 6 tests below. */
+const RUNG_ID = '01JGXDFAM0K2Z1GYCSNM5F5RD9';
 
 const SIGNED_SYLLABUS_URL = 'https://objects.example.test/bucket/syllabi/key?X-Amz-Signature=abc';
 
@@ -148,6 +156,7 @@ function renderPage(served: CourseDetail = course()): void {
   render(
     <QueryClientProvider client={client}>
       <CourseDetailPage />
+      <Toaster />
     </QueryClientProvider>,
   );
 }
@@ -236,6 +245,19 @@ const ROSTER_PAGE = {
   meta: EMPTY_PAGE.meta,
 };
 
+/** One PENDING request, for the decision tests below. */
+const PENDING_PAGE = {
+  data: [
+    {
+      ...OWN_ENROLLMENT,
+      id: '01JGXDFAM0K2Z1GYCSNM5F5RD8',
+      status: 'PENDING',
+      decidedAt: null,
+    },
+  ],
+  meta: EMPTY_PAGE.meta,
+};
+
 const ATTENDANCE_SUMMARY = {
   counts: { present: 4, absent: 1, late: 2 },
   total: 7,
@@ -296,6 +318,7 @@ function renderAttendance(
   render(
     <QueryClientProvider client={client}>
       <CourseDetailPage />
+      <Toaster />
     </QueryClientProvider>,
   );
 }
@@ -373,5 +396,129 @@ describe('CourseDetail attendance — the owning teacher', () => {
     );
     expect(screen.queryByText('Attendance register')).toBeNull();
     expect(screen.queryByRole('button', { name: /save register/i })).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Enrolment gate — Phase 6 prerequisites
+// ---------------------------------------------------------------------------
+
+const RUNG = { id: RUNG_ID, code: 'SMAW-100', name: 'SMAW Level 1' };
+
+/** A published course with a rung, seen by a student who holds no row on it. */
+function gatedCourse(overrides: Partial<CourseDetail> = {}): CourseDetail {
+  return course({
+    viewerEnrollmentStatus: null,
+    prerequisiteCourseId: RUNG_ID,
+    prerequisite: RUNG,
+    ...overrides,
+  });
+}
+
+describe('CourseDetail enrolment gate — prerequisites', () => {
+  it('disables enrolment naming the rung while the student has not completed it', async () => {
+    renderAttendance(gatedCourse(), VIEWER, { '/enrollments': () => EMPTY_PAGE });
+
+    const button = await screen.findByRole('button', { name: /requires/i });
+    expect(button).toBeDisabled();
+    expect(button).toHaveTextContent('Requires SMAW-100');
+    // The named fact beside the button, spelled out in full.
+    expect(screen.getByText('SMAW-100 · SMAW Level 1')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /request enrolment/i })).toBeNull();
+  });
+
+  it('re-enables enrolment once the completed lookup holds the rung', async () => {
+    // The #31 half: an APPROVED seat on SMAW-100 must turn the button ON, not
+    // merely keep it from lying — a subject without `completedCourseIds` denies
+    // every gated course silently.
+    renderAttendance(gatedCourse(), VIEWER, {
+      '/enrollments': () => ({
+        data: [{ id: ENROLLMENT_ID, status: 'APPROVED', course: { id: RUNG_ID } }],
+        meta: EMPTY_PAGE.meta,
+      }),
+    });
+
+    expect(await screen.findByRole('button', { name: 'Request enrolment' })).toBeEnabled();
+  });
+
+  it('behaves as before when the course names no rung at all', async () => {
+    renderAttendance(course({ viewerEnrollmentStatus: null }), VIEWER);
+
+    expect(await screen.findByRole('button', { name: 'Request enrolment' })).toBeEnabled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Header facts and seat refusals — Phase 7 workshop capacity
+// ---------------------------------------------------------------------------
+
+describe('CourseDetail header — workshop places', () => {
+  it('shows workshop seats remaining beside ordinary ones when bound', async () => {
+    renderAttendance(course({ workshopCapacity: 5, workshopSeatsRemaining: 2 }), VIEWER);
+
+    expect(await screen.findByText('2 of 5 places left')).toBeInTheDocument();
+  });
+
+  it('says nothing about a workshop where none is bound', async () => {
+    renderAttendance(course(), VIEWER);
+
+    await screen.findByRole('heading', { level: 1, name: 'Welding Fundamentals' });
+    expect(screen.queryByText(/places left/)).toBeNull();
+  });
+
+  it('refuses enrolment naming the workshop when every place is taken', async () => {
+    renderAttendance(
+      course({
+        viewerEnrollmentStatus: null,
+        workshopCapacity: 5,
+        workshopSeatsRemaining: 0,
+      }),
+      VIEWER,
+    );
+
+    const button = await screen.findByRole('button', { name: /workshop is full/i });
+    expect(button).toBeDisabled();
+  });
+
+  it('keeps the ordinary full-course copy for a course with no workshop bound', async () => {
+    renderAttendance(course({ viewerEnrollmentStatus: null, isFull: true }), VIEWER);
+
+    const button = await screen.findByRole('button', { name: /course is full/i });
+    expect(button).toBeDisabled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Decisions — the 409 that names its bound
+// ---------------------------------------------------------------------------
+
+describe('CourseDetail decisions — capacity refusals', () => {
+  it('tells the approving teacher which bound fired when the workshop is full', async () => {
+    // The 409's code maps to "This course is full." (problem.ts ERROR_COPY) and
+    // its detail is diagnostics (#25) — so the screen answers from the row it has
+    // cached, which knows the workshop is the exhausted bound.
+    apiPost.mockRejectedValueOnce(
+      new ApiError({
+        type: 'about:blank',
+        title: 'Conflict',
+        status: 409,
+        code: 'CAPACITY_EXCEEDED',
+        requestId: 'test',
+      }),
+    );
+    renderAttendance(course({ workshopCapacity: 5, workshopSeatsRemaining: 0 }), TEACHER_USER, {
+      [`/courses/${COURSE_ID}/enrollments`]: () => PENDING_PAGE,
+      [`/courses/${COURSE_ID}/attendance`]: (_path, options) =>
+        attendanceRegister((options as { query?: { date?: string } }).query?.date ?? '1970-01-01'),
+    });
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('tab', { name: /students/i }));
+    // DataList renders every roster row in BOTH its card list and its table, so
+    // there are two Approve buttons for the one request; either drives it.
+    const approveButtons = await screen.findAllByRole('button', { name: 'Approve' });
+    await user.click(approveButtons[0] as HTMLElement);
+
+    expect(await screen.findByText('The workshop for this course is full')).toBeInTheDocument();
   });
 });

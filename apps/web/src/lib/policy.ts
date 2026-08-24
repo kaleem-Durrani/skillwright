@@ -1,5 +1,10 @@
 import { useCallback, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { can, type Action, type PolicyResult } from '@skillwright/shared/policy';
+import { MAX_PAGE_SIZE, type Paginated } from '@skillwright/shared/schema';
+import { api } from './api.js';
+import { qk } from './query.js';
+import type { EnrollmentDto } from './types.js';
 import { useSession } from './session.js';
 
 /**
@@ -82,4 +87,50 @@ export function useAllowedItems<T extends { action?: Action; subject?: PolicySub
     () => items.filter((item) => (item.action ? policy.can(item.action, item.subject) : true)),
     [items, policy],
   );
+}
+
+export interface CompletedCourses {
+  /** Undefined until the first page lands. */
+  completedCourseIds: readonly string[] | undefined;
+  /**
+   * True only when the lookup has ANSWERED. Until then the viewer's completion of
+   * any given course is UNKNOWN, not false — a screen must not disable or refuse
+   * enrolment on data it has not received.
+   */
+  ready: boolean;
+}
+
+/**
+ * The REQUESTING viewer's completed courses — the ids they hold an APPROVED
+ * enrollment for, exactly what `Subject.completedCourseIds` wants (actor.ts).
+ *
+ * This is the client half of a subject-loader duty the server discharges in
+ * `loadCourseEnrollmentSubject` (courses.service.ts): `enrollment:request`
+ * composes `and(isPublished, hasCompletedPrerequisite)`, and
+ * `hasCompletedPrerequisite` reads these ids beside the subject course's
+ * `prerequisiteCourseId`. A client subject that omits them denies every gated
+ * course — hiding an enrol button the API would have allowed — which is the
+ * client-side shape of LESSONS-LEARNED #31.
+ *
+ * The source is the endpoint this app already uses (`GET /enrollments`
+ * self-scopes a student's rows to their own server-side, so no per-subject gate
+ * is needed), read at the schema's page ceiling rather than a widget's page size,
+ * so "completed" is never an artefact of however many rows another screen chose
+ * to render. Like the server loader, callers scope it to STUDENT viewers: every
+ * other role's `enrollment:request` cell decides without reading the field.
+ */
+export function useCompletedCourseIds(enabled: boolean): CompletedCourses {
+  const query = useQuery({
+    queryKey: qk.enrollments({ status: 'APPROVED', limit: MAX_PAGE_SIZE }),
+    queryFn: () =>
+      api.get<Paginated<EnrollmentDto>>('/enrollments', {
+        query: { status: 'APPROVED', limit: MAX_PAGE_SIZE },
+      }),
+    enabled,
+  });
+
+  return {
+    completedCourseIds: query.data?.data.map((row) => row.course.id),
+    ready: query.isSuccess,
+  };
 }

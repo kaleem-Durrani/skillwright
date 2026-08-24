@@ -15,10 +15,11 @@
 import type { SessionUser } from '@/lib/session';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import userEvent, { type UserEvent } from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { UPLOAD_LIMITS } from '@skillwright/shared/schema';
 import { qk } from '@/lib/query';
+import { ApiError } from '@/lib/problem';
 import type { CourseDetail } from '@/lib/types';
 
 type ApiSend = (path: string, body?: unknown, options?: unknown) => Promise<unknown>;
@@ -50,6 +51,8 @@ import { CourseFormDialog } from './CourseFormDialog.js';
 const COURSE_ID = '01JGXDFAM0K2Z1GYCSNM5F5RCX';
 const DEPARTMENT_ID = '01JGXDFAM0K2Z1GYCSNM5F5RCY';
 const TEACHER_ID = '01JGXDFAM0K2Z1GYCSNM5F5RCZ';
+/** Another course, offered as a prerequisite rung in the edit tests below. */
+const OTHER_COURSE_ID = '01JGXDFAM0K2Z1GYCSNM5F5RD8';
 
 function viewer(overrides: Partial<SessionUser> = {}): SessionUser {
   return {
@@ -97,8 +100,16 @@ const EXISTING_COURSE: CourseDetail = {
 // Harness
 // ---------------------------------------------------------------------------
 
+/**
+ * The detail the edit form's own GET answers with. Tests that need a variant — a
+ * course already carrying a rung or a bound workshop — reassign this BEFORE
+ * `openDialog`; the stub reads it at call time.
+ */
+let servedDetail: CourseDetail = EXISTING_COURSE;
+
 beforeEach(() => {
   vi.clearAllMocks();
+  servedDetail = EXISTING_COURSE;
 
   apiGet.mockImplementation((path: string) => {
     if (path.includes('/departments')) {
@@ -107,8 +118,21 @@ beforeEach(() => {
         meta: {},
       });
     }
-    // The detail fetch the edit form makes for itself.
-    return Promise.resolve(EXISTING_COURSE);
+    // The prerequisite select's options. Matched AFTER the edit form's own
+    // detail fetch, whose path also starts with /courses.
+    if (path.includes(`/courses/${COURSE_ID}`)) return Promise.resolve(servedDetail);
+    if (path.includes('/courses')) {
+      return Promise.resolve({
+        data: [
+          { id: OTHER_COURSE_ID, code: 'SMAW-100', name: 'SMAW Level 1' },
+          // The row being edited is offered by the endpoint and filtered out by
+          // the dialog; keeping it in the stub proves the filter runs.
+          { id: COURSE_ID, code: 'WELD-101', name: 'Welding Fundamentals' },
+        ],
+        meta: {},
+      });
+    }
+    return Promise.resolve(servedDetail);
   });
   apiPost.mockResolvedValue({ ...EXISTING_COURSE });
   apiPatch.mockResolvedValue({ ...EXISTING_COURSE });
@@ -155,6 +179,19 @@ function submitButton(dialog: HTMLElement): HTMLElement {
   const typed = dialog.querySelector('button[type="submit"]');
   if (typed instanceof HTMLElement) return typed;
   return within(dialog).getByRole('button', { name: /add|save/i });
+}
+
+/** Drive a Radix Select from the keyboard (the UserCreateDialog arrangement). */
+async function chooseOption(
+  user: UserEvent,
+  trigger: HTMLElement,
+  label: string | RegExp,
+): Promise<void> {
+  trigger.focus();
+  await user.keyboard('{Enter}');
+  const option = await screen.findByRole('option', { name: label });
+  await user.click(option);
+  await waitFor(() => expect(screen.queryByRole('listbox')).toBeNull());
 }
 
 /** Every POST/PATCH body this file cares about, keyed by the path given. */
@@ -279,4 +316,178 @@ describe('CourseFormDialog — syllabus upload', () => {
   function postsTo(pattern: RegExp): Array<Record<string, unknown>> {
     return bodiesOf([...apiPost.mock.calls], pattern);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Workshop places — Phase 7
+// ---------------------------------------------------------------------------
+
+describe('CourseFormDialog — workshop places', () => {
+  it('omits workshopCapacity from a create body when the box is left blank', async () => {
+    const user = userEvent.setup();
+    const dialog = await openDialog();
+
+    // Everything else the create schema requires, so the only variable below is
+    // the workshop box.
+    await user.type(within(dialog).getByRole('textbox', { name: /^code/i }), 'WELD-101');
+    await user.type(within(dialog).getByRole('textbox', { name: /name/i }), 'Mig Welding Basics');
+    await chooseOption(
+      user,
+      within(dialog).getByRole('combobox', { name: /department/i }),
+      'Welding',
+    );
+    await user.type(within(dialog).getByRole('textbox', { name: /^duration/i }), '6');
+    await user.type(within(dialog).getByRole('textbox', { name: /^capacity/i }), '12');
+
+    await user.click(submitButton(dialog));
+
+    const bodies = bodiesOf([...apiPost.mock.calls], /^\/courses$/);
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    // Blank means UNBOUND — a lecture-only course — so the key stays OFF the
+    // optional create field rather than arriving as a null it does not accept.
+    expect(bodies[0]).not.toHaveProperty('workshopCapacity');
+  });
+
+  it('sends workshopCapacity as a number when the box is filled', async () => {
+    const user = userEvent.setup();
+    const dialog = await openDialog();
+
+    await user.type(within(dialog).getByRole('textbox', { name: /^code/i }), 'WELD-102');
+    await user.type(within(dialog).getByRole('textbox', { name: /name/i }), 'CNC Practice');
+    await chooseOption(
+      user,
+      within(dialog).getByRole('combobox', { name: /department/i }),
+      'Welding',
+    );
+    await user.type(within(dialog).getByRole('textbox', { name: /^duration/i }), '6');
+    await user.type(within(dialog).getByRole('textbox', { name: /^capacity/i }), '10');
+    await user.type(within(dialog).getByRole('textbox', { name: /workshop places/i }), '4');
+
+    await user.click(submitButton(dialog));
+
+    const bodies = bodiesOf([...apiPost.mock.calls], /^\/courses$/);
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    expect(bodies[0]).toMatchObject({ capacity: 10, workshopCapacity: 4 });
+  });
+
+  it('unbinds the workshop with an explicit null when the box is emptied on edit', async () => {
+    servedDetail = { ...EXISTING_COURSE, workshopCapacity: 4, workshopSeatsRemaining: 1 };
+    const user = userEvent.setup();
+    const dialog = await openDialog({ course: { id: COURSE_ID, name: EXISTING_COURSE.name } });
+
+    const box = within(dialog).getByRole('textbox', { name: /workshop places/i });
+    expect(box).toHaveValue('4');
+    await user.clear(box);
+
+    await user.click(submitButton(dialog));
+
+    await waitFor(() => expect(apiPatch).toHaveBeenCalledTimes(1));
+    const [, body] = apiPatch.mock.calls[0] as [string, Record<string, unknown>];
+    // updateCourseSchema takes null where create takes omission: explicit null is
+    // what CLEARS the bound.
+    expect(body).toEqual({ workshopCapacity: null });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Prerequisite — Phase 6
+// ---------------------------------------------------------------------------
+
+describe('CourseFormDialog — prerequisite rung', () => {
+  it('offers no prerequisite control on create — createCourseSchema refuses the field', async () => {
+    const dialog = await openDialog();
+
+    expect(within(dialog).queryByRole('combobox', { name: /prerequisite/i })).toBeNull();
+  });
+
+  it('offers other courses on edit and PATCHes the chosen rung', async () => {
+    const user = userEvent.setup();
+    const dialog = await openDialog({
+      course: { id: COURSE_ID, name: EXISTING_COURSE.name },
+    });
+
+    await chooseOption(
+      user,
+      within(dialog).getByRole('combobox', { name: /prerequisite/i }),
+      /SMAW Level 1/,
+    );
+    await user.click(submitButton(dialog));
+
+    await waitFor(() => expect(apiPatch).toHaveBeenCalledTimes(1));
+    const [path, body] = apiPatch.mock.calls[0] as [string, Record<string, unknown>];
+    expect(path).toContain(COURSE_ID);
+    expect(body).toEqual({ prerequisiteCourseId: OTHER_COURSE_ID });
+  });
+
+  it('never offers the course itself as its own rung', async () => {
+    const dialog = await openDialog({
+      course: { id: COURSE_ID, name: EXISTING_COURSE.name },
+    });
+
+    // Open the listbox and inspect every option.
+    const trigger = within(dialog).getByRole('combobox', { name: /prerequisite/i });
+    trigger.focus();
+    await userEvent.setup().keyboard('{Enter}');
+    const options = await screen.findAllByRole('option');
+    const names = options.map((option) => option.textContent ?? '');
+    expect(names.some((name) => name.includes('WELD-101'))).toBe(false);
+    expect(names.some((name) => name.includes('SMAW Level 1'))).toBe(true);
+  });
+
+  it('clears the rung with an explicit null when None is chosen', async () => {
+    servedDetail = {
+      ...EXISTING_COURSE,
+      prerequisiteCourseId: OTHER_COURSE_ID,
+      prerequisite: { id: OTHER_COURSE_ID, code: 'SMAW-100', name: 'SMAW Level 1' },
+    };
+    const user = userEvent.setup();
+    const dialog = await openDialog({
+      course: { id: COURSE_ID, name: EXISTING_COURSE.name },
+    });
+
+    await chooseOption(
+      user,
+      within(dialog).getByRole('combobox', { name: /prerequisite/i }),
+      'None',
+    );
+    await user.click(submitButton(dialog));
+
+    await waitFor(() => expect(apiPatch).toHaveBeenCalledTimes(1));
+    const [, body] = apiPatch.mock.calls[0] as [string, Record<string, unknown>];
+    // Explicit null is the wire's "ungate this course" — '' would be a 422.
+    expect(body).toEqual({ prerequisiteCourseId: null });
+  });
+
+  it('lands a refused rung (self or cycle) back on the select as a field error', async () => {
+    apiPatch.mockRejectedValueOnce(
+      new ApiError({
+        type: 'about:blank',
+        title: 'Unprocessable Entity',
+        status: 422,
+        code: 'VALIDATION_FAILED',
+        requestId: 'test',
+        errors: [
+          {
+            path: 'prerequisiteCourseId',
+            message: 'Setting this prerequisite would create a cycle',
+          },
+        ],
+      }),
+    );
+    const user = userEvent.setup();
+    const dialog = await openDialog({
+      course: { id: COURSE_ID, name: EXISTING_COURSE.name },
+    });
+
+    await chooseOption(
+      user,
+      within(dialog).getByRole('combobox', { name: /prerequisite/i }),
+      /SMAW Level 1/,
+    );
+    await user.click(submitButton(dialog));
+
+    expect(await within(dialog).findByText(/create a cycle/)).toBeInTheDocument();
+    // The dialog stays open: the refusal is a field to fix, not a closed door.
+    expect(dialog).toBeInTheDocument();
+  });
 });

@@ -14,7 +14,8 @@ import { Plus, Search } from 'lucide-react';
 import type { Paginated } from '@skillwright/shared/schema';
 import { api } from '@/lib/api';
 import { qk } from '@/lib/query';
-import { usePolicy } from '@/lib/policy';
+import { useCompletedCourseIds, usePolicy } from '@/lib/policy';
+import { useSession } from '@/lib/session';
 import { formatDuration } from '@/lib/format';
 /*
  * The catalogue row is `CourseListItem`, NOT `CourseSummary`.
@@ -46,6 +47,36 @@ export function CoursesPage() {
   const search = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
   const policy = usePolicy();
+  const { user } = useSession();
+
+  /**
+   * The role read that scopes the completed-courses lookup below. A student's
+   * `GET /enrollments` is self-scoped server-side; no other role's rows would say
+   * anything about what the viewer has COMPLETED.
+   */
+  const isStudent = user?.role === 'STUDENT';
+  const completed = useCompletedCourseIds(isStudent);
+
+  /**
+   * The ladder rung a card names, when it is one the viewer still owes — Phase 6's
+   * catalogue half. Data-driven and viewer-independent for everyone except a
+   * signed-in student who has ALREADY completed the named course, whose card goes
+   * back to saying nothing; nobody else's completion is decidable here, so their
+   * cards always state the requirement. Unknown (lookup unsettled) counts as owed:
+   * a badge that disappears late is noise, one that appears late is a warning the
+   * student got exactly when it became true.
+   */
+  const requiresLabel = (course: CourseListItem): string | null => {
+    if (course.prerequisite === null) return null;
+    if (
+      isStudent &&
+      completed.ready &&
+      completed.completedCourseIds?.includes(course.prerequisite.id)
+    ) {
+      return null;
+    }
+    return `Requires: ${course.prerequisite.code} ${course.prerequisite.name}`;
+  };
 
   // Local mirror of the URL query so typing does not push a history entry per
   // keystroke; the URL is updated on a debounce below.
@@ -187,50 +218,61 @@ export function CoursesPage() {
               ),
           },
         ]}
-        renderCard={(course) => (
-          <Card interactive className="relative flex flex-col gap-2">
-            <div className="flex items-start justify-between gap-3">
-              <CardTitle className="text-base">
-                <Link
-                  to="/courses/$courseId"
-                  params={{ courseId: course.id }}
-                  className="outline-none after:absolute after:inset-0"
-                >
-                  {course.name}
-                </Link>
-              </CardTitle>
-              {course.viewerEnrollmentStatus ? (
-                <StatusChip status={course.viewerEnrollmentStatus} />
-              ) : (
-                <StatusChip status={course.publishedAt ? 'PUBLISHED' : 'DRAFT'} />
-              )}
-            </div>
-            <p className="text-xs text-fg-tertiary">
-              {course.code} · {course.department.name}
-            </p>
-            <p className="line-clamp-2 text-sm text-fg-secondary">
-              {course.description ?? 'No description yet.'}
-            </p>
-            <dl className="flex flex-wrap gap-x-4 gap-y-1 pt-1 text-xs text-fg-tertiary">
-              <div className="flex gap-1">
-                <dt>Teacher:</dt>
-                <dd className="text-fg-secondary">{course.teacher.name}</dd>
+        renderCard={(course) => {
+          const requires = requiresLabel(course);
+          return (
+            <Card interactive className="relative flex flex-col gap-2">
+              <div className="flex items-start justify-between gap-3">
+                <CardTitle className="text-base">
+                  <Link
+                    to="/courses/$courseId"
+                    params={{ courseId: course.id }}
+                    className="outline-none after:absolute after:inset-0"
+                  >
+                    {course.name}
+                  </Link>
+                </CardTitle>
+                {course.viewerEnrollmentStatus ? (
+                  <StatusChip status={course.viewerEnrollmentStatus} />
+                ) : (
+                  <StatusChip status={course.publishedAt ? 'PUBLISHED' : 'DRAFT'} />
+                )}
               </div>
-              <div className="flex gap-1">
-                <dt>Duration:</dt>
-                <dd className="text-fg-secondary">
-                  {formatDuration(course.duration.value, course.duration.unit)}
-                </dd>
-              </div>
-              <div className="flex gap-1">
-                <dt>Places:</dt>
-                <dd className="text-fg-secondary tabular-nums">
-                  {course.approvedCount}/{course.capacity}
-                </dd>
-              </div>
-            </dl>
-          </Card>
-        )}
+              <p className="text-xs text-fg-tertiary">
+                {course.code} · {course.department.name}
+              </p>
+              <p className="line-clamp-2 text-sm text-fg-secondary">
+                {course.description ?? 'No description yet.'}
+              </p>
+              {requires ? (
+                /*
+                 * On the card only, like the blurb above it: the table's columns
+                 * are facts about every row, and the enrol decision this badge
+                 * feeds happens on the detail screen the card links to.
+                 */
+                <p className="text-xs font-medium text-fg-brand">{requires}</p>
+              ) : null}
+              <dl className="flex flex-wrap gap-x-4 gap-y-1 pt-1 text-xs text-fg-tertiary">
+                <div className="flex gap-1">
+                  <dt>Teacher:</dt>
+                  <dd className="text-fg-secondary">{course.teacher.name}</dd>
+                </div>
+                <div className="flex gap-1">
+                  <dt>Duration:</dt>
+                  <dd className="text-fg-secondary">
+                    {formatDuration(course.duration.value, course.duration.unit)}
+                  </dd>
+                </div>
+                <div className="flex gap-1">
+                  <dt>Places:</dt>
+                  <dd className="text-fg-secondary tabular-nums">
+                    {course.approvedCount}/{course.capacity}
+                  </dd>
+                </div>
+              </dl>
+            </Card>
+          );
+        }}
         empty={
           isFiltered ? (
             <EmptyState

@@ -17,7 +17,9 @@ import {
 import { rejectEnrollmentSchema } from '@skillwright/shared/schema';
 import { api, type Paginated } from '@/lib/api';
 import { qk } from '@/lib/query';
-import { subject, usePolicy, type PolicySubject } from '@/lib/policy';
+import { subject, useCompletedCourseIds, usePolicy, type PolicySubject } from '@/lib/policy';
+import { ApiError } from '@/lib/problem';
+import { useSession } from '@/lib/session';
 import { formatBytes, formatDate, formatDuration, formatRelative } from '@/lib/format';
 import type {
   CourseDetail,
@@ -83,6 +85,15 @@ const RESOURCE_ICON: Record<ResourceTypeValue, LucideIcon> = {
  * by the service under SERIALIZABLE, not by the policy, and `isFull` on the DTO is what
  * the button disables on.
  *
+ * `prerequisiteCourseId` and `completedCourseIds` are BACK, because a rule now reads
+ * them: `enrollment:request` composes `and(isPublished, hasCompletedPrerequisite)`, and
+ * that combinator reads both (combinators.ts). They are the client half of what
+ * `loadCourseEnrollmentSubject` loads server-side — the rung this course names, and the
+ * rungs the VIEWER has completed. Omitting either denies every gated course silently and
+ * hides an enrol button the API would serve: LESSONS-LEARNED #31 again, in its newest
+ * costume. The completed list travels only for a STUDENT, exactly as the server loader
+ * scopes it — no other role's cell for this action reads it.
+ *
  * `studentId` is deliberately NOT set. The server adds it for a STUDENT so
  * `isEnrolledStudent` passes and the enrollments service then narrows the rows to that
  * student's own; on the client the same subject would open a "Students" roster that
@@ -90,7 +101,10 @@ const RESOURCE_ICON: Record<ResourceTypeValue, LucideIcon> = {
  * NARROWER than the server hides nothing a student needs and renders no button that
  * would 403 — the failure this layer exists to prevent.
  */
-function courseSubject(course: CourseDetail): PolicySubject {
+function courseSubject(
+  course: CourseDetail,
+  completedCourseIds?: readonly string[],
+): PolicySubject {
   return subject({
     id: course.id,
     courseId: course.id,
@@ -98,6 +112,10 @@ function courseSubject(course: CourseDetail): PolicySubject {
     departmentId: course.department.id,
     publishedAt: course.publishedAt,
     enrollmentStatus: course.viewerEnrollmentStatus,
+    // Explicit null means "ungated" — the DTO always carries the field, so the
+    // subject must too. An ABSENT key would deny even an ungated course.
+    prerequisiteCourseId: course.prerequisiteCourseId,
+    ...(completedCourseIds ? { completedCourseIds } : {}),
   });
 }
 
@@ -154,7 +172,16 @@ export function CourseDetailPage() {
   const { courseId } = Route.useParams();
   const policy = usePolicy();
   const client = useQueryClient();
+  const { user } = useSession();
   const [rejecting, setRejecting] = useState<EnrollmentDto | null>(null);
+
+  /**
+   * The role read that scopes the completed-courses lookup below — the same single
+   * legitimate read `ViewerAttendanceSection` makes. `hasCompletedPrerequisite` is
+   * only ever asked of a STUDENT's subject; every other role's `enrollment:request`
+   * cell decides on the role alone.
+   */
+  const isStudent = user?.role === 'STUDENT';
 
   /**
    * The resource form's target in ONE value: `null` is closed, `'new'` is create, and a
@@ -176,11 +203,24 @@ export function CourseDetailPage() {
   });
 
   /**
-   * The policy subject is built from what THIS screen has loaded — teacher,
-   * publication state, the viewer's own enrolment. Nothing is fetched by the
-   * policy layer itself; `can()` is a pure function over this bag.
+   * The viewer's completed rungs, fetched only when the enrolment decision is live:
+   * a signed-in student looking at a course they hold no row for. Every other case
+   * — teachers, admins, a student already seated or already rejected — is decided
+   * without this field, and spending the request would buy data nothing reads.
    */
-  const viewerSubject = course.data ? courseSubject(course.data) : undefined;
+  const completed = useCompletedCourseIds(
+    isStudent && course.data?.viewerEnrollmentStatus === null,
+  );
+
+  /**
+   * The policy subject is built from what THIS screen has loaded — teacher,
+   * publication state, the viewer's own enrolment and, for a student, their
+   * completed courses. Nothing else is fetched by the policy layer itself; `can()`
+   * is a pure function over this bag.
+   */
+  const viewerSubject = course.data
+    ? courseSubject(course.data, isStudent ? completed.completedCourseIds : undefined)
+    : undefined;
 
   /*
    * No `enabled` gate, deliberately — and it used to have one.
@@ -240,7 +280,28 @@ export function CourseDetailPage() {
         client.invalidateQueries({ queryKey: qk.course(courseId) }),
       ]);
     },
-    onError: (error) => toast.fromError(error, 'Could not record that decision'),
+    onError: (error) => {
+      /*
+       * CAPACITY_EXCEEDED maps to one sentence per code (problem.ts ERROR_COPY:
+       * "This course is full."), and the 409's distinguishing `detail` is
+       * diagnostics, not user copy — the SPA renders errors by code, never by
+       * detail (LESSONS-LEARNED #25). Which bound fired is not a mystery to THIS
+       * screen, though: the cached row carries both bounds and the derived
+       * remainder. When the workshop is the exhausted one, the teacher gets that
+       * sentence instead of a wrong "course full"; anything else keeps the
+       * code-mapped default.
+       */
+      if (
+        error instanceof ApiError &&
+        error.is('CAPACITY_EXCEEDED') &&
+        course.data?.workshopCapacity !== null &&
+        course.data?.workshopSeatsRemaining === 0
+      ) {
+        toast.error('The workshop for this course is full');
+        return;
+      }
+      toast.fromError(error, 'Could not record that decision');
+    },
   });
 
   /*
@@ -330,6 +391,49 @@ export function CourseDetailPage() {
     enrollments.data?.data.filter((entry) => entry.status === 'PENDING').length ?? 0;
 
   /*
+   * Enrolment refusals, computed from DATA so they can be SHOWN rather than acted
+   * on by vanishing. The button's policy Gate below stays exactly what it was;
+   * these only decide whether the affordance sits disabled with a reason beside it.
+   *
+   * Unmet prerequisite — scoped to a STUDENT with the lookup ANSWERED, mirroring
+   * where the server loader puts `completedCourseIds`. Before `ready` the state is
+   * unknown, not unmet: refusing on data not yet received would disable enrolment
+   * on a guess, which is LESSONS-LEARNED #15's failure pointed the other way.
+   */
+  const prerequisiteUnmet =
+    isStudent &&
+    completed.ready &&
+    data.prerequisite !== null &&
+    !completed.completedCourseIds?.includes(data.prerequisite.id);
+
+  // The second bound from Phase 7: ordinary seats may remain while every workshop
+  // place is taken. Derived like `isFull`, never recomputed here.
+  const workshopFull = data.workshopCapacity !== null && data.workshopSeatsRemaining === 0;
+
+  const enrolBlocker =
+    prerequisiteUnmet && data.prerequisite !== null
+      ? `Requires ${data.prerequisite.code}`
+      : workshopFull
+        ? 'Workshop is full'
+        : isFull
+          ? 'Course is full'
+          : null;
+
+  /*
+   * Visible-but-refusing: an unmet prerequisite used to take the whole button away,
+   * which read as "this course does not take enrolments" rather than "not yet". The
+   * affordance stays on screen, disabled, naming the rung it needs — the same honest
+   * pattern as `isFull`, and why the OR branch exists at all: for an unmet student
+   * `can('enrollment:request')` is now FALSE (the server would 403), but a disabled
+   * button performs nothing; the Gate still rules every enabled action.
+   *
+   * The two guard terms keep today's behaviour everywhere else: anonymous visitors
+   * see no button (their denial is the session, not the rung), and a DRAFT course
+   * stays silent because publication still gates through `can()` alone.
+   */
+  const showEnrolRefusal = prerequisiteUnmet && user !== null && data.publishedAt !== null;
+
+  /*
    * `resource:create` is COURSE-scoped — `ownsCourse` for a teacher, with no publication
    * term (policy.ts:221-228) — so it is asked with the course subject, exactly once, and
    * the same answer drives the header button and the empty state's action. Two `can()`
@@ -361,15 +465,15 @@ export function CourseDetailPage() {
           <>
             {data.viewerEnrollmentStatus ? (
               <StatusChip status={data.viewerEnrollmentStatus} />
-            ) : policy.can('enrollment:request', viewerSubject) ? (
+            ) : policy.can('enrollment:request', viewerSubject) || showEnrolRefusal ? (
               <Button
                 block
                 className="sm:w-auto"
-                disabled={isFull}
+                disabled={enrolBlocker !== null}
                 loading={requestEnrollment.isPending}
                 onClick={() => requestEnrollment.mutate()}
               >
-                {isFull ? 'Course is full' : 'Request enrolment'}
+                {enrolBlocker ?? 'Request enrolment'}
               </Button>
             ) : null}
 
@@ -417,6 +521,24 @@ export function CourseDetailPage() {
         <Fact label="Starts" value={formatDate(data.startDate)} />
         <Fact label="Ends" value={formatDate(data.endDate)} />
         <Fact label="Places" value={`${data.approvedCount} / ${data.capacity}`} />
+        {/*
+          Data-driven, viewer-independent: the rung this course names, shown to
+          everyone whenever it names one. Whether the VIEWER has met it is the
+          enrol button's business above, not a fact about the course.
+        */}
+        {data.prerequisite !== null ? (
+          <Fact label="Requires" value={`${data.prerequisite.code} · ${data.prerequisite.name}`} />
+        ) : null}
+        {/*
+          The second bound, beside the first and only when it exists — an unbound
+          course renders no workshop fact at all, not a "none" row.
+        */}
+        {data.workshopCapacity !== null ? (
+          <Fact
+            label="Workshop"
+            value={`${data.workshopSeatsRemaining} of ${data.workshopCapacity} places left`}
+          />
+        ) : null}
         <Fact label="Visibility" value={data.publishedAt ? 'Published' : 'Draft'} />
       </dl>
 

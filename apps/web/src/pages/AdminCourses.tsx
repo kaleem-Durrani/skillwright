@@ -150,6 +150,16 @@ export function AdminCoursesPage() {
             cell: (course) => (
               <span className="tabular-nums">
                 {course.approvedCount}/{course.capacity}
+                {/*
+                  The second bound, only when it exists — an unbound (lecture)
+                  course says nothing about a workshop it does not have.
+                */}
+                {course.workshopCapacity !== null ? (
+                  <span className="block text-xs text-fg-tertiary">
+                    {course.workshopSeatsRemaining} of {course.workshopCapacity} workshop places
+                    left
+                  </span>
+                ) : null}
               </span>
             ),
           },
@@ -217,6 +227,14 @@ export function AdminCoursesPage() {
                   {course.approvedCount}/{course.capacity}
                 </dd>
               </div>
+              {course.workshopCapacity !== null ? (
+                <div className="flex gap-1">
+                  <dt>Workshop:</dt>
+                  <dd className="text-fg-secondary tabular-nums">
+                    {course.workshopSeatsRemaining} of {course.workshopCapacity} places left
+                  </dd>
+                </div>
+              ) : null}
             </dl>
             <div className="relative z-10 flex items-center justify-end gap-1 pt-1">
               {/* Positioned above nothing here — the card title's link is not an

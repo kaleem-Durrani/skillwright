@@ -31,7 +31,7 @@ import { cn } from '@/lib/cn';
 import { formatBytes } from '@/lib/format';
 import { ApiError } from '@/lib/problem';
 import { qk } from '@/lib/query';
-import type { CourseDetail, DepartmentSummary, UserDetail } from '@/lib/types';
+import type { CourseDetail, CourseListItem, DepartmentSummary, UserDetail } from '@/lib/types';
 import { useSession } from '@/lib/session';
 import { describeFileProblem, isUploadFailure, uploadFile, type UploadedFile } from '@/lib/uploads';
 import { acceptedTypesSentence } from '@/components/uploads/fileCopy';
@@ -108,10 +108,27 @@ const formShape = z.object({
     .refine((value) => /^\d+$/.test(value) && Number(value) >= 1, {
       message: 'Capacity must be a whole number of at least 1.',
     }),
+  /**
+   * The second bound (Phase 7). Blank means UNBOUND — a lecture-only course — which
+   * is a legitimate answer, not an omission: create omits the field, update sends
+   * explicit `null` to clear it (`updateCourseSchema` is nullable, not just optional).
+   * The schema's ceiling of 10 000 is the server's to refuse; this refine only does
+   * what its sibling `capacity` does.
+   */
+  workshopCapacity: z.string().trim().refine(isPlacesOrBlank, {
+    message: 'Workshop places must be a whole number of at least 1.',
+  }),
+  /** The ladder rung. `''` is "none" — never sent on create, `null` on a clearing PATCH. */
+  prerequisiteCourseId: z.string(),
   startDate: z.string(),
   endDate: z.string(),
   syllabus: z.instanceof(File).nullable(),
 });
+
+/** Digits only, and at least 1 — or nothing at all, which is the unbound answer. */
+function isPlacesOrBlank(value: string): boolean {
+  return value === '' || (/^\d+$/.test(value) && Number(value) >= 1);
+}
 
 type CourseFormValues = z.infer<typeof formShape>;
 
@@ -194,12 +211,21 @@ const FIELD_FOR_PATH: Readonly<Record<string, keyof CourseFormValues>> = {
   departmentId: 'departmentId',
   teacherId: 'teacherId',
   capacity: 'capacity',
+  workshopCapacity: 'workshopCapacity',
+  prerequisiteCourseId: 'prerequisiteCourseId',
   startDate: 'startDate',
   endDate: 'endDate',
   syllabusUploadId: 'syllabus',
   'duration.value': 'durationValue',
   'duration.unit': 'durationUnit',
 };
+
+/**
+ * Radix `SelectItem` refuses an empty-string value, so the "None" choice travels
+ * under a sentinel and is translated back to `''` — the form's unbound answer —
+ * in `onValueChange`.
+ */
+const NO_PREREQUISITE = '__none__';
 
 /** The served detail flattened into the controls this form owns. */
 function toFormValues(detail: CourseDetail | undefined): CourseFormValues {
@@ -213,6 +239,9 @@ function toFormValues(detail: CourseDetail | undefined): CourseFormValues {
     durationValue: detail ? String(detail.duration.value) : '',
     durationUnit: detail?.duration.unit ?? 'WEEK',
     capacity: detail ? String(detail.capacity) : '',
+    // Null (unbound) reads back as the blank box, exactly as it was typed.
+    workshopCapacity: detail?.workshopCapacity != null ? String(detail.workshopCapacity) : '',
+    prerequisiteCourseId: detail?.prerequisiteCourseId ?? '',
     startDate: toDateTimeLocal(detail?.startDate),
     endDate: toDateTimeLocal(detail?.endDate),
     // A chosen file is always a NEW syllabus; the attached one cannot be read back
@@ -237,6 +266,17 @@ function toCreate(
     ...(isAdmin && values.teacherId !== '' ? { teacherId: values.teacherId } : {}),
     duration: { value: Number(values.durationValue), unit: values.durationUnit },
     capacity: Number(values.capacity),
+    // Omitted, not null — `createCourseSchema` has no bound at all until given one.
+    ...(values.workshopCapacity === ''
+      ? {}
+      : { workshopCapacity: Number(values.workshopCapacity) }),
+    /*
+     * NO `prerequisiteCourseId` here, deliberately: `createCourseSchema` does not
+     * accept the field (packages/shared/src/schema/course.ts), so a control on this
+     * path could only send a key the wire strips. The rung is set on the edit form,
+     * where `updateCourseSchema` takes it — the same split as code/slug, pointed
+     * the other way round.
+     */
     ...(values.startDate === '' ? {} : { startDate: toIso(values.startDate) }),
     ...(values.endDate === '' ? {} : { endDate: toIso(values.endDate) }),
   };
@@ -272,6 +312,26 @@ function toUpdate(
         }
       : {}),
     ...(dirty.capacity ? { capacity: Number(values.capacity) } : {}),
+    /*
+     * Nullable on the wire, not just optional: an emptied box is an explicit
+     * `null` — "unbind this workshop" — never "leave unchanged". Unchanged rows
+     * are already kept out by the `dirty` guard, so the two meanings cannot
+     * collide.
+     */
+    ...(dirty.workshopCapacity
+      ? {
+          workshopCapacity: values.workshopCapacity === '' ? null : Number(values.workshopCapacity),
+        }
+      : {}),
+    // Same nullable contract as the bound above: choosing "None" PATCHes explicit
+    // null to clear the rung. The API refuses self-references and cycles with a
+    // 422 on this path; `FIELD_FOR_PATH` lands that back on this control.
+    ...(dirty.prerequisiteCourseId
+      ? {
+          prerequisiteCourseId:
+            values.prerequisiteCourseId === '' ? null : values.prerequisiteCourseId,
+        }
+      : {}),
     ...(dirty.startDate
       ? { startDate: values.startDate === '' ? null : toIso(values.startDate) }
       : {}),
@@ -338,6 +398,19 @@ export function CourseFormDialog({
         query: { role: 'TEACHER', limit: 200 },
       }),
     enabled: open && isAdmin,
+  });
+
+  /**
+   * Candidate rungs for the prerequisite select — EDIT only, because the field
+   * exists on `updateCourseSchema` alone. Every course the viewer can see is a
+   * candidate; the one being edited is filtered out at render, and anything else
+   * the API refuses (unknown id, a cycle) comes back as a 422 on
+   * `prerequisiteCourseId` and lands on the control through `FIELD_FOR_PATH`.
+   */
+  const courses = useQuery({
+    queryKey: qk.courses({ limit: 200 }),
+    queryFn: () => api.get<Paginated<CourseListItem>>('/courses', { query: { limit: 200 } }),
+    enabled: open && isEditing,
   });
 
   const formId = useId();
@@ -621,6 +694,48 @@ export function CourseFormDialog({
             </FormField>
           ) : null}
 
+          {/*
+            EDIT-ONLY, and not as an oversight: `createCourseSchema` accepts no
+            `prerequisiteCourseId`, so a create-time control could only produce
+            requests whose answer silently ignores it. The API refuses a self-rung
+            and a cyclic one with a 422 on this same path — the self option is
+            filtered out here because it is knowable, while cycles are not (they
+            depend on every other course's rung), so those stay the server's call.
+          */}
+          {isEditing ? (
+            <FormField
+              label="Prerequisite"
+              hint="Optional — students need an approved seat in that course before they can enrol in this one."
+              error={errors.prerequisiteCourseId?.message}
+            >
+              <Select
+                value={form.watch('prerequisiteCourseId') || NO_PREREQUISITE}
+                disabled={locked}
+                onValueChange={(next) =>
+                  setValue(
+                    'prerequisiteCourseId',
+                    next === NO_PREREQUISITE ? '' : next,
+                    // Dirtying here is what lets "changed nothing else" saves still
+                    // clear or set the rung; validation runs for the same reason.
+                    { shouldValidate: true, shouldDirty: true },
+                  )
+                }
+              >
+                <SelectTrigger placeholder="None" />
+                <SelectContent>
+                  <SelectItem value={NO_PREREQUISITE}>None</SelectItem>
+                  {(courses.data?.data ?? [])
+                    .filter((option) => option.id !== course?.id)
+                    .map((option) => (
+                      <SelectItem key={option.id} value={option.id}>
+                        {option.name} ({option.code})
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </FormField>
+          ) : null}
+
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <FormField label="Duration" required error={errors.durationValue?.message}>
               <div className="flex gap-2">
@@ -660,6 +775,24 @@ export function CourseFormDialog({
                 placeholder="12"
                 disabled={locked}
                 {...form.register('capacity')}
+              />
+            </FormField>
+
+            <FormField
+              label="Workshop places"
+              hint="Optional — leave empty for lecture-only courses."
+              error={errors.workshopCapacity?.message}
+            >
+              {/*
+                The second bound on the SAME approved-count (Phase 7). Blank is a
+                meaningful answer — unbound — so nothing here nudges the user
+                toward filling it in.
+              */}
+              <Input
+                inputMode="numeric"
+                placeholder="None"
+                disabled={locked}
+                {...form.register('workshopCapacity')}
               />
             </FormField>
           </div>
