@@ -190,10 +190,11 @@ async function makeCourse(
       teacherId,
       durationValue: 6,
       durationUnit: 'WEEK',
-      capacity: 10,
       publishedAt: options.published === false ? null : new Date(),
     },
   });
+  // Phase 9: one intake per fixture course.
+  await prisma.courseOffering.create({ data: { courseId: course.id, capacity: 10 } });
   return course.id;
 }
 
@@ -253,7 +254,13 @@ async function enrol(
   courseId: string,
   status: 'PENDING' | 'APPROVED',
 ): Promise<void> {
-  await prisma.enrollment.create({ data: { studentId, courseId, status } });
+  const offering = await prisma.courseOffering.findFirstOrThrow({
+    where: { courseId, deletedAt: null },
+    select: { id: true },
+  });
+  await prisma.enrollment.create({
+    data: { studentId, offeringId: offering.id, status },
+  });
 }
 
 interface World {
@@ -579,8 +586,12 @@ describe('a resource is never more visible than its course', () => {
     const student = await signIn('student-draft4@example.com', 'STUDENT');
     const courseId = await makeCourse(teacher.id);
     const resourceId = await makeResource({ courseId, authorId: teacher.id, isPublic: true });
+    const offering = await prisma.courseOffering.findFirstOrThrow({
+      where: { courseId, deletedAt: null },
+      select: { id: true },
+    });
     await prisma.enrollment.create({
-      data: { courseId, studentId: student.id, status: 'APPROVED' },
+      data: { offeringId: offering.id, studentId: student.id, status: 'APPROVED' },
     });
 
     await prisma.course.update({ where: { id: courseId }, data: { publishedAt: null } });

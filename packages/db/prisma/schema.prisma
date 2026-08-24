@@ -334,21 +334,6 @@ model Course {
   durationValue Int
   durationUnit  DurationUnit
 
-  capacity Int
-  /// Workshop seats. Null means unbound — a lecture course has no workshop.
-  /// A second bound on the SAME approvedCount: approval seats only while BOTH
-  /// hold (ADR 0006's conditional increment applied twice in one WHERE).
-  /// Guarded by CHECK (workshopCapacity IS NULL OR workshopCapacity > 0),
-  /// migration 0006_workshop_capacity.
-  workshopCapacity Int?
-  /// Denormalised count of APPROVED enrollments, maintained inside the approval
-  /// transaction. Guarded by CHECK (approved_count BETWEEN 0 AND capacity) so the
-  /// database refuses to oversell even if application code is wrong.
-  approvedCount Int @default(0)
-
-  startDate DateTime?
-  endDate   DateTime?
-
   syllabusUpload   Upload? @relation("CourseSyllabus", fields: [syllabusUploadId], references: [id], onDelete: SetNull)
   syllabusUploadId String? @unique
 
@@ -367,14 +352,18 @@ model Course {
   /// Courses this one gates. Back-relation Prisma requires; nothing reads it yet.
   prerequisiteFor Course[] @relation("CoursePrerequisite")
 
+  /// Publication is a property of the COURSE — the thing the catalogue lists and the
+  /// thing resources hang off — not of one intake. Publishing or unpublishing is one
+  /// verb (`course:publish`) that moves the whole course, every offering included.
+  /// Whether a particular intake is open lives on the offering: its dates say so.
   publishedAt DateTime?
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  enrollments       Enrollment[]
-  resources         Resource[]
+  offerings CourseOffering[]
+  resources Resource[]
 
   @@index([departmentId])
   @@index([teacherId])
@@ -384,14 +373,73 @@ model Course {
   @@index([prerequisiteCourseId])
 }
 
+/// One scheduled run of a Course — an intake, a cohort, a term's offering.
+///
+/// Phase 9 split `Course` in two because trade schools run repeating intakes: the
+/// seed used to announce "Spring intake applications now open" and CourseDetail.tsx
+/// said "apply again for the spring cohort", but the schema carried exactly one
+/// startDate/endDate/capacity, so neither sentence was backed by anything.
+///
+/// Everything that repeats per intake lives here; everything that identifies or
+/// describes the course itself stays on Course (see that model). The split follows
+/// the file's own discipline: one identity table plus satellites, explicit
+/// onDelete everywhere.
+///
+/// The guarded numbers (ADR 0006) moved WITH the seats they guard:
+///   - `capacity` / `workshopCapacity` / `approvedCount` were columns of the single
+///     term a Course used to model, and seats are sold per intake;
+///   - the CHECK constraints (`course_offering_capacity_sane`,
+///     `course_offering_workshop_capacity_sane`, migration 0007) and the atomic
+///     conditional UPDATE in enrollments.service.ts follow them;
+///   - `@@unique([studentId, offeringId])` on Enrollment makes "apply again for the
+///     spring cohort" a NEW row on a new offering instead of a reused one, which is
+///     what finally separates a student's intake histories (migration 0004's caveat).
+model CourseOffering {
+  id String @id @default(cuid())
+
+  /// The course this run is of. Cascade mirrors every other owned child
+  /// (Enrollment→course, Resource→course): a hard-deleted course takes its runs,
+  /// and soft delete is the only path application code uses anyway.
+  course   Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  courseId String
+
+  capacity Int
+  /// Workshop seats. Null means unbound — a lecture offering has no workshop.
+  /// A second bound on the SAME approvedCount: approval seats only while BOTH
+  /// hold (ADR 0006's conditional increment applied twice in one WHERE).
+  /// Guarded by CHECK (workshopCapacity IS NULL OR workshopCapacity > 0),
+  /// migrated from Course in 0007_cohorts.
+  workshopCapacity Int?
+  /// Denormalised count of APPROVED enrollments on THIS offering, maintained inside
+  /// the approval transaction. Guarded by CHECK (approved_count BETWEEN 0 AND
+  /// capacity) so the database refuses to oversell even if application code is wrong.
+  approvedCount Int @default(0)
+
+  startDate DateTime?
+  endDate   DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  enrollments Enrollment[]
+
+  @@index([courseId])
+  @@index([deletedAt])
+}
+
 model Enrollment {
   id String @id @default(cuid())
 
   student   User   @relation("EnrollmentStudent", fields: [studentId], references: [id], onDelete: Cascade)
   studentId String
 
-  course   Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  courseId String
+  /// The intake the seat is requested for — never the course directly. One row per
+  /// (student, offering), so a student who completes the autumn cohort may apply to
+  /// the spring one as a NEW row while the old history stays intact. The course is
+  /// always `offering.course`; nothing denormalises it.
+  offering   CourseOffering @relation(fields: [offeringId], references: [id], onDelete: Cascade)
+  offeringId String
 
   status EnrollmentStatus @default(PENDING)
 
@@ -407,20 +455,24 @@ model Enrollment {
 
   attendanceRecords AttendanceRecord[]
 
-  /// One enrollment row per (student, course), forever. A withdrawn student who
-  /// re-applies updates this row rather than creating a second one.
-  @@unique([studentId, courseId])
-  @@index([courseId, status])
+  /// One enrollment row per (student, OFFERING). A withdrawn student who re-applies
+  /// to the same intake updates this row rather than creating a second one; applying
+  /// to a DIFFERENT intake of the same course creates a new row — that distinction
+  /// is what Phase 9's split exists to express.
+  @@unique([studentId, offeringId])
+  @@index([offeringId, status])
   @@index([studentId, status])
   @@index([decidedById])
 }
 
 /// One row per (enrollment, session date). Marking a register twice for the same
 /// day CORRECTS the row rather than duplicating it — the same discipline as
-/// `Enrollment @@unique([studentId, courseId])`.
+/// `Enrollment @@unique([studentId, offeringId])`.
 ///
 /// A satellite on Enrollment, not on (User, Course): presence only means anything
-/// about a seat someone actually holds.
+/// about a seat someone actually holds. Since Phase 9's split each intake has its
+/// OWN enrollment rows, so a student's separate intakes of one course no longer
+/// share a history thread (migration 0004's caveat is resolved, not extended).
 model AttendanceRecord {
   id String @id @default(cuid())
 

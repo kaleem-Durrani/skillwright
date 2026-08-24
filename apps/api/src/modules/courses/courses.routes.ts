@@ -19,6 +19,9 @@ import {
   courseIdParamSchema,
   courseDetailSchema,
   courseListItemSchema,
+  courseOfferingParamSchema,
+  courseOfferingSchema,
+  createCourseOfferingInputSchema,
   createCourseSchema,
   enrollmentSchema,
   idParamSchema,
@@ -27,6 +30,7 @@ import {
   paginated,
   publishCourseSchema,
   requestEnrollmentSchema,
+  updateCourseOfferingInputSchema,
   updateCourseSchema,
 } from './courses.schema.js';
 import * as courseService from './courses.service.js';
@@ -42,6 +46,10 @@ function idOf(request: FastifyRequest): string {
 
 function courseIdOf(request: FastifyRequest): string {
   return (request.params as { courseId: string }).courseId;
+}
+
+function offeringIdOf(request: FastifyRequest): string {
+  return (request.params as { offeringId: string }).offeringId;
 }
 
 const coursesRoutes: FastifyPluginAsync = async (fastify) => {
@@ -173,17 +181,16 @@ const coursesRoutes: FastifyPluginAsync = async (fastify) => {
     {
       schema: {
         params: courseIdParamSchema,
-        // The SPA posts no body at all (CourseDetail.tsx:70) while
-        // `requestEnrollmentSchema` requires `courseId`, so the path supplies it and
-        // the rest of the body is optional. There is no shared schema for this shape.
-        // `.nullish()`, not `.optional()`: Fastify hands a bodyless POST to the
-        // validator as `null`, which `.optional()` rejects — so the SPA's own call
-        // answered 422 before the policy gate ever ran.
-        body: requestEnrollmentSchema.omit({ courseId: true }).nullish(),
+        // The SPA posts a body naming the INTAKE it wants (`offeringId` is required
+        // since Phase 9 — seats are sold per intake, so "apply" without naming one has
+        // no answer). The path supplies `courseId`; `.nullish()` is GONE deliberately:
+        // a bodyless POST used to mean "the course's only intake", and with more than
+        // one intake that request is malformed rather than implicit.
+        body: requestEnrollmentSchema.omit({ courseId: true }),
         response: { 201: enrollmentSchema },
       },
       // Subject is the COURSE: a draft course cannot accumulate a waiting list
-      // (policy.ts:153-159).
+      // (policy.ts).
       preHandler: authorize('enrollment:request', (request) =>
         courseService.loadCourseEnrollmentSubject(courseIdOf(request), request.actor),
       ),
@@ -195,9 +202,67 @@ const coursesRoutes: FastifyPluginAsync = async (fastify) => {
           await enrollmentsService.requestForCourse(
             requireActor(request),
             request.params.courseId,
-            request.body ?? undefined,
+            request.body,
           ),
         ),
+  );
+
+  // --- Offerings (Phase 9) ----------------------------------------------------
+  //
+  // Three routes over ONE existing action. Opening, retuning or retiring an intake is
+  // editing the course, so every gate below is `authorize('course:update', …)` against
+  // the TEMPLATE subject — no new action, no new matrix cell, exactly who may edit the
+  // course may edit its intakes. The offering routes are the minimum the corrected data
+  // model needs to be writable through the API; they are data-model plumbing, not a new
+  // admin surface.
+
+  app.post(
+    '/:courseId/offerings',
+    {
+      schema: {
+        params: courseIdParamSchema,
+        body: createCourseOfferingInputSchema,
+        response: { 201: courseOfferingSchema },
+      },
+      preHandler: authorize('course:update', (request) =>
+        courseService.loadCourseSubject(courseIdOf(request)),
+      ),
+    },
+    async (request, reply) =>
+      reply.status(201).send(await courseService.createOffering(courseIdOf(request), request.body)),
+  );
+
+  app.patch(
+    '/:courseId/offerings/:offeringId',
+    {
+      schema: {
+        params: courseOfferingParamSchema,
+        body: updateCourseOfferingInputSchema,
+        response: { 200: courseOfferingSchema },
+      },
+      // The gate names the COURSE; the handler answers 404 for an offering that does
+      // not exist under it — the same gate-here-404-there split every nested route in
+      // this repo uses.
+      preHandler: authorize('course:update', (request) =>
+        courseService.loadCourseSubject(courseIdOf(request)),
+      ),
+    },
+    async (request) =>
+      courseService.updateOffering(courseIdOf(request), offeringIdOf(request), request.body),
+  );
+
+  app.delete(
+    '/:courseId/offerings/:offeringId',
+    {
+      schema: { params: courseOfferingParamSchema },
+      preHandler: authorize('course:update', (request) =>
+        courseService.loadCourseSubject(courseIdOf(request)),
+      ),
+    },
+    async (request, reply) => {
+      await courseService.deleteOffering(courseIdOf(request), offeringIdOf(request));
+      return reply.status(204).send();
+    },
   );
 
   // --- Resources under a course ---------------------------------------------

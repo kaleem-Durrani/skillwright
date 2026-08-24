@@ -388,6 +388,15 @@ const COURSE_CATALOGUE: ReadonlyArray<{
 /** The one course seeded at 29/30, so the capacity edge is reachable without setup. */
 const NEARLY_FULL_COURSE_INDEX = 3;
 
+/**
+ * The course that demonstrates Phase 9's model: TWO intakes. Its first offering is
+ * already running (the dates every other course has); the second opens later — the
+ * "spring cohort" CourseDetail.tsx promises and this seed used to announce with
+ * nothing backing it.
+ */
+const TWO_INTAKE_COURSE_INDEX = 0;
+const SPRING_START_OFFSET = 75;
+
 const QUALIFICATIONS = [
   'City & Guilds Level 3 Diploma',
   'NVQ Level 4 in Engineering Maintenance',
@@ -595,8 +604,21 @@ async function seedUsers(departmentIds: string[]) {
   return { teachers, students, admins };
 }
 
-async function seedCourses(departmentIds: string[], teachers: SeededUser[]) {
-  const courses = [];
+type SeededOffering = { id: string; capacity: number };
+type SeededCourse = {
+  id: string;
+  code: string;
+  slug: string;
+  name: string;
+  teacherId: string;
+  offerings: SeededOffering[];
+};
+
+async function seedCourses(
+  departmentIds: string[],
+  teachers: SeededUser[],
+): Promise<SeededCourse[]> {
+  const courses: SeededCourse[] = [];
   for (const [index, spec] of COURSE_CATALOGUE.entries()) {
     const code = `${DEPARTMENTS[spec.dept]!.prefix}-${spec.level}`;
     const slug = slugify(`${spec.name}-${code}`);
@@ -629,92 +651,143 @@ async function seedCourses(departmentIds: string[], teachers: SeededUser[]) {
       teacherId: teacher.id,
       durationValue: spec.durationValue,
       durationUnit: spec.durationUnit,
-      capacity,
-      startDate: at(-60 + index * 2),
-      endDate: at(60 + index * 3),
       syllabusUploadId: syllabus.id,
       publishedAt: at(-65 + index),
     };
 
-    courses.push(
-      await prisma.course.upsert({
-        where: { code },
-        create: { id: did('course', code), code, createdAt: at(-70 + index), ...data },
-        update: data,
-      }),
-    );
+    const course = await prisma.course.upsert({
+      where: { code },
+      create: { id: did('course', code), code, createdAt: at(-70 + index), ...data },
+      update: data,
+    });
+
+    // Intakes. Every course gets the run it has always had; the demo course gets a
+    // second, future one so "apply again for the spring cohort" is backed by a row.
+    const offerings: SeededOffering[] = [];
+    const intakes: Array<{ key: string; startDate: Date; endDate: Date }> = [
+      { key: '1', startDate: at(-60 + index * 2), endDate: at(60 + index * 3) },
+    ];
+    if (index === TWO_INTAKE_COURSE_INDEX) {
+      intakes.push({
+        key: 'spring',
+        startDate: at(SPRING_START_OFFSET),
+        endDate: at(SPRING_START_OFFSET + 90),
+      });
+    }
+    for (const intake of intakes) {
+      const offeringData = {
+        courseId: course.id,
+        capacity,
+        startDate: intake.startDate,
+        endDate: intake.endDate,
+      };
+      const offering = await prisma.courseOffering.upsert({
+        where: { id: did('offering', `${code}:${intake.key}`) },
+        create: { id: did('offering', `${code}:${intake.key}`), ...offeringData },
+        update: offeringData,
+      });
+      offerings.push({ id: offering.id, capacity });
+    }
+
+    courses.push({
+      id: course.id,
+      code,
+      slug: course.slug,
+      name: course.name,
+      teacherId: course.teacherId,
+      offerings,
+    });
   }
-  logger.info('seed.courses', { count: courses.length, published: courses.length });
+  logger.info('seed.courses', {
+    count: courses.length,
+    published: courses.length,
+    offerings: courses.reduce((sum, course) => sum + course.offerings.length, 0),
+  });
   return courses;
 }
 
 async function seedEnrollments(
-  courses: Array<{ id: string; code: string; capacity: number; teacherId: string }>,
+  courses: SeededCourse[],
   students: SeededUser[],
   admins: SeededUser[],
 ) {
   let total = 0;
 
   for (const [index, course] of courses.entries()) {
-    const rnd = prngFor(`enrollment:${course.code}`);
-    const plan =
-      index === NEARLY_FULL_COURSE_INDEX
+    // The running intake carries the plan this seed has always had; the future
+    // spring intake of the two-intake course is just OPEN — a handful of PENDING
+    // applications and no decisions yet, which is what "applications now open" means.
+    const plansByOffering: Array<
+      Record<'APPROVED' | 'PENDING' | 'REJECTED' | 'WITHDRAWN' | 'COMPLETED', number>
+    > = course.offerings.map((_offering, offeringIndex) => {
+      if (offeringIndex > 0 && index === TWO_INTAKE_COURSE_INDEX) {
+        return { APPROVED: 0, PENDING: 3, REJECTED: 0, WITHDRAWN: 0, COMPLETED: 0 };
+      }
+      return index === NEARLY_FULL_COURSE_INDEX
         ? { APPROVED: 29, PENDING: 4, REJECTED: 1, WITHDRAWN: 1, COMPLETED: 0 }
         : {
-            APPROVED: 6 + Math.floor(rnd() * 8),
-            PENDING: Math.floor(rnd() * 5),
-            REJECTED: Math.floor(rnd() * 3),
-            WITHDRAWN: Math.floor(rnd() * 3),
-            COMPLETED: Math.floor(rnd() * 6),
+            APPROVED: 6 + Math.floor(prngFor(`enrollment:${course.code}`)() * 8),
+            PENDING: Math.floor(prngFor(`enrollment:${course.code}:p`)() * 5),
+            REJECTED: Math.floor(prngFor(`enrollment:${course.code}:r`)() * 3),
+            WITHDRAWN: Math.floor(prngFor(`enrollment:${course.code}:w`)() * 3),
+            COMPLETED: Math.floor(prngFor(`enrollment:${course.code}:c`)() * 6),
+          };
+    });
+
+    for (const [offeringIndex, offering] of course.offerings.entries()) {
+      const plan = plansByOffering[offeringIndex]!;
+      const rnd = prngFor(`enrollment:${course.code}:${offeringIndex}`);
+      const cohort = shuffled(students, `cohort:${course.code}:${offeringIndex}`);
+      let cursor = 0;
+      let approved = 0;
+
+      for (const [status, count] of Object.entries(plan) as Array<
+        ['APPROVED' | 'PENDING' | 'REJECTED' | 'WITHDRAWN' | 'COMPLETED', number]
+      >) {
+        for (let n = 0; n < count; n += 1) {
+          const student = cohort[cursor % cohort.length]!;
+          cursor += 1;
+
+          const decided = status !== 'PENDING';
+          // Decisions alternate between the course's own teacher and an admin, because the
+          // policy layer allows both and only seeded data proves the UI renders both.
+          const decider = n % 4 === 0 ? admins[n % admins.length]!.id : course.teacherId;
+          const data = {
+            status,
+            requestedAt: at(-50 + (cursor % 30)),
+            decidedAt: decided ? at(-48 + (cursor % 30)) : null,
+            decidedById: decided ? decider : null,
+            decisionNote:
+              status === 'REJECTED'
+                ? 'Prerequisite not met: complete the Level 1 course first.'
+                : status === 'WITHDRAWN'
+                  ? 'Withdrawn at the student’s request.'
+                  : null,
           };
 
-    const cohort = shuffled(students, `cohort:${course.code}`);
-    let cursor = 0;
-    let approved = 0;
+          await prisma.enrollment.upsert({
+            where: { studentId_offeringId: { studentId: student.id, offeringId: offering.id } },
+            create: {
+              id: did('enrollment', `${course.code}:${offeringIndex}:${student.id}`),
+              studentId: student.id,
+              offeringId: offering.id,
+              ...data,
+            },
+            update: data,
+          });
 
-    for (const [status, count] of Object.entries(plan) as Array<
-      ['APPROVED' | 'PENDING' | 'REJECTED' | 'WITHDRAWN' | 'COMPLETED', number]
-    >) {
-      for (let n = 0; n < count; n += 1) {
-        const student = cohort[cursor % cohort.length]!;
-        cursor += 1;
-
-        const decided = status !== 'PENDING';
-        // Decisions alternate between the course's own teacher and an admin, because the
-        // policy layer allows both and only seeded data proves the UI renders both.
-        const decider = n % 4 === 0 ? admins[n % admins.length]!.id : course.teacherId;
-        const data = {
-          status,
-          requestedAt: at(-50 + (cursor % 30)),
-          decidedAt: decided ? at(-48 + (cursor % 30)) : null,
-          decidedById: decided ? decider : null,
-          decisionNote:
-            status === 'REJECTED'
-              ? 'Prerequisite not met: complete the Level 1 course first.'
-              : status === 'WITHDRAWN'
-                ? 'Withdrawn at the student’s request.'
-                : null,
-        };
-
-        await prisma.enrollment.upsert({
-          where: { studentId_courseId: { studentId: student.id, courseId: course.id } },
-          create: {
-            id: did('enrollment', `${course.code}:${student.id}`),
-            studentId: student.id,
-            courseId: course.id,
-            ...data,
-          },
-          update: data,
-        });
-
-        if (status === 'APPROVED') approved += 1;
-        total += 1;
+          if (status === 'APPROVED') approved += 1;
+          total += 1;
+        }
       }
-    }
 
-    // approvedCount is denormalised, so the seed must leave it truthful — a seed that
-    // violates the invariant it is meant to demonstrate is worse than no seed.
-    await prisma.course.update({ where: { id: course.id }, data: { approvedCount: approved } });
+      // approvedCount is denormalised, so the seed must leave it truthful — a seed that
+      // violates the invariant it is meant to demonstrate is worse than no seed.
+      await prisma.courseOffering.update({
+        where: { id: offering.id },
+        data: { approvedCount: approved },
+      });
+    }
   }
 
   logger.info('seed.enrollments', { count: total });
@@ -1148,6 +1221,10 @@ export async function seed(): Promise<void> {
       null,
       `${COURSE_CATALOGUE[NEARLY_FULL_COURSE_INDEX]!.name}`,
       '  is seeded at 29 / 30 approved — one seat from the capacity edge.',
+      null,
+      `${COURSE_CATALOGUE[TWO_INTAKE_COURSE_INDEX]!.name}`,
+      `  has TWO intakes: one running now, one starting in ${SPRING_START_OFFSET} days —`,
+      '  the spring cohort "applications now open" points at.',
       null,
       'Avatars are derived, not stored. Example:',
       `  ${avatarUrlFor(demoStudent.id).slice(0, 72)}…`,

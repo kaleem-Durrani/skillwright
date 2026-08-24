@@ -71,8 +71,7 @@ const attendanceRoutes: FastifyPluginAsync = async (fastify) => {
         attendanceService.loadCourseSubject(courseIdOf(request)),
       ),
     },
-    async (request) =>
-      attendanceService.registerForDate(request.params.courseId, request.query.date),
+    async (request) => attendanceService.registerForDate(request.params.courseId, request.query),
   );
 
   /*
@@ -101,7 +100,11 @@ const attendanceRoutes: FastifyPluginAsync = async (fastify) => {
         // Filesystem-safe characters only; ids and bare dates need nothing escaped.
         `attachment; filename="attendance-${courseId}${from ? `-${from}` : ''}${to ? `-to-${to}` : ''}.csv"`,
       );
-      return attendanceService.exportRegister(courseId, { from, to });
+      return attendanceService.exportRegister(courseId, {
+        offeringId: request.query.offeringId,
+        from,
+        to,
+      });
     },
   );
 

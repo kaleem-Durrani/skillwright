@@ -280,7 +280,6 @@ describe('sweepAbandonedUploads', () => {
         teacherId,
         durationValue: 6,
         durationUnit: 'WEEK',
-        capacity: 10,
         syllabusUploadId: row.id,
       },
     });

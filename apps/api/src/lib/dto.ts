@@ -18,8 +18,19 @@
  * `@skillwright/shared` is a compile error here rather than a response-validation 500
  * at runtime.
  */
-import { avatarUrlFor, type Department, type Prisma, type User } from '@skillwright/db';
-import type { CourseSummary, DepartmentSummary, UserSummary } from '@skillwright/shared';
+import {
+  avatarUrlFor,
+  type CourseOffering,
+  type Department,
+  type Prisma,
+  type User,
+} from '@skillwright/db';
+import type {
+  CourseOffering as CourseOfferingDto,
+  CourseSummary,
+  DepartmentSummary,
+  UserSummary,
+} from '@skillwright/shared';
 
 /**
  * The relations `toCourseSummary` reads, as one include every caller spreads into its
@@ -92,15 +103,12 @@ export function toDepartmentSummary(department: Department): DepartmentSummary {
 }
 
 /**
- * The ONLY shape a course is serialised as in a list, and the ONLY place
- * `seatsRemaining`, `isFull` and `workshopSeatsRemaining` are derived
- * (course.ts:37-44). The SPA never recomputes
- * capacity arithmetic, so it can never drift from the server's answer — which is only
- * true while this function is the single definition of it.
- *
- * `Math.max(0, …)` because `approvedCount` is maintained by the raw counter updates in
- * enrollments.service.ts and a negative remainder must render as full, not as a
- * negative seat count.
+ * The ONLY shape a course TEMPLATE is serialised as. Since Phase 9 it names and
+ * describes the course; the seat arithmetic lives on offerings — see
+ * `toOfferingSummary`, which is the single definition of `seatsRemaining`,
+ * `isFull` and `workshopSeatsRemaining` (course.ts:37-44). The SPA never recomputes
+ * capacity arithmetic, so it can never drift from the server's answer — which is
+ * only true while that function is the single definition of it.
  *
  * Dates are stringified even though the response schema would normalise a `Date` on
  * its own: the return type is the shared `CourseSummary`, whose `publishedAt` is a
@@ -108,14 +116,6 @@ export function toDepartmentSummary(department: Department): DepartmentSummary {
  * than a runtime surprise.
  */
 export function toCourseSummary(course: CourseWithSummaryRelations): CourseSummary {
-  const seatsRemaining = Math.max(0, course.capacity - course.approvedCount);
-  // Null stays null — "unbound" must not render as a seat count. The same
-  // Math.max(0, …) guard as the admissions bound above, against the same raw
-  // counter updates.
-  const workshopSeatsRemaining =
-    course.workshopCapacity === null
-      ? null
-      : Math.max(0, course.workshopCapacity - course.approvedCount);
   return {
     id: course.id,
     code: course.code,
@@ -124,12 +124,39 @@ export function toCourseSummary(course: CourseWithSummaryRelations): CourseSumma
     department: toDepartmentSummary(course.department),
     teacher: toUserSummary(course.teacher),
     duration: { value: course.durationValue, unit: course.durationUnit },
-    capacity: course.capacity,
-    approvedCount: course.approvedCount,
-    workshopCapacity: course.workshopCapacity,
+    publishedAt: course.publishedAt?.toISOString() ?? null,
+  };
+}
+
+/**
+ * The ONLY shape an intake is serialised as, and (since Phase 9 moved the guarded
+ * numbers off Course) the only place `seatsRemaining`, `isFull` and
+ * `workshopSeatsRemaining` are derived.
+ *
+ * `Math.max(0, …)` because `approvedCount` is maintained by the raw counter updates in
+ * enrollments.service.ts and a negative remainder must render as full, not as a
+ * negative seat count. Null stays null — "unbound" must not render as a seat count.
+ */
+export function toOfferingSummary(
+  offering: Pick<
+    CourseOffering,
+    'id' | 'startDate' | 'endDate' | 'capacity' | 'workshopCapacity' | 'approvedCount'
+  >,
+): CourseOfferingDto {
+  const seatsRemaining = Math.max(0, offering.capacity - offering.approvedCount);
+  const workshopSeatsRemaining =
+    offering.workshopCapacity === null
+      ? null
+      : Math.max(0, offering.workshopCapacity - offering.approvedCount);
+  return {
+    id: offering.id,
+    startDate: offering.startDate?.toISOString() ?? null,
+    endDate: offering.endDate?.toISOString() ?? null,
+    capacity: offering.capacity,
+    workshopCapacity: offering.workshopCapacity,
+    approvedCount: offering.approvedCount,
     seatsRemaining,
     isFull: seatsRemaining === 0,
     workshopSeatsRemaining,
-    publishedAt: course.publishedAt?.toISOString() ?? null,
   };
 }

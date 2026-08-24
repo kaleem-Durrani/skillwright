@@ -408,8 +408,15 @@ function resolveSlug(candidate: string | undefined, title: string): string {
  */
 async function approvedStudentIdsExcept(exceptUserId: string): Promise<string[]> {
   const rows = await prisma.enrollment.findMany({
-    where: { status: 'APPROVED', studentId: { not: exceptUserId }, course: { deletedAt: null } },
+    where: {
+      status: 'APPROVED',
+      studentId: { not: exceptUserId },
+      // Seats are per-intake since Phase 9, so the relation is two hops; a student
+      // seated on several intakes of one course appears once — SELECT dedupes.
+      offering: { deletedAt: null, course: { deletedAt: null } },
+    },
     select: { studentId: true },
+    distinct: ['studentId'],
   });
   return rows.map((row) => row.studentId);
 }

@@ -100,9 +100,11 @@ async function makeCourse(
       teacherId,
       durationValue: 6,
       durationUnit: 'WEEK',
-      capacity: options.capacity ?? 10,
       publishedAt: options.published === false ? null : new Date(),
     },
+  });
+  await prisma.courseOffering.create({
+    data: { courseId: course.id, capacity: options.capacity ?? 10 },
   });
   return course.id;
 }
@@ -122,9 +124,13 @@ async function seatStudent(
     status?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN';
   } = {},
 ): Promise<string> {
+  const offering = await prisma.courseOffering.findFirstOrThrow({
+    where: { courseId, deletedAt: null },
+    select: { id: true },
+  });
   const row = await prisma.enrollment.create({
     data: {
-      courseId,
+      offeringId: offering.id,
       studentId,
       status: options.status ?? 'APPROVED',
       requestedAt: options.requestedAt ?? new Date(),
@@ -348,12 +354,21 @@ describe('GET /courses/:courseId/attendance/export', () => {
     return { course: courseId, teacher, ada, ben };
   }
 
+  /** A register is scoped to ONE intake since Phase 9; the fixture course has one. */
+  async function offeringOf(course: string): Promise<string> {
+    const offering = await prisma.courseOffering.findFirstOrThrow({
+      where: { courseId: course, deletedAt: null },
+      select: { id: true },
+    });
+    return offering.id;
+  }
+
   it('streams the register over a range, ordered by date then student name', async () => {
     const { course, teacher } = await fixtures();
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/v1/courses/${course}/attendance/export?from=2026-03-02&to=2026-03-06`,
+      url: `/api/v1/courses/${course}/attendance/export?offeringId=${await offeringOf(course)}&from=2026-03-02&to=2026-03-06`,
       headers: { cookie: cookieHeader(teacher.token) },
     });
 
@@ -385,7 +400,7 @@ describe('GET /courses/:courseId/attendance/export', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/v1/courses/${course}/attendance/export`,
+      url: `/api/v1/courses/${course}/attendance/export?offeringId=${await offeringOf(course)}`,
       headers: { cookie: cookieHeader(teacher.token) },
     });
 
@@ -399,7 +414,7 @@ describe('GET /courses/:courseId/attendance/export', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/v1/courses/${course}/attendance/export`,
+      url: `/api/v1/courses/${course}/attendance/export?offeringId=${await offeringOf(course)}`,
       headers: { cookie: cookieHeader(other.token) },
     });
 
@@ -412,7 +427,7 @@ describe('GET /courses/:courseId/attendance/export', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/v1/courses/${course}/attendance/export`,
+      url: `/api/v1/courses/${course}/attendance/export?offeringId=${await offeringOf(course)}`,
       headers: { cookie: cookieHeader(ada.token) },
     });
 
@@ -424,7 +439,7 @@ describe('GET /courses/:courseId/attendance/export', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: '/api/v1/courses/01JGXDFAM0K2Z1GYCSNM5F5RCX/attendance/export',
+      url: '/api/v1/courses/01JGXDFAM0K2Z1GYCSNM5F5RCX/attendance/export?offeringId=01JGXDFAM0K2Z1GYCSNM5F5RCY',
       headers: { cookie: cookieHeader(admin.token) },
     });
 

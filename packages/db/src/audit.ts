@@ -52,6 +52,10 @@ export const AUDITED_MODELS: ReadonlySet<string> = new Set([
   'User',
   'Department',
   'Course',
+  // Phase 9's per-intake offering. Its writes (create, capacity/date edits, soft
+  // delete through the offering routes) audit exactly like the template's — an intake
+  // being opened, rescheduled or retired is precisely what this trail exists for.
+  'CourseOffering',
   'Enrollment',
   'AttendanceRecord',
   'Resource',

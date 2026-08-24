@@ -91,7 +91,10 @@ async function signIn(email: string, role: Role): Promise<Person> {
   return { id: user.id, token: token as string };
 }
 
-async function makeCourse(teacherId: string, options: { capacity?: number } = {}): Promise<string> {
+async function makeCourse(
+  teacherId: string,
+  options: { capacity?: number } = {},
+): Promise<{ courseId: string; offeringId: string }> {
   sequence += 1;
   const course = await prisma.course.create({
     data: {
@@ -102,25 +105,28 @@ async function makeCourse(teacherId: string, options: { capacity?: number } = {}
       teacherId,
       durationValue: 6,
       durationUnit: 'WEEK',
-      capacity: options.capacity ?? 10,
       publishedAt: new Date(),
     },
   });
-  return course.id;
+  // Seats are an offering fact since Phase 9.
+  const offering = await prisma.courseOffering.create({
+    data: { courseId: course.id, capacity: options.capacity ?? 10 },
+  });
+  return { courseId: course.id, offeringId: offering.id };
 }
 
 async function enroll(
   student: Person,
-  courseId: string,
+  offeringId: string,
   status: 'PENDING' | 'APPROVED' | 'WITHDRAWN' = 'APPROVED',
 ): Promise<string> {
   const enrollment = await prisma.enrollment.create({
-    data: { studentId: student.id, courseId, status },
+    data: { studentId: student.id, offeringId, status },
   });
   // Keep the denormalised counter honest so unrelated assertions stay meaningful.
   if (status === 'APPROVED') {
-    await prisma.course.update({
-      where: { id: courseId },
+    await prisma.courseOffering.update({
+      where: { id: offeringId },
       data: { approvedCount: { increment: 1 } },
     });
   }
@@ -140,12 +146,18 @@ function markUrl(courseId: string): string {
 }
 
 /** Every mutation carries `originHeaders`, or csrf.plugin.ts refuses it first. */
-function mark(courseId: string, date: string, marks: MarkRow[], cookie: string) {
+function mark(
+  courseId: string,
+  offeringId: string,
+  date: string,
+  marks: MarkRow[],
+  cookie: string,
+) {
   return app.inject({
     method: 'PUT',
     url: markUrl(courseId),
     headers: { ...originHeaders, cookie: cookieHeader(cookie) },
-    payload: { date, marks } as Record<string, unknown>,
+    payload: { offeringId, date, marks } as Record<string, unknown>,
   });
 }
 
@@ -173,12 +185,13 @@ describe('bulk marking a register', () => {
     const teacher = await signIn('at-t1@example.com', 'TEACHER');
     const alice = await signIn('at-s1@example.com', 'STUDENT');
     const bob = await signIn('at-s2@example.com', 'STUDENT');
-    const courseId = await makeCourse(teacher.id);
-    const enrolmentA = await enroll(alice, courseId);
-    const enrolmentB = await enroll(bob, courseId);
+    const { courseId, offeringId } = await makeCourse(teacher.id);
+    const enrolmentA = await enroll(alice, offeringId);
+    const enrolmentB = await enroll(bob, offeringId);
 
     const response = await mark(
       courseId,
+      offeringId,
       DAY_ONE,
       [
         { enrollmentId: enrolmentA, status: 'PRESENT' },
@@ -205,11 +218,12 @@ describe('bulk marking a register', () => {
   it('corrects rather than duplicates when the same date is marked twice', async () => {
     const teacher = await signIn('at-t2@example.com', 'TEACHER');
     const alice = await signIn('at-s3@example.com', 'STUDENT');
-    const courseId = await makeCourse(teacher.id);
-    const enrolmentA = await enroll(alice, courseId);
+    const { courseId, offeringId } = await makeCourse(teacher.id);
+    const enrolmentA = await enroll(alice, offeringId);
 
     const first = await mark(
       courseId,
+      offeringId,
       DAY_ONE,
       [{ enrollmentId: enrolmentA, status: 'ABSENT', note: 'No show' }],
       teacher.token,
@@ -218,6 +232,7 @@ describe('bulk marking a register', () => {
 
     const second = await mark(
       courseId,
+      offeringId,
       DAY_ONE,
       [{ enrollmentId: enrolmentA, status: 'PRESENT' }],
       teacher.token,
@@ -250,14 +265,14 @@ describe('bulk marking a register', () => {
     const pending = await signIn('at-s5@example.com', 'STUDENT');
     const otherTeacher = await signIn('at-t3b@example.com', 'TEACHER');
     const otherStudent = await signIn('at-s5b@example.com', 'STUDENT');
-    const courseId = await makeCourse(teacher.id);
-    const enrolmentA = await enroll(alice, courseId);
-    const pendingEnrolment = await enroll(pending, courseId, 'PENDING');
-    const foreignCourse = await makeCourse(otherTeacher.id);
-    const foreignEnrolment = await enroll(otherStudent, foreignCourse);
+    const { courseId, offeringId } = await makeCourse(teacher.id);
+    const enrolmentA = await enroll(alice, offeringId);
+    const pendingEnrolment = await enroll(pending, offeringId, 'PENDING');
+    const foreignOffering = await makeCourse(otherTeacher.id);
+    const foreignEnrolment = await enroll(otherStudent, foreignOffering.offeringId);
 
     async function expectRejected(marks: MarkRow[]): Promise<void> {
-      const response = await mark(courseId, DAY_TWO, marks, teacher.token);
+      const response = await mark(courseId, offeringId, DAY_TWO, marks, teacher.token);
       expect(response.statusCode).toBe(409);
       expect(response.json().code).toBe('CONFLICT');
       // Transactional all-or-nothing: the valid id beside the bad one wrote nothing.
@@ -280,11 +295,12 @@ describe('bulk marking a register', () => {
     const teacherA = await signIn('at-t4@example.com', 'TEACHER');
     const teacherB = await signIn('at-t5@example.com', 'TEACHER');
     const student = await signIn('at-s6@example.com', 'STUDENT');
-    const courseId = await makeCourse(teacherA.id);
-    const enrolment = await enroll(student, courseId);
+    const { courseId, offeringId } = await makeCourse(teacherA.id);
+    const enrolment = await enroll(student, offeringId);
 
     const marked = await mark(
       courseId,
+      offeringId,
       DAY_ONE,
       [{ enrollmentId: enrolment, status: 'PRESENT' }],
       teacherB.token,
@@ -294,7 +310,10 @@ describe('bulk marking a register', () => {
     expect(marked.json().detail).toContain('TEACHER:ownsCourse');
     expect(await prisma.attendanceRecord.count()).toBe(0);
 
-    const read = await get(`${markUrl(courseId)}?date=${DAY_ONE}`, teacherB.token);
+    const read = await get(
+      `${markUrl(courseId)}?date=${DAY_ONE}&offeringId=${offeringId}`,
+      teacherB.token,
+    );
     expect(read.statusCode).toBe(403);
     expect(read.json().detail).toContain('TEACHER:ownsCourse');
   });
@@ -303,12 +322,13 @@ describe('bulk marking a register', () => {
     const teacher = await signIn('at-t6@example.com', 'TEACHER');
     const student = await signIn('at-s7@example.com', 'STUDENT');
     const classmate = await signIn('at-s8@example.com', 'STUDENT');
-    const courseId = await makeCourse(teacher.id);
-    const own = await enroll(student, courseId);
-    await enroll(classmate, courseId);
+    const { courseId, offeringId } = await makeCourse(teacher.id);
+    const own = await enroll(student, offeringId);
+    await enroll(classmate, offeringId);
 
     const marked = await mark(
       courseId,
+      offeringId,
       DAY_ONE,
       [{ enrollmentId: own, status: 'PRESENT' }],
       student.token,
@@ -317,7 +337,10 @@ describe('bulk marking a register', () => {
     expect(marked.json().detail).toContain('STUDENT:deny');
 
     // Even enrolled-and-approved, the class list is not theirs to read.
-    const read = await get(`${markUrl(courseId)}?date=${DAY_ONE}`, student.token);
+    const read = await get(
+      `${markUrl(courseId)}?date=${DAY_ONE}&offeringId=${offeringId}`,
+      student.token,
+    );
     expect(read.statusCode).toBe(403);
   });
 
@@ -325,11 +348,12 @@ describe('bulk marking a register', () => {
     const admin = await signIn('at-a1@example.com', 'ADMIN');
     const teacher = await signIn('at-t7@example.com', 'TEACHER');
     const student = await signIn('at-s9@example.com', 'STUDENT');
-    const courseId = await makeCourse(teacher.id);
-    const enrolment = await enroll(student, courseId);
+    const { courseId, offeringId } = await makeCourse(teacher.id);
+    const enrolment = await enroll(student, offeringId);
 
     const response = await mark(
       courseId,
+      offeringId,
       DAY_ONE,
       [{ enrollmentId: enrolment, status: 'LATE' }],
       admin.token,
@@ -345,12 +369,15 @@ describe('register scoping and validation', () => {
     const approved = await signIn('at-s10@example.com', 'STUDENT');
     const pending = await signIn('at-s11@example.com', 'STUDENT');
     const withdrawn = await signIn('at-s12@example.com', 'STUDENT');
-    const courseId = await makeCourse(teacher.id);
-    await enroll(approved, courseId, 'APPROVED');
-    await enroll(pending, courseId, 'PENDING');
-    await enroll(withdrawn, courseId, 'WITHDRAWN');
+    const { courseId, offeringId } = await makeCourse(teacher.id);
+    await enroll(approved, offeringId, 'APPROVED');
+    await enroll(pending, offeringId, 'PENDING');
+    await enroll(withdrawn, offeringId, 'WITHDRAWN');
 
-    const response = await get(`${markUrl(courseId)}?date=${DAY_ONE}`, teacher.token);
+    const response = await get(
+      `${markUrl(courseId)}?date=${DAY_ONE}&offeringId=${offeringId}`,
+      teacher.token,
+    );
     expect(response.statusCode).toBe(200);
     const body = response.json();
 
@@ -365,8 +392,8 @@ describe('register scoping and validation', () => {
   it('shows existing records joined onto the roster', async () => {
     const teacher = await signIn('at-t9@example.com', 'TEACHER');
     const student = await signIn('at-s13@example.com', 'STUDENT');
-    const courseId = await makeCourse(teacher.id);
-    const enrolment = await enroll(student, courseId);
+    const { courseId, offeringId } = await makeCourse(teacher.id);
+    const enrolment = await enroll(student, offeringId);
     await prisma.attendanceRecord.create({
       data: {
         enrollmentId: enrolment,
@@ -376,7 +403,10 @@ describe('register scoping and validation', () => {
       },
     });
 
-    const response = await get(`${markUrl(courseId)}?date=${DAY_ONE}`, teacher.token);
+    const response = await get(
+      `${markUrl(courseId)}?date=${DAY_ONE}&offeringId=${offeringId}`,
+      teacher.token,
+    );
     expect(response.statusCode).toBe(200);
     expect(response.json().rows[0].status).toBe('ABSENT');
   });
@@ -384,7 +414,7 @@ describe('register scoping and validation', () => {
   it('answers 404 for a register whose course does not exist, even for an admin', async () => {
     const admin = await signIn('at-a2@example.com', 'ADMIN');
     const response = await get(
-      `${markUrl('ckvzq0000000000000000000')}?date=${DAY_ONE}`,
+      `${markUrl('ckvzq0000000000000000000')}?date=${DAY_ONE}&offeringId=ckvzq0000000000000000001`,
       admin.token,
     );
     // The ADMIN cell is `allow`, which ignores the subject — so the read itself
@@ -395,11 +425,12 @@ describe('register scoping and validation', () => {
   it('validates the date before anything is written', async () => {
     const teacher = await signIn('at-t10@example.com', 'TEACHER');
     const student = await signIn('at-s14@example.com', 'STUDENT');
-    const courseId = await makeCourse(teacher.id);
-    const enrolment = await enroll(student, courseId);
+    const { courseId, offeringId } = await makeCourse(teacher.id);
+    const enrolment = await enroll(student, offeringId);
 
     const wrongFormat = await mark(
       courseId,
+      offeringId,
       '14/03/2030',
       [{ enrollmentId: enrolment, status: 'PRESENT' }],
       teacher.token,
@@ -409,7 +440,7 @@ describe('register scoping and validation', () => {
     const notADay = await get(`${markUrl(courseId)}?date=2030-03`, teacher.token);
     expect(notADay.statusCode).toBe(422);
 
-    const missing = await get(markUrl(courseId), teacher.token);
+    const missing = await get(`${markUrl(courseId)}?offeringId=${offeringId}`, teacher.token);
     expect(missing.statusCode).toBe(422);
 
     expect(await prisma.attendanceRecord.count()).toBe(0);
@@ -419,7 +450,7 @@ describe('register scoping and validation', () => {
     // A well-formed-but-unknown id, so route validation passes and the gate is
     // what answers.
     const response = await get(
-      `/api/v1/courses/ckvzq0000000000000000000/attendance?date=${DAY_ONE}`,
+      `/api/v1/courses/ckvzq0000000000000000000/attendance?date=${DAY_ONE}&offeringId=ckvzq0000000000000000001`,
     );
     expect(response.statusCode).toBe(401);
   });
@@ -430,9 +461,9 @@ describe('personal attendance summary', () => {
     const teacher = await signIn('at-t11@example.com', 'TEACHER');
     const alice = await signIn('at-s15@example.com', 'STUDENT');
     const bob = await signIn('at-s16@example.com', 'STUDENT');
-    const courseId = await makeCourse(teacher.id);
-    const aliceEnrolment = await enroll(alice, courseId);
-    const bobEnrolment = await enroll(bob, courseId);
+    const { courseId, offeringId } = await makeCourse(teacher.id);
+    const aliceEnrolment = await enroll(alice, offeringId);
+    const bobEnrolment = await enroll(bob, offeringId);
 
     await prisma.attendanceRecord.createMany({
       data: [
@@ -478,8 +509,8 @@ describe('personal attendance summary', () => {
     const teacherA = await signIn('at-t12@example.com', 'TEACHER');
     const teacherB = await signIn('at-t13@example.com', 'TEACHER');
     const student = await signIn('at-s17@example.com', 'STUDENT');
-    const courseId = await makeCourse(teacherA.id);
-    const enrolment = await enroll(student, courseId);
+    const { courseId, offeringId } = await makeCourse(teacherA.id);
+    const enrolment = await enroll(student, offeringId);
     await prisma.attendanceRecord.create({
       data: {
         enrollmentId: enrolment,
@@ -501,8 +532,8 @@ describe('personal attendance summary', () => {
   it('summarises an empty history as zeros, not an error', async () => {
     const teacher = await signIn('at-t14@example.com', 'TEACHER');
     const student = await signIn('at-s18@example.com', 'STUDENT');
-    const courseId = await makeCourse(teacher.id);
-    const enrolment = await enroll(student, courseId);
+    const { courseId, offeringId } = await makeCourse(teacher.id);
+    const enrolment = await enroll(student, offeringId);
 
     const response = await get(`/api/v1/enrollments/${enrolment}/attendance`, student.token);
     expect(response.statusCode).toBe(200);

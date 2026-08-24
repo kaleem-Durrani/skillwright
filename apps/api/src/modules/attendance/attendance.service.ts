@@ -9,6 +9,7 @@ import type {
   AttendanceRecordDto,
   AttendanceRegisterDto,
   AttendanceSummaryDto,
+  GetRegisterQuery,
   MarkRegisterInput,
 } from './attendance.schema.js';
 
@@ -76,16 +77,21 @@ export async function loadCourseSubject(courseId: string): Promise<Subject | und
 /** Subject for the enrollment-scoped half of `attendance:read` — the own summary. */
 export async function loadEnrollmentSubject(id: string): Promise<Subject | undefined> {
   const enrollment = await prisma.enrollment.findFirst({
-    where: { id, course: { deletedAt: null } },
-    select: { id: true, studentId: true, courseId: true, course: { select: { teacherId: true } } },
+    where: { id, offering: { deletedAt: null, course: { deletedAt: null } } },
+    // The course facts ride the offering relation since Phase 9.
+    select: {
+      id: true,
+      studentId: true,
+      offering: { select: { courseId: true, course: { select: { teacherId: true } } } },
+    },
   });
   if (!enrollment) return undefined;
 
   return {
     id: enrollment.id,
     studentId: enrollment.studentId,
-    courseId: enrollment.courseId,
-    courseTeacherId: enrollment.course.teacherId,
+    courseId: enrollment.offering.courseId,
+    courseTeacherId: enrollment.offering.course.teacherId,
   };
 }
 
@@ -108,19 +114,21 @@ function rosterOrderBy(): Prisma.EnrollmentOrderByWithRelationInput {
 }
 
 /**
- * One date's register for a course: the current APPROVED roster joined with any
- * existing records. Deliberately DATE-SCOPED — see migration 0004's caveat.
- * An unmarked seat is `status: null`, not an absent row.
+ * One date's register for one OFFERING: the current APPROVED roster joined with any
+ * existing records. Deliberately DATE-SCOPED — see migration 0004's caveat — and,
+ * since Phase 9, deliberately INTAKE-SCOPED too: two intakes of one course never
+ * share a teaching day, so mixing their rosters into one register would fabricate
+ * rows. An unmarked seat is `status: null`, not an absent row.
  */
 async function buildRegister(
   client: RegisterClient,
-  courseId: string,
+  offeringId: string,
   date: string,
 ): Promise<AttendanceRegisterDto> {
   const sessionDate = toSessionDate(date);
 
   const roster = await client.enrollment.findMany({
-    where: { courseId, status: 'APPROVED' },
+    where: { offeringId, status: 'APPROVED' },
     select: ROSTER_SELECT,
     orderBy: rosterOrderBy(),
   });
@@ -147,6 +155,20 @@ async function buildRegister(
 }
 
 /**
+ * Resolves the offering named by a register request, refusing anything that is not a
+ * live intake of THIS course. The gate ran against the COURSE subject; this is the
+ * handler-side half that keeps a teacher from marking an intake of someone else's
+ * course by guessing its id.
+ */
+async function assertLiveOffering(courseId: string, offeringId: string): Promise<void> {
+  const offering = await prisma.courseOffering.findFirst({
+    where: { id: offeringId, courseId, deletedAt: null },
+    select: { id: true },
+  });
+  if (!offering) throw notFound('Offering');
+}
+
+/**
  * Marks a whole register in one transaction. Any enrollmentId that is not an
  * APPROVED enrollment of THIS course — unknown, another teacher's course,
  * PENDING, REJECTED, WITHDRAWN — aborts the WHOLE request with a 409 before a
@@ -168,10 +190,18 @@ export async function markRegister(
   input: MarkRegisterInput,
 ): Promise<AttendanceRegisterDto> {
   return prisma.$transaction(async (tx) => {
+    // The gate ran against the course; the offering named in the body must be one of
+    // ITS live intakes, or nothing here may be written.
+    const offering = await tx.courseOffering.findFirst({
+      where: { id: input.offeringId, courseId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!offering) throw notFound('Offering');
+
     // Reaching here means loadCourseSubject found the course; this re-read is
     // the roster, not a second existence check.
     const approved = await tx.enrollment.findMany({
-      where: { courseId, status: 'APPROVED' },
+      where: { offeringId: input.offeringId, status: 'APPROVED' },
       select: { id: true },
     });
     const seatedIds = new Set(approved.map((row) => row.id));
@@ -180,7 +210,7 @@ export async function markRegister(
     if (ineligible.length > 0) {
       const first = ineligible[0];
       throw conflict(
-        `${ineligible.length} of ${input.marks.length} enrollmentIds ${ineligible.length === 1 ? 'is' : 'are'} not APPROVED enrolments on this course${first ? ` (first: ${first.enrollmentId})` : ''}`,
+        `${ineligible.length} of ${input.marks.length} enrollmentIds ${ineligible.length === 1 ? 'is' : 'are'} not APPROVED enrolments on this intake${first ? ` (first: ${first.enrollmentId})` : ''}`,
       );
     }
 
@@ -203,28 +233,29 @@ export async function markRegister(
       });
     }
 
-    return buildRegister(tx, courseId, input.date);
+    return buildRegister(tx, input.offeringId, input.date);
   }, TX_OPTIONS);
 }
 
 /**
- * Read side of `GET /courses/:courseId/attendance?date=`.
+ * Read side of `GET /courses/:courseId/attendance?date=&offeringId=`.
  *
- * The course is re-checked by hand because `attendance:read`'s ADMIN cell is
- * `allow`, which ignores the subject entirely — an admin naming a missing course
- * reaches this function, and an empty register must never masquerade as a real
+ * Both halves are re-checked by hand because `attendance:read`'s ADMIN cell is
+ * `allow`, which ignores the subject entirely — an admin naming a missing course or
+ * intake reaches this function, and an empty register must never masquerade as a real
  * one. Same post-gate 404 as enrollments.service.ts getById.
  */
 export async function registerForDate(
   courseId: string,
-  date: string,
+  query: GetRegisterQuery,
 ): Promise<AttendanceRegisterDto> {
   const course = await prisma.course.findFirst({
     where: { id: courseId, deletedAt: null },
     select: { id: true },
   });
   if (!course) throw notFound('Course');
-  return buildRegister(prisma, courseId, date);
+  await assertLiveOffering(courseId, query.offeringId);
+  return buildRegister(prisma, query.offeringId, query.date);
 }
 
 // ---------------------------------------------------------------------------
@@ -283,8 +314,8 @@ const EXPORT_BATCH = 500;
  * as the tiebreaker that makes each batched page deterministic.
  */
 async function* attendanceExportRows(
-  courseId: string,
-  query: AttendanceExportQuery,
+  offeringId: string,
+  query: Omit<AttendanceExportQuery, 'offeringId'>,
 ): AsyncGenerator<readonly (string | null)[]> {
   yield [
     'session_date',
@@ -297,9 +328,9 @@ async function* attendanceExportRows(
   ];
 
   const where: Prisma.AttendanceRecordWhereInput = {
-    // The course scope rides the relation, so a record from another course's
+    // The offering scope rides the relation, so a record from another intake's
     // enrollment can never slip in through a guessed id.
-    enrollment: { courseId },
+    enrollment: { offeringId },
     ...(query.from !== undefined || query.to !== undefined
       ? {
           sessionDate: {
@@ -337,10 +368,10 @@ async function* attendanceExportRows(
 }
 
 /**
- * Streams the export after the same post-gate 404 `registerForDate` performs:
+ * Streams the export after the same post-gate 404s `registerForDate` performs:
  * `attendance:read`'s ADMIN cell is `allow`, which ignores the subject entirely, so an
- * admin naming a missing course reaches this function and an empty CSV must never
- * masquerade as a real course's register.
+ * admin naming a missing course or intake reaches this function and an empty CSV must
+ * never masquerade as a real register.
  */
 export async function exportRegister(
   courseId: string,
@@ -351,5 +382,6 @@ export async function exportRegister(
     select: { id: true },
   });
   if (!course) throw notFound('Course');
-  return csvStream(attendanceExportRows(courseId, query));
+  await assertLiveOffering(courseId, query.offeringId);
+  return csvStream(attendanceExportRows(query.offeringId, query));
 }

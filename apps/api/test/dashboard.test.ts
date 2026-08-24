@@ -132,10 +132,11 @@ async function makeCourse(teacherId: string, published: boolean): Promise<string
       teacherId,
       durationValue: 6,
       durationUnit: 'WEEK',
-      capacity: 10,
       publishedAt: published ? new Date() : null,
     },
   });
+  // Phase 9: one intake per fixture course.
+  await prisma.courseOffering.create({ data: { courseId: course.id, capacity: 10 } });
   return course.id;
 }
 
@@ -144,7 +145,13 @@ async function enrol(
   courseId: string,
   status: 'PENDING' | 'APPROVED',
 ): Promise<void> {
-  await prisma.enrollment.create({ data: { studentId, courseId, status } });
+  const offering = await prisma.courseOffering.findFirstOrThrow({
+    where: { courseId, deletedAt: null },
+    select: { id: true },
+  });
+  await prisma.enrollment.create({
+    data: { studentId, offeringId: offering.id, status },
+  });
 }
 
 /**

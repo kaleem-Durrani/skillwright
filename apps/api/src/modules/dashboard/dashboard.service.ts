@@ -63,11 +63,17 @@ function ownCoursesWhere(actor: Actor): Prisma.CourseWhereInput {
     case 'TEACHER':
       return { deletedAt: null, teacherId: actor.id };
     case 'STUDENT':
-      // The same `enrolledApproved` shape courses.service.ts:180 uses; a PENDING
-      // application is not a course you have.
+      // The same `enrolledApproved` shape courses.service.ts uses; a PENDING
+      // application is not a course you have. Seats are per-intake since Phase 9,
+      // so the relation is two hops — any live offering of the course counts.
       return {
         deletedAt: null,
-        enrollments: { some: { studentId: actor.id, status: 'APPROVED' } },
+        offerings: {
+          some: {
+            deletedAt: null,
+            enrollments: { some: { studentId: actor.id, status: 'APPROVED' } },
+          },
+        },
       };
   }
 }
@@ -95,10 +101,20 @@ function pendingEnrollmentsWhere(actor: Actor): Prisma.EnrollmentWhereInput {
     actor.role === 'STUDENT'
       ? { studentId: actor.id }
       : actor.role === 'TEACHER'
-        ? { course: { teacherId: actor.id } }
+        ? // The course rides the offering relation since Phase 9.
+          { offering: { course: { teacherId: actor.id } } }
         : {};
 
-  return { AND: [scope, { status: 'PENDING' }, { course: { deletedAt: null } }] };
+  // Soft delete is filtered by hand on BOTH levels: an enrollment on a retired intake
+  // or a deleted course is invisible in the queue (enrollments.service.ts's
+  // visibilityWhere) and must therefore be invisible in the tile.
+  return {
+    AND: [
+      scope,
+      { status: 'PENDING' },
+      { offering: { deletedAt: null, course: { deletedAt: null } } },
+    ],
+  };
 }
 
 /*

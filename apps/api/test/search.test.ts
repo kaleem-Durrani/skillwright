@@ -119,11 +119,11 @@ async function courseRow(spec: CourseSpec): Promise<{ id: string; code: string }
       teacherId: spec.teacherId,
       durationValue: 6,
       durationUnit: 'WEEK',
-      capacity: 12,
       publishedAt: spec.publishedAt ?? null,
     },
     select: { id: true, code: true },
   });
+  await prisma.courseOffering.create({ data: { courseId: course.id, capacity: 12 } });
   return { id: course.id, code: course.code };
 }
 
@@ -179,10 +179,14 @@ async function announcementRow(spec: AnnouncementSpec): Promise<string> {
 }
 
 async function enroll(studentId: string, courseId: string, status: 'APPROVED' | 'PENDING') {
+  const offering = await prisma.courseOffering.findFirstOrThrow({
+    where: { courseId, deletedAt: null },
+    select: { id: true },
+  });
   await prisma.enrollment.create({
     data: {
       studentId,
-      courseId,
+      offeringId: offering.id,
       status,
       ...(status === 'APPROVED' ? { decidedAt: new Date() } : {}),
     },

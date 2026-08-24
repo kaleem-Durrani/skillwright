@@ -152,7 +152,6 @@ async function createCourse(teacherId: string, slug: string, deletedAt?: Date): 
       teacherId,
       durationValue: 6,
       durationUnit: 'WEEK',
-      capacity: 30,
       ...(deletedAt ? { deletedAt } : {}),
     },
   });

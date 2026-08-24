@@ -91,6 +91,13 @@ function get(url: string, cookie?: string) {
 }
 
 /** The flat enrollment route — `POST /api/v1/enrollments`, the OTHER `enrollment:request` gate. */
+function firstOfferingOf(courseId: string) {
+  return prisma.courseOffering.findFirstOrThrow({
+    where: { courseId, deletedAt: null },
+    select: { id: true },
+  });
+}
+
 function postEnrollment(payload: unknown, cookie: string) {
   return app.inject({
     method: 'POST',
@@ -143,10 +150,11 @@ async function makeCourse(
       teacherId,
       durationValue: 6,
       durationUnit: 'WEEK',
-      capacity: 10,
       publishedAt: options.published === false ? null : new Date(),
     },
   });
+  // Phase 9: one intake per fixture course; applications name it.
+  await prisma.courseOffering.create({ data: { courseId: course.id, capacity: 10 } });
   return { id: course.id, code: course.code, name: course.name };
 }
 
@@ -155,9 +163,18 @@ function setPrerequisite(courseId: string, prerequisiteCourseId: string | null, 
   return send('PATCH', `/${courseId}`, { prerequisiteCourseId }, cookie);
 }
 
+/** Resolves the course's first intake and applies through the real route (Phase 9). */
+async function applyNested(courseId: string, student: Person) {
+  const offering = await prisma.courseOffering.findFirstOrThrow({
+    where: { courseId, deletedAt: null },
+    select: { id: true },
+  });
+  return send('POST', `/${courseId}/enrollments`, { offeringId: offering.id }, student.token);
+}
+
 /** Applies through the course-nested route and approves through the enrollment route. */
 async function completeCourse(student: Person, teacher: Person, courseId: string): Promise<void> {
-  const applied = await send('POST', `/${courseId}/enrollments`, undefined, student.token);
+  const applied = await applyNested(courseId, student);
   expect(applied.statusCode).toBe(201);
   const approved = await app.inject({
     method: 'POST',
@@ -215,7 +232,7 @@ describe('PATCH /courses/:id sets the prerequisite', () => {
 
     // A course with no prerequisite stays requestable by anyone.
     const student = await signIn('p6-clear-student@example.com', 'STUDENT');
-    const request = await send('POST', `/${level2.id}/enrollments`, undefined, student.token);
+    const request = await applyNested(level2.id, student);
     expect(request.statusCode).toBe(201);
   });
 
@@ -301,7 +318,7 @@ describe('enrollment:request enforces the prerequisite', () => {
     const admin = await signIn('p6-ta@example.com', 'ADMIN');
     expect((await setPrerequisite(level2.id, level1.id, admin.token)).statusCode).toBe(200);
 
-    const response = await send('POST', `/${level2.id}/enrollments`, undefined, student.token);
+    const response = await applyNested(level2.id, student);
     expect(response.statusCode).toBe(403);
     expect(response.json().code).toBe('FORBIDDEN');
     // The refusal carries the exact policy rule tag, same shape as every other gate.
@@ -321,7 +338,7 @@ describe('enrollment:request enforces the prerequisite', () => {
 
     // This can only pass if the subject loader carried `completedCourseIds`;
     // a subject missing the field denies exactly like an unmet requirement.
-    const nested = await send('POST', `/${level2.id}/enrollments`, undefined, student.token);
+    const nested = await applyNested(level2.id, student);
     expect(nested.statusCode).toBe(201);
     expect(nested.json().status).toBe('PENDING');
 
@@ -329,7 +346,10 @@ describe('enrollment:request enforces the prerequisite', () => {
     // must agree, so a fresh student completes the prerequisite and applies there.
     const other = await signIn('p6-s2b@example.com', 'STUDENT');
     await completeCourse(other, teacher, level1.id);
-    const flat = await postEnrollment({ courseId: level2.id }, other.token);
+    const flat = await postEnrollment(
+      { courseId: level2.id, offeringId: (await firstOfferingOf(level2.id)).id },
+      other.token,
+    );
     expect(flat.statusCode).toBe(201);
     expect(flat.json().status).toBe('PENDING');
   }, 20_000);
@@ -344,10 +364,10 @@ describe('enrollment:request enforces the prerequisite', () => {
 
     // PENDING on the prerequisite is a request, not a seat — same reading of
     // "completed" as `enrolledApproved` everywhere else in the policy.
-    const applied = await send('POST', `/${level1.id}/enrollments`, undefined, student.token);
+    const applied = await applyNested(level1.id, student);
     expect(applied.statusCode).toBe(201);
 
-    const response = await send('POST', `/${level2.id}/enrollments`, undefined, student.token);
+    const response = await applyNested(level2.id, student);
     expect(response.statusCode).toBe(403);
     expect(response.json().detail).toContain('STUDENT:and(isPublished, hasCompletedPrerequisite)');
   }, 20_000);
@@ -361,7 +381,7 @@ describe('enrollment:request enforces the prerequisite', () => {
     expect((await setPrerequisite(level2.id, level1.id, admin.token)).statusCode).toBe(200);
     await completeCourse(student, teacher, level1.id);
 
-    const response = await send('POST', `/${level2.id}/enrollments`, undefined, student.token);
+    const response = await applyNested(level2.id, student);
     expect(response.statusCode).toBe(403);
     expect(response.json().detail).toContain('STUDENT:and(isPublished, hasCompletedPrerequisite)');
   }, 20_000);
@@ -375,7 +395,11 @@ describe('enrollment:request enforces the prerequisite', () => {
     expect((await setPrerequisite(level2.id, level1.id, admin.token)).statusCode).toBe(200);
 
     const response = await postEnrollment(
-      { courseId: level2.id, studentId: student.id },
+      {
+        courseId: level2.id,
+        offeringId: (await firstOfferingOf(level2.id)).id,
+        studentId: student.id,
+      },
       admin.token,
     );
     expect(response.statusCode).toBe(201);

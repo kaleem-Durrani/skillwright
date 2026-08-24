@@ -106,10 +106,14 @@ async function signIn(email: string, role: Role): Promise<Person> {
   return { id: user.id, token: token as string };
 }
 
+/**
+ * Creates one course with ONE intake — the minimum the Phase 9 model allows. Tests
+ * that exercise multiple intakes create them inline against `courseId`.
+ */
 async function makeCourse(
   teacherId: string,
   options: { capacity?: number; workshopCapacity?: number; published?: boolean } = {},
-): Promise<string> {
+): Promise<{ courseId: string; offeringId: string }> {
   sequence += 1;
   const course = await prisma.course.create({
     data: {
@@ -120,17 +124,23 @@ async function makeCourse(
       teacherId,
       durationValue: 6,
       durationUnit: 'WEEK',
-      capacity: options.capacity ?? 10,
-      workshopCapacity: options.workshopCapacity ?? null,
       publishedAt: options.published === false ? null : new Date(),
     },
   });
-  return course.id;
+  // Seats are an offering fact since Phase 9, so the fixture's capacity lands there.
+  const offering = await prisma.courseOffering.create({
+    data: {
+      courseId: course.id,
+      capacity: options.capacity ?? 10,
+      workshopCapacity: options.workshopCapacity ?? null,
+    },
+  });
+  return { courseId: course.id, offeringId: offering.id };
 }
 
-async function approvedCountOf(courseId: string): Promise<number> {
-  const course = await prisma.course.findUniqueOrThrow({ where: { id: courseId } });
-  return course.approvedCount;
+async function approvedCountOf(offeringId: string): Promise<number> {
+  const offering = await prisma.courseOffering.findUniqueOrThrow({ where: { id: offeringId } });
+  return offering.approvedCount;
 }
 
 // --- tests -----------------------------------------------------------------
@@ -139,9 +149,9 @@ describe('requesting a seat', () => {
   it('creates a PENDING row and serialises the shared enrollment shape', async () => {
     const teacher = await signIn('t1@example.com', 'TEACHER');
     const student = await signIn('s1@example.com', 'STUDENT');
-    const courseId = await makeCourse(teacher.id);
+    const { courseId, offeringId } = await makeCourse(teacher.id);
 
-    const response = await post('/', { courseId }, student.token);
+    const response = await post('/', { courseId, offeringId }, student.token);
     expect(response.statusCode).toBe(201);
 
     const body = response.json();
@@ -156,15 +166,15 @@ describe('requesting a seat', () => {
     expect(body.student).not.toHaveProperty('email');
 
     // A request is PENDING; only approval moves the counter.
-    expect(await approvedCountOf(courseId)).toBe(0);
+    expect(await approvedCountOf(offeringId)).toBe(0);
   });
 
   it('refuses a draft course, because a draft cannot accumulate a waiting list', async () => {
     const teacher = await signIn('t2@example.com', 'TEACHER');
     const student = await signIn('s2@example.com', 'STUDENT');
-    const courseId = await makeCourse(teacher.id, { published: false });
+    const { courseId, offeringId } = await makeCourse(teacher.id, { published: false });
 
-    const response = await post('/', { courseId }, student.token);
+    const response = await post('/', { courseId, offeringId }, student.token);
     expect(response.statusCode).toBe(403);
     expect(response.json().code).toBe('FORBIDDEN');
     expect(response.json().detail).toContain('STUDENT:and(isPublished, hasCompletedPrerequisite)');
@@ -173,25 +183,25 @@ describe('requesting a seat', () => {
   it('refuses a second live application but re-uses the row after a withdrawal', async () => {
     const teacher = await signIn('t3@example.com', 'TEACHER');
     const student = await signIn('s3@example.com', 'STUDENT');
-    const courseId = await makeCourse(teacher.id);
+    const { courseId, offeringId } = await makeCourse(teacher.id);
 
-    const first = await post('/', { courseId }, student.token);
+    const first = await post('/', { courseId, offeringId }, student.token);
     expect(first.statusCode).toBe(201);
 
-    const duplicate = await post('/', { courseId }, student.token);
+    const duplicate = await post('/', { courseId, offeringId }, student.token);
     expect(duplicate.statusCode).toBe(409);
     expect(duplicate.json().code).toBe('CONFLICT');
 
     expect((await post(`/${first.json().id}/withdraw`, {}, student.token)).statusCode).toBe(200);
 
-    const again = await post('/', { courseId }, student.token);
+    const again = await post('/', { courseId, offeringId }, student.token);
     expect(again.statusCode).toBe(201);
     // schema.prisma:377-379 — one row per (student, course), forever.
     expect(again.json().id).toBe(first.json().id);
     expect(again.json().status).toBe('PENDING');
     expect(again.json().decidedAt).toBeNull();
     expect(again.json().decidedBy).toBeNull();
-    expect(await prisma.enrollment.count({ where: { courseId } })).toBe(1);
+    expect(await prisma.enrollment.count({ where: { offeringId } })).toBe(1);
   });
 
   it('ignores studentId from a non-admin and honours it for an admin', async () => {
@@ -199,14 +209,14 @@ describe('requesting a seat', () => {
     const student = await signIn('s4@example.com', 'STUDENT');
     const other = await signIn('s4b@example.com', 'STUDENT');
     const admin = await signIn('a4@example.com', 'ADMIN');
-    const courseId = await makeCourse(teacher.id);
+    const { courseId, offeringId } = await makeCourse(teacher.id);
 
     // enrollment.ts:28-31 — a non-admin naming someone else has it ignored, not honoured.
-    const spoofed = await post('/', { courseId, studentId: other.id }, student.token);
+    const spoofed = await post('/', { courseId, offeringId, studentId: other.id }, student.token);
     expect(spoofed.statusCode).toBe(201);
     expect(spoofed.json().student.id).toBe(student.id);
 
-    const onBehalf = await post('/', { courseId, studentId: other.id }, admin.token);
+    const onBehalf = await post('/', { courseId, offeringId, studentId: other.id }, admin.token);
     expect(onBehalf.statusCode).toBe(201);
     expect(onBehalf.json().student.id).toBe(other.id);
   });
@@ -214,7 +224,11 @@ describe('requesting a seat', () => {
   it('turns an unknown courseId into a field-level 422 for an admin', async () => {
     const admin = await signIn('a5@example.com', 'ADMIN');
 
-    const response = await post('/', { courseId: 'ckvzq0000000000000000000' }, admin.token);
+    const response = await post(
+      '/',
+      { courseId: 'ckvzq0000000000000000000', offeringId: 'ckvzq0000000000000000001' },
+      admin.token,
+    );
     expect(response.statusCode).toBe(422);
     expect(JSON.stringify(response.json())).toContain('courseId');
   });
@@ -224,9 +238,9 @@ describe('approval and capacity', () => {
   it('seats a student and moves the denormalised counter', async () => {
     const teacher = await signIn('t6@example.com', 'TEACHER');
     const student = await signIn('s6@example.com', 'STUDENT');
-    const courseId = await makeCourse(teacher.id, { capacity: 5 });
+    const { courseId, offeringId } = await makeCourse(teacher.id, { capacity: 5 });
 
-    const requested = await post('/', { courseId }, student.token);
+    const requested = await post('/', { courseId, offeringId }, student.token);
     const approved = await post(
       `/${requested.json().id}/approve`,
       { note: 'Welcome' },
@@ -237,48 +251,48 @@ describe('approval and capacity', () => {
     expect(approved.json().status).toBe('APPROVED');
     expect(approved.json().decidedBy.id).toBe(teacher.id);
     expect(approved.json().decisionNote).toBe('Welcome');
-    expect(approved.json().course.approvedCount).toBe(1);
-    expect(approved.json().course.seatsRemaining).toBe(4);
-    expect(await approvedCountOf(courseId)).toBe(1);
+    expect(approved.json().offering.approvedCount).toBe(1);
+    expect(approved.json().offering.seatsRemaining).toBe(4);
+    expect(await approvedCountOf(offeringId)).toBe(1);
   });
 
   /** The other half of the bodyless case: the owner sends no note, and is seated. */
   it('approves with no body at all, from the person entitled to', async () => {
     const teacher = await signIn('t12z@example.com', 'TEACHER');
     const student = await signIn('s12z@example.com', 'STUDENT');
-    const courseId = await makeCourse(teacher.id, { capacity: 5 });
-    const requested = await post('/', { courseId }, student.token);
+    const { courseId, offeringId } = await makeCourse(teacher.id, { capacity: 5 });
+    const requested = await post('/', { courseId, offeringId }, student.token);
 
     const approved = await post(`/${requested.json().id}/approve`, undefined, teacher.token);
     expect(approved.statusCode).toBe(200);
     expect(approved.json().status).toBe('APPROVED');
     expect(approved.json().decisionNote).toBeNull();
-    expect(await approvedCountOf(courseId)).toBe(1);
+    expect(await approvedCountOf(offeringId)).toBe(1);
   });
 
   it('is idempotent: approving twice never oversells by one', async () => {
     const teacher = await signIn('t7@example.com', 'TEACHER');
     const student = await signIn('s7@example.com', 'STUDENT');
-    const courseId = await makeCourse(teacher.id, { capacity: 5 });
+    const { courseId, offeringId } = await makeCourse(teacher.id, { capacity: 5 });
 
-    const requested = await post('/', { courseId }, student.token);
+    const requested = await post('/', { courseId, offeringId }, student.token);
     const first = await post(`/${requested.json().id}/approve`, {}, teacher.token);
     const second = await post(`/${requested.json().id}/approve`, {}, teacher.token);
 
     expect(first.statusCode).toBe(200);
     expect(second.statusCode).toBe(200);
     expect(second.json().status).toBe('APPROVED');
-    expect(await approvedCountOf(courseId)).toBe(1);
+    expect(await approvedCountOf(offeringId)).toBe(1);
   });
 
   it('refuses the seat that would oversell, as 409 CAPACITY_EXCEEDED', async () => {
     const teacher = await signIn('t8@example.com', 'TEACHER');
     const first = await signIn('s8a@example.com', 'STUDENT');
     const second = await signIn('s8b@example.com', 'STUDENT');
-    const courseId = await makeCourse(teacher.id, { capacity: 1 });
+    const { courseId, offeringId } = await makeCourse(teacher.id, { capacity: 1 });
 
-    const a = await post('/', { courseId }, first.token);
-    const b = await post('/', { courseId }, second.token);
+    const a = await post('/', { courseId, offeringId }, first.token);
+    const b = await post('/', { courseId, offeringId }, second.token);
     expect((await post(`/${a.json().id}/approve`, {}, teacher.token)).statusCode).toBe(200);
 
     const full = await post(`/${b.json().id}/approve`, {}, teacher.token);
@@ -287,7 +301,7 @@ describe('approval and capacity', () => {
     expect(full.headers['content-type']).toContain('application/problem+json');
 
     // The throw rolled the increment back: nothing was seated and nothing was moved.
-    expect(await approvedCountOf(courseId)).toBe(1);
+    expect(await approvedCountOf(offeringId)).toBe(1);
     const untouched = await prisma.enrollment.findUniqueOrThrow({ where: { id: b.json().id } });
     expect(untouched.status).toBe('PENDING');
   });
@@ -299,7 +313,7 @@ describe('approval and capacity', () => {
    */
   it('seats exactly the capacity under 200 concurrent approvals', async () => {
     const teacher = await signIn('t9@example.com', 'TEACHER');
-    const courseId = await makeCourse(teacher.id, { capacity: 30 });
+    const { courseId, offeringId } = await makeCourse(teacher.id, { capacity: 30 });
 
     await prisma.user.createMany({
       data: Array.from({ length: 200 }, (_unused, index) => ({
@@ -316,9 +330,12 @@ describe('approval and capacity', () => {
     expect(students).toHaveLength(200);
 
     await prisma.enrollment.createMany({
-      data: students.map((student) => ({ studentId: student.id, courseId })),
+      data: students.map((student) => ({ studentId: student.id, offeringId })),
     });
-    const pending = await prisma.enrollment.findMany({ where: { courseId }, select: { id: true } });
+    const pending = await prisma.enrollment.findMany({
+      where: { offeringId },
+      select: { id: true },
+    });
 
     const responses = await Promise.all(
       pending.map((enrollment) => post(`/${enrollment.id}/approve`, {}, teacher.token)),
@@ -333,8 +350,8 @@ describe('approval and capacity', () => {
     );
 
     // Reconciliation: the denormalised counter equals the real APPROVED count.
-    const real = await prisma.enrollment.count({ where: { courseId, status: 'APPROVED' } });
-    expect(await approvedCountOf(courseId)).toBe(30);
+    const real = await prisma.enrollment.count({ where: { offeringId, status: 'APPROVED' } });
+    expect(await approvedCountOf(offeringId)).toBe(30);
     expect(real).toBe(30);
   });
 });
@@ -346,11 +363,14 @@ describe('workshop capacity — the second guarded number', () => {
     const second = await signIn('s22b@example.com', 'STUDENT');
     const third = await signIn('s22c@example.com', 'STUDENT');
     // Admissions allows 10; the workshop has two stations.
-    const courseId = await makeCourse(teacher.id, { capacity: 10, workshopCapacity: 2 });
+    const { courseId, offeringId } = await makeCourse(teacher.id, {
+      capacity: 10,
+      workshopCapacity: 2,
+    });
 
-    const a = await post('/', { courseId }, first.token);
-    const b = await post('/', { courseId }, second.token);
-    const c = await post('/', { courseId }, third.token);
+    const a = await post('/', { courseId, offeringId }, first.token);
+    const b = await post('/', { courseId, offeringId }, second.token);
+    const c = await post('/', { courseId, offeringId }, third.token);
     expect((await post(`/${a.json().id}/approve`, {}, teacher.token)).statusCode).toBe(200);
     expect((await post(`/${b.json().id}/approve`, {}, teacher.token)).statusCode).toBe(200);
 
@@ -363,7 +383,7 @@ describe('workshop capacity — the second guarded number', () => {
     expect(refused.json().detail).toContain('workshop');
 
     // The throw rolled nothing back: two seated, the third still PENDING.
-    expect(await approvedCountOf(courseId)).toBe(2);
+    expect(await approvedCountOf(offeringId)).toBe(2);
     expect((await prisma.enrollment.findUniqueOrThrow({ where: { id: c.json().id } })).status).toBe(
       'PENDING',
     );
@@ -377,7 +397,10 @@ describe('workshop capacity — the second guarded number', () => {
    */
   it('seats exactly the workshop capacity under 200 concurrent approvals', async () => {
     const teacher = await signIn('t23@example.com', 'TEACHER');
-    const courseId = await makeCourse(teacher.id, { capacity: 30, workshopCapacity: 5 });
+    const { courseId, offeringId } = await makeCourse(teacher.id, {
+      capacity: 30,
+      workshopCapacity: 5,
+    });
 
     await prisma.user.createMany({
       data: Array.from({ length: 200 }, (_unused, index) => ({
@@ -394,9 +417,12 @@ describe('workshop capacity — the second guarded number', () => {
     expect(students).toHaveLength(200);
 
     await prisma.enrollment.createMany({
-      data: students.map((student) => ({ studentId: student.id, courseId })),
+      data: students.map((student) => ({ studentId: student.id, offeringId })),
     });
-    const pending = await prisma.enrollment.findMany({ where: { courseId }, select: { id: true } });
+    const pending = await prisma.enrollment.findMany({
+      where: { offeringId },
+      select: { id: true },
+    });
 
     const responses = await Promise.all(
       pending.map((enrollment) => post(`/${enrollment.id}/approve`, {}, teacher.token)),
@@ -411,15 +437,15 @@ describe('workshop capacity — the second guarded number', () => {
     );
 
     // Reconciliation: the one counter equals the real APPROVED count.
-    const real = await prisma.enrollment.count({ where: { courseId, status: 'APPROVED' } });
-    expect(await approvedCountOf(courseId)).toBe(5);
+    const real = await prisma.enrollment.count({ where: { offeringId, status: 'APPROVED' } });
+    expect(await approvedCountOf(offeringId)).toBe(5);
     expect(real).toBe(5);
   });
 
   it('leaves an unbound course on exactly the old behaviour', async () => {
     const teacher = await signIn('t24@example.com', 'TEACHER');
     // No workshop bound at all — the IS NULL OR arm of the WHERE.
-    const courseId = await makeCourse(teacher.id, { capacity: 10 });
+    const { courseId, offeringId } = await makeCourse(teacher.id, { capacity: 10 });
 
     await prisma.user.createMany({
       data: Array.from({ length: 4 }, (_unused, index) => ({
@@ -434,10 +460,10 @@ describe('workshop capacity — the second guarded number', () => {
       select: { id: true },
     });
     await prisma.enrollment.createMany({
-      data: students.map((student) => ({ studentId: student.id, courseId })),
+      data: students.map((student) => ({ studentId: student.id, offeringId })),
     });
     const pending = await prisma.enrollment.findMany({
-      where: { courseId },
+      where: { offeringId },
       select: { id: true },
       orderBy: { id: 'asc' },
     });
@@ -450,10 +476,10 @@ describe('workshop capacity — the second guarded number', () => {
       approvals.push(response);
     }
     expect(approvals.map((response) => response.statusCode)).toEqual([200, 200, 200, 200]);
-    expect(await approvedCountOf(courseId)).toBe(4);
+    expect(await approvedCountOf(offeringId)).toBe(4);
 
     // Null stays null on the wire — "unbound", never a seat count of zero.
-    expect(firstApproval?.json().course).toMatchObject({
+    expect(firstApproval?.json().offering).toMatchObject({
       workshopCapacity: null,
       workshopSeatsRemaining: null,
     });
@@ -461,13 +487,74 @@ describe('workshop capacity — the second guarded number', () => {
 
   it('holds the CHECK: a workshop of zero seats is not a legal row', async () => {
     const teacher = await signIn('t25@example.com', 'TEACHER');
-    const courseId = await makeCourse(teacher.id);
+    const { courseId, offeringId } = await makeCourse(teacher.id);
+    void courseId;
 
-    // course_workshop_capacity_sane (migration 0006) keeps "unbound" distinct
-    // from "full" — clearing the bound is what null is for.
+    // course_offering_workshop_capacity_sane (migration 0007, heir to 0006's Course
+    // CHECK) keeps "unbound" distinct from "full" — clearing the bound is what null
+    // is for.
     await expect(
-      prisma.$executeRaw`UPDATE "Course" SET "workshopCapacity" = 0 WHERE id = ${courseId}`,
-    ).rejects.toThrow(/course_workshop_capacity_sane/);
+      prisma.$executeRaw`UPDATE "CourseOffering" SET "workshopCapacity" = 0 WHERE id = ${offeringId}`,
+    ).rejects.toThrow(/course_offering_workshop_capacity_sane/);
+  });
+
+  it('sells seats per INTAKE: a withdrawn student applies to the next cohort as a new row', async () => {
+    const teacher = await signIn('t26@example.com', 'TEACHER');
+    const student = await signIn('s26@example.com', 'STUDENT');
+    const springTerm = await makeCourse(teacher.id, { capacity: 5 });
+    // A second intake of the SAME course — the thing Phase 9 exists to express.
+    const summerIntake = await prisma.courseOffering.create({
+      data: { courseId: springTerm.courseId, capacity: 5 },
+    });
+
+    const autumn = await post('/', springTerm, student.token);
+    expect(autumn.statusCode).toBe(201);
+    await post(`/${autumn.json().id}/withdraw`, {}, student.token);
+
+    const spring = await post(
+      '/',
+      { courseId: springTerm.courseId, offeringId: summerIntake.id },
+      student.token,
+    );
+    expect(spring.statusCode).toBe(201);
+    // A NEW row on a NEW intake; the old history is untouched, not reused.
+    expect(spring.json().id).not.toBe(autumn.json().id);
+    expect(spring.json().offering.id).toBe(summerIntake.id);
+    expect(
+      await prisma.enrollment.count({ where: { offering: { courseId: springTerm.courseId } } }),
+    ).toBe(2);
+  });
+
+  it("refuses an application that names no intake or another course's intake", async () => {
+    const teacher = await signIn('t27@example.com', 'TEACHER');
+    const other = await signIn('t27b@example.com', 'TEACHER');
+    const student = await signIn('s27@example.com', 'STUDENT');
+    const mine = await makeCourse(teacher.id);
+    const theirs = await makeCourse(other.id);
+
+    // The bodyless POST the old single-offering API accepted is malformed now:
+    // "apply" without naming an intake has no honest default.
+    const bodyless = await post('/', {}, student.token);
+    expect(bodyless.statusCode).toBe(422);
+
+    // An intake that exists but belongs to ANOTHER course than the path names.
+    const mismatched = await app.inject({
+      method: 'POST',
+      url: `/api/v1/courses/${theirs.courseId}/enrollments`,
+      headers: { ...originHeaders, cookie: cookieHeader(student.token) },
+      payload: { offeringId: mine.offeringId },
+    });
+    expect(mismatched.statusCode).toBe(422);
+    expect(JSON.stringify(mismatched.json())).toContain('offeringId');
+
+    // And an unknown intake id is the same field-level refusal, not an FK 500.
+    const unknown = await post(
+      '/',
+      { courseId: theirs.courseId, offeringId: 'ckvzq0000000000000000000' },
+      student.token,
+    );
+    expect(unknown.statusCode).toBe(422);
+    expect(JSON.stringify(unknown.json())).toContain('offeringId');
   });
 });
 
@@ -475,8 +562,8 @@ describe('rejection and withdrawal', () => {
   it('requires a rejection reason — including the body the SPA currently sends', async () => {
     const teacher = await signIn('t10@example.com', 'TEACHER');
     const student = await signIn('s10@example.com', 'STUDENT');
-    const courseId = await makeCourse(teacher.id);
-    const requested = await post('/', { courseId }, student.token);
+    const { courseId, offeringId } = await makeCourse(teacher.id);
+    const requested = await post('/', { courseId, offeringId }, student.token);
 
     const empty = await post(`/${requested.json().id}/reject`, {}, teacher.token);
     expect(empty.statusCode).toBe(422);
@@ -496,11 +583,11 @@ describe('rejection and withdrawal', () => {
   it('releases the seat when an APPROVED enrollment is rejected', async () => {
     const teacher = await signIn('t11@example.com', 'TEACHER');
     const student = await signIn('s11@example.com', 'STUDENT');
-    const courseId = await makeCourse(teacher.id, { capacity: 2 });
-    const requested = await post('/', { courseId }, student.token);
+    const { courseId, offeringId } = await makeCourse(teacher.id, { capacity: 2 });
+    const requested = await post('/', { courseId, offeringId }, student.token);
 
     await post(`/${requested.json().id}/approve`, {}, teacher.token);
-    expect(await approvedCountOf(courseId)).toBe(1);
+    expect(await approvedCountOf(offeringId)).toBe(1);
 
     const rejected = await post(
       `/${requested.json().id}/reject`,
@@ -510,14 +597,14 @@ describe('rejection and withdrawal', () => {
     expect(rejected.statusCode).toBe(200);
     expect(rejected.json().status).toBe('REJECTED');
     expect(rejected.json().decisionNote).toBe('Prerequisite missing');
-    expect(await approvedCountOf(courseId)).toBe(0);
+    expect(await approvedCountOf(offeringId)).toBe(0);
   });
 
   it('releases the seat when an APPROVED student withdraws', async () => {
     const teacher = await signIn('t12@example.com', 'TEACHER');
     const student = await signIn('s12@example.com', 'STUDENT');
-    const courseId = await makeCourse(teacher.id, { capacity: 2 });
-    const requested = await post('/', { courseId }, student.token);
+    const { courseId, offeringId } = await makeCourse(teacher.id, { capacity: 2 });
+    const requested = await post('/', { courseId, offeringId }, student.token);
 
     await post(`/${requested.json().id}/approve`, {}, teacher.token);
     const withdrawn = await post(
@@ -528,14 +615,14 @@ describe('rejection and withdrawal', () => {
 
     expect(withdrawn.statusCode).toBe(200);
     expect(withdrawn.json().status).toBe('WITHDRAWN');
-    expect(await approvedCountOf(courseId)).toBe(0);
+    expect(await approvedCountOf(offeringId)).toBe(0);
   });
 
   it('refuses a transition the status machine does not allow', async () => {
     const teacher = await signIn('t13@example.com', 'TEACHER');
     const student = await signIn('s13@example.com', 'STUDENT');
-    const courseId = await makeCourse(teacher.id);
-    const requested = await post('/', { courseId }, student.token);
+    const { courseId, offeringId } = await makeCourse(teacher.id);
+    const requested = await post('/', { courseId, offeringId }, student.token);
 
     await post(`/${requested.json().id}/withdraw`, {}, student.token);
 
@@ -550,8 +637,8 @@ describe('authorization', () => {
     const owner = await signIn('t14@example.com', 'TEACHER');
     const stranger = await signIn('t14b@example.com', 'TEACHER');
     const student = await signIn('s14@example.com', 'STUDENT');
-    const courseId = await makeCourse(owner.id);
-    const requested = await post('/', { courseId }, student.token);
+    const { courseId, offeringId } = await makeCourse(owner.id);
+    const requested = await post('/', { courseId, offeringId }, student.token);
 
     const approve = await post(`/${requested.json().id}/approve`, {}, stranger.token);
     expect(approve.statusCode).toBe(403);
@@ -567,7 +654,7 @@ describe('authorization', () => {
     expect(reject.json().detail).toContain('TEACHER:ownsCourse');
 
     // Nothing was written by the refusal.
-    expect(await approvedCountOf(courseId)).toBe(0);
+    expect(await approvedCountOf(offeringId)).toBe(0);
     expect(
       (await prisma.enrollment.findUniqueOrThrow({ where: { id: requested.json().id } })).status,
     ).toBe('PENDING');
@@ -587,8 +674,8 @@ describe('authorization', () => {
     const owner = await signIn('t14c@example.com', 'TEACHER');
     const stranger = await signIn('t14d@example.com', 'TEACHER');
     const student = await signIn('s14c@example.com', 'STUDENT');
-    const courseId = await makeCourse(owner.id);
-    const requested = await post('/', { courseId }, student.token);
+    const { courseId, offeringId } = await makeCourse(owner.id);
+    const requested = await post('/', { courseId, offeringId }, student.token);
     const enrollmentId = requested.json().id;
 
     const approve = await post(`/${enrollmentId}/approve`, undefined, stranger.token);
@@ -608,20 +695,20 @@ describe('authorization', () => {
   it('refuses a student approving their own enrollment', async () => {
     const teacher = await signIn('t15@example.com', 'TEACHER');
     const student = await signIn('s15@example.com', 'STUDENT');
-    const courseId = await makeCourse(teacher.id);
-    const requested = await post('/', { courseId }, student.token);
+    const { courseId, offeringId } = await makeCourse(teacher.id);
+    const requested = await post('/', { courseId, offeringId }, student.token);
 
     const response = await post(`/${requested.json().id}/approve`, {}, student.token);
     expect(response.statusCode).toBe(403);
     expect(response.json().detail).toContain('STUDENT:deny');
-    expect(await approvedCountOf(courseId)).toBe(0);
+    expect(await approvedCountOf(offeringId)).toBe(0);
   });
 
   it('refuses a teacher withdrawing on a student behalf — that verb is rejection', async () => {
     const teacher = await signIn('t16@example.com', 'TEACHER');
     const student = await signIn('s16@example.com', 'STUDENT');
-    const courseId = await makeCourse(teacher.id);
-    const requested = await post('/', { courseId }, student.token);
+    const { courseId, offeringId } = await makeCourse(teacher.id);
+    const requested = await post('/', { courseId, offeringId }, student.token);
 
     const response = await post(`/${requested.json().id}/withdraw`, {}, teacher.token);
     expect(response.statusCode).toBe(403);
@@ -632,8 +719,8 @@ describe('authorization', () => {
     const teacher = await signIn('t17@example.com', 'TEACHER');
     const student = await signIn('s17@example.com', 'STUDENT');
     const stranger = await signIn('s17b@example.com', 'STUDENT');
-    const courseId = await makeCourse(teacher.id);
-    const requested = await post('/', { courseId }, student.token);
+    const { courseId, offeringId } = await makeCourse(teacher.id);
+    const requested = await post('/', { courseId, offeringId }, student.token);
 
     const mine = await get(`/${requested.json().id}`, student.token);
     expect(mine.statusCode).toBe(200);
@@ -646,8 +733,8 @@ describe('authorization', () => {
   it('refuses anonymous callers on both the list and a decision', async () => {
     const teacher = await signIn('t18@example.com', 'TEACHER');
     const student = await signIn('s18@example.com', 'STUDENT');
-    const courseId = await makeCourse(teacher.id);
-    const requested = await post('/', { courseId }, student.token);
+    const { courseId, offeringId } = await makeCourse(teacher.id);
+    const requested = await post('/', { courseId, offeringId }, student.token);
 
     const list = await get('/');
     expect(list.statusCode).toBe(401);
@@ -660,19 +747,19 @@ describe('authorization', () => {
   it('refuses a state change that is not provably same-origin', async () => {
     const teacher = await signIn('t19@example.com', 'TEACHER');
     const student = await signIn('s19@example.com', 'STUDENT');
-    const courseId = await makeCourse(teacher.id);
+    const { courseId, offeringId } = await makeCourse(teacher.id);
 
     const response = await app.inject({
       method: 'POST',
       url: '/api/v1/enrollments',
       headers: { cookie: cookieHeader(student.token) },
-      payload: { courseId },
+      payload: { courseId, offeringId },
     });
 
     expect(response.statusCode).toBe(403);
     expect(response.json().detail).toContain('csrf.sameOrigin');
     // It never reached the policy gate, so nothing was written.
-    expect(await prisma.enrollment.count({ where: { courseId } })).toBe(0);
+    expect(await prisma.enrollment.count({ where: { offeringId } })).toBe(0);
   });
 });
 
@@ -684,9 +771,9 @@ describe('listing', () => {
     const one = await signIn('s20a@example.com', 'STUDENT');
     const two = await signIn('s20b@example.com', 'STUDENT');
 
-    const courseId = await makeCourse(owner.id);
-    await post('/', { courseId }, one.token);
-    await post('/', { courseId }, two.token);
+    const { courseId, offeringId } = await makeCourse(owner.id);
+    await post('/', { courseId, offeringId }, one.token);
+    await post('/', { courseId, offeringId }, two.token);
 
     const mine = await get('/', one.token);
     expect(mine.statusCode).toBe(200);

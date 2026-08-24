@@ -95,12 +95,12 @@ export function toResourceDto(resource: ResourceWithRelations): ResourceDto {
  * The actor's own enrolment status in one course, scoped to the actor.
  *
  * `Subject.enrollmentStatus` is the REQUESTING actor's status in the relevant course,
- * never the status of some arbitrary row (actor.ts:72-77) — passing someone else's is
+ * never the status of some arbitrary row (actor.ts) — passing someone else's is
  * the one documented way to misuse the field. Teachers, admins and anonymous visitors
- * have no enrolment to report, and `enrolledApproved` (combinators.ts:62-65) is not the
+ * have no enrolment to report, and `enrolledApproved` (combinators.ts) is not the
  * rule that lets either of the first two through anyway.
  *
- * Reading `actor.role` here is data scoping, not authorization; courses.service.ts:166-176
+ * Reading `actor.role` here is data scoping, not authorization; courses.service.ts
  * runs the identical lookup for `course:read`.
  */
 async function viewerEnrollmentStatus(
@@ -108,11 +108,20 @@ async function viewerEnrollmentStatus(
   courseId: string,
 ): Promise<EnrollmentState | null> {
   if (actor === null || actor.role !== 'STUDENT') return null;
-  const enrollment = await prisma.enrollment.findUnique({
-    where: { studentId_courseId: { studentId: actor.id, courseId } },
+  // Seats are per-intake since Phase 9, so "in the course" means ANY live offering of
+  // it: an APPROVED seat anywhere reads APPROVED, exactly what `enrolledApproved`
+  // checks. Otherwise the most recent row wins.
+  const approved = await prisma.enrollment.findFirst({
+    where: { studentId: actor.id, status: 'APPROVED', offering: { courseId, deletedAt: null } },
     select: { status: true },
   });
-  return enrollment?.status ?? null;
+  if (approved) return approved.status;
+  const latest = await prisma.enrollment.findFirst({
+    where: { studentId: actor.id, offering: { courseId, deletedAt: null } },
+    orderBy: { requestedAt: 'desc' },
+    select: { status: true },
+  });
+  return latest?.status ?? null;
 }
 
 /**
@@ -273,10 +282,20 @@ export function visibilityWhere(actor: Actor | null): Prisma.ResourceWhereInput 
           {
             OR: [
               publicAndLive,
-              // enrolledApproved: PENDING is not enough (combinators.ts:62-65). An
+              // enrolledApproved: PENDING is not enough (combinators.ts). An
               // approved student keeps access even after the course is unpublished,
-              // which is why this branch carries no publication term.
-              { course: { enrollments: { some: { studentId: actor.id, status: 'APPROVED' } } } },
+              // which is why this branch carries no publication term. Seats are
+              // per-intake since Phase 9, so the relation is two hops.
+              {
+                course: {
+                  offerings: {
+                    some: {
+                      deletedAt: null,
+                      enrollments: { some: { studentId: actor.id, status: 'APPROVED' } },
+                    },
+                  },
+                },
+              },
             ],
           },
         ],
@@ -590,23 +609,32 @@ export async function create(actor: Actor, input: CreateResourceInput): Promise<
 
   // RESOURCE_PUBLISHED is creation here — a Resource has no publish verb of its own;
   // new material in the course IS the publication. One query fetches the course's name
-  // for the copy and the whole audience: every APPROVED student except the teacher who
-  // just uploaded it. PENDING students are excluded deliberately — they cannot see the
-  // resource yet (visibilityWhere's enrolledApproved branch), so a bell pointing at one
-  // would answer 403. After the create has committed; best-effort, never throws.
+  // for the copy and the whole audience: every student with an APPROVED seat on ANY
+  // live intake of the course, except the teacher who just uploaded it (Phase 9:
+  // seats are per-offering, but materials belong to the course). PENDING students are
+  // excluded deliberately — they cannot see the resource yet (visibilityWhere's
+  // enrolledApproved branch), so a bell pointing at one would answer 403. After the
+  // create has committed; best-effort, never throws.
   const audience = await prisma.course.findFirst({
     where: { id: input.courseId, deletedAt: null },
     select: {
       name: true,
-      enrollments: {
-        where: { status: 'APPROVED', studentId: { not: actor.id } },
-        select: { studentId: true },
+      offerings: {
+        where: { deletedAt: null },
+        select: {
+          enrollments: {
+            where: { status: 'APPROVED', studentId: { not: actor.id } },
+            select: { studentId: true },
+          },
+        },
       },
     },
   });
   if (audience) {
     await notify({
-      userIds: audience.enrollments.map((enrollment) => enrollment.studentId),
+      userIds: audience.offerings.flatMap((offering) =>
+        offering.enrollments.map((enrollment) => enrollment.studentId),
+      ),
       type: 'RESOURCE_PUBLISHED',
       title: 'New course material',
       body: `New material was added to ${audience.name}.`,

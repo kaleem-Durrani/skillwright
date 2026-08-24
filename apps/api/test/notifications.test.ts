@@ -210,20 +210,27 @@ async function makeCourse(teacherId: string): Promise<{ id: string; name: string
       teacherId,
       durationValue: 6,
       durationUnit: 'WEEK',
-      capacity: 10,
       publishedAt: new Date(),
     },
     select: { id: true, name: true },
   });
+  await prisma.courseOffering.create({ data: { courseId: course.id, capacity: 10 } });
   return course;
 }
 
-function seedEnrollment(
+async function seedEnrollment(
   studentId: string,
   courseId: string,
   status: 'PENDING' | 'APPROVED' | 'WITHDRAWN',
 ): Promise<{ id: string }> {
-  return prisma.enrollment.create({ data: { studentId, courseId, status }, select: { id: true } });
+  const offering = await prisma.courseOffering.findFirstOrThrow({
+    where: { courseId, deletedAt: null },
+    select: { id: true },
+  });
+  return prisma.enrollment.create({
+    data: { studentId, offeringId: offering.id, status },
+    select: { id: true },
+  });
 }
 
 /**
@@ -570,9 +577,13 @@ describe('ENROLLMENT_REQUESTED', () => {
     const student = await signIn(`req-s${sequence}@example.com`, 'STUDENT', 'Sam Applicant');
     const course = await makeCourse(teacher.id);
 
+    const offering = await prisma.courseOffering.findFirstOrThrow({
+      where: { courseId: course.id, deletedAt: null },
+      select: { id: true },
+    });
     const response = await api('POST', '/enrollments', {
       person: student,
-      payload: { courseId: course.id },
+      payload: { courseId: course.id, offeringId: offering.id },
     });
     expect(response.statusCode).toBe(201);
 
@@ -598,9 +609,13 @@ describe('ENROLLMENT_REQUESTED', () => {
     // One row reused forever per (student, course): this seat was withdrawn last term.
     await seedEnrollment(student.id, course.id, 'WITHDRAWN');
 
+    const offering = await prisma.courseOffering.findFirstOrThrow({
+      where: { courseId: course.id, deletedAt: null },
+      select: { id: true },
+    });
     const response = await api('POST', '/enrollments', {
       person: student,
-      payload: { courseId: course.id },
+      payload: { courseId: course.id, offeringId: offering.id },
     });
     expect(response.statusCode).toBe(201);
 

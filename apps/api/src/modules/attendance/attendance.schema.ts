@@ -14,17 +14,19 @@ export const courseIdParamSchema = z.object({ courseId: idSchema });
 export type CourseIdParam = z.infer<typeof courseIdParamSchema>;
 
 /**
- * The query `GET /courses/:courseId/attendance/export` binds — a date range over the
- * register, both ends optional and inclusive.
+ * The query `GET /courses/:courseId/attendance/export` binds — an offering-scoped
+ * date range, both ends optional and inclusive. `offeringId` is required since
+ * Phase 9: a register belongs to ONE intake.
  *
  * Declared HERE rather than in @skillwright/shared for the audit.schema.ts:1-18
  * reason: the CSV endpoints are API-local wire surface, so there is nothing upstream
- * to bind. The leaf rule is still imported (`sessionDateSchema`), so the bare
- * `YYYY-MM-DD` definition is not restated — the same discipline every local
- * declaration in this repo follows.
+ * to bind. The leaf rules are still imported (`sessionDateSchema`, `idSchema`), so no
+ * definition is restated — the same discipline every local declaration in this repo
+ * follows.
  */
 export const attendanceExportQuerySchema = z
   .object({
+    offeringId: idSchema,
     from: sessionDateSchema.optional(),
     to: sessionDateSchema.optional(),
   })

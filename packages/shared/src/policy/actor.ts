@@ -73,6 +73,11 @@ export interface Subject {
    * The REQUESTING actor's enrollment status in the relevant course, not the
    * status of some arbitrary enrollment row. The caller must scope the lookup to
    * the actor; passing someone else's status here is the one way to misuse this.
+   *
+   * Since Phase 9's template/offering split a student holds one enrollment PER
+   * INTAKE of a course. This field answers "their status in the COURSE": an
+   * APPROVED seat on any live offering of it reads APPROVED here, which is what
+   * `enrolledApproved` has always meant ("may this student be here").
    */
   enrollmentStatus?: EnrollmentState | null;
 

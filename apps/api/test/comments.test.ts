@@ -145,10 +145,12 @@ async function makeCourse(
       teacherId,
       durationValue: 6,
       durationUnit: 'WEEK',
-      capacity: 10,
       publishedAt: options.published === false ? null : new Date(),
     },
   });
+  // Phase 9: every course gets at least one intake so enrollment fixtures have a
+  // seat to attach to.
+  await prisma.courseOffering.create({ data: { courseId: course.id, capacity: 10 } });
   return course.id;
 }
 
@@ -202,7 +204,14 @@ async function enrol(
   courseId: string,
   status: 'PENDING' | 'APPROVED',
 ): Promise<void> {
-  await prisma.enrollment.create({ data: { studentId, courseId, status } });
+  // Seats are per-intake since Phase 9; the fixture's course has exactly one.
+  const offering = await prisma.courseOffering.findFirstOrThrow({
+    where: { courseId, deletedAt: null },
+    select: { id: true },
+  });
+  await prisma.enrollment.create({
+    data: { studentId, offeringId: offering.id, status },
+  });
 }
 
 interface CommentFixture {

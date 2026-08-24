@@ -26,16 +26,21 @@ export type AttendanceMarkInput = z.infer<typeof attendanceMarkSchema>;
 
 /**
  * A whole register in one request, because an instructor marks a class, not a
- * row. Re-submitting the same date CORRECTS via the
+ * row. A register is scoped to ONE intake (`offeringId`) — two intakes of the same
+ * course never share a teaching day. Re-submitting the same date CORRECTS via the
  * `@@unique([enrollmentId, sessionDate])` upsert rather than duplicating.
  */
 export const markRegisterBodySchema = z.object({
+  offeringId: idSchema,
   date: sessionDateSchema,
   marks: z.array(attendanceMarkSchema).min(1).max(500),
 });
 export type MarkRegisterInput = z.infer<typeof markRegisterBodySchema>;
 
-export const getRegisterQuerySchema = z.object({ date: sessionDateSchema });
+export const getRegisterQuerySchema = z.object({
+  offeringId: idSchema,
+  date: sessionDateSchema,
+});
 export type GetRegisterQuery = z.infer<typeof getRegisterQuerySchema>;
 
 /** A stored record, as serialised on its own or inside a summary. */
