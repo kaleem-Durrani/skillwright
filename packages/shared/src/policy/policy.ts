@@ -4,6 +4,7 @@ import {
   and,
   deny,
   enrolledApproved,
+  hasCompletedPrerequisite,
   isAuthor,
   isEnrolledStudent,
   isParticipant,
@@ -140,6 +141,19 @@ const publicAndLive = and(isPublic, isPublished);
 const resourceVisibleToStudent = or(publicAndLive, enrolledApproved);
 const resourceVisibleToTeacher = or(publicAndLive, ownsCourse, isAuthor);
 
+/*
+ * A seat request climbs the ladder. The course must be live — the same term
+ * `enrollment:request` carried on its own before prerequisites existed — and
+ * where it names a prerequisite, the REQUESTING actor must hold an APPROVED
+ * seat there. Composed and named once for the same reason `studentCourseVisible`
+ * is: the generated permissions doc cites the composition verbatim.
+ *
+ * The second conjunct reads `prerequisiteCourseId` and `completedCourseIds`, so
+ * the subject loader MUST carry both (actor.ts) — a subject that omits either
+ * denies silently, which is LESSONS-LEARNED #15/#31.
+ */
+const studentSeatRequest = and(isPublished, hasCompletedPrerequisite);
+
 export const POLICY: PolicyTable = definePolicy({
   // -------------------------------------------------------------------------
   // Course
@@ -181,8 +195,11 @@ export const POLICY: PolicyTable = definePolicy({
   // -------------------------------------------------------------------------
   'enrollment:request': {
     anonymous: deny,
-    // Subject is the COURSE. A draft course cannot accumulate a waiting list.
-    STUDENT: isPublished,
+    // Subject is the COURSE. A draft course cannot accumulate a waiting list, and
+    // where the course names a prerequisite the requesting student must have
+    // completed it (`studentSeatRequest` above). Admins keep `allow`: enrolling
+    // someone by hand IS how a teacher's "I'll allow it" is exercised.
+    STUDENT: studentSeatRequest,
     TEACHER: deny,
     ADMIN: allow,
   },

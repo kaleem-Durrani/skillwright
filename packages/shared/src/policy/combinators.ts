@@ -97,6 +97,27 @@ export const isPublished: Rule = rule(
   (_actor, subject) => subject.publishedAt !== undefined && subject.publishedAt !== null,
 );
 
+/**
+ * The subject course names a prerequisite (`prerequisiteCourseId`) and the
+ * requesting actor has completed it (`completedCourseIds` holds an APPROVED seat
+ * there).
+ *
+ * Both fields are loader duties, and both fail closed: an ABSENT
+ * `prerequisiteCourseId` denies (only explicit null means "no requirement" — a
+ * loader that forgot the column must refuse, not open every gated course), and
+ * an absent or non-matching `completedCourseIds` denies. A PENDING request is
+ * not a completed prerequisite, for the same reason `enrolledApproved` refuses
+ * to count one.
+ */
+export const hasCompletedPrerequisite: Rule = rule(
+  'hasCompletedPrerequisite',
+  (_actor, subject) =>
+    // `undefined` means "never loaded"; only explicit null means "none".
+    subject.prerequisiteCourseId !== undefined &&
+    (subject.prerequisiteCourseId === null ||
+      (subject.completedCourseIds?.includes(subject.prerequisiteCourseId) ?? false)),
+);
+
 /** `Resource.isPublic`. Actor-independent. */
 export const isPublic: Rule = rule('isPublic', (_actor, subject) => subject.isPublic === true);
 

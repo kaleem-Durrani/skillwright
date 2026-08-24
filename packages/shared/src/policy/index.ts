@@ -7,6 +7,7 @@ export {
   and,
   deny,
   enrolledApproved,
+  hasCompletedPrerequisite,
   isAuthor,
   isEnrolledStudent,
   isParticipant,

@@ -54,9 +54,10 @@ const enrollmentsRoutes: FastifyPluginAsync = async (fastify) => {
     {
       schema: { body: requestEnrollmentSchema, response: { 201: enrollmentSchema } },
       // policy.ts:155 — the subject is the COURSE, not an enrollment: a draft course
-      // cannot accumulate a waiting list.
+      // cannot accumulate a waiting list. The actor rides along so the subject can
+      // carry the requester's completed courses for `hasCompletedPrerequisite`.
       preHandler: authorize('enrollment:request', (request) =>
-        enrollmentService.loadRequestedCourseSubject(courseIdOfBody(request)),
+        enrollmentService.loadRequestedCourseSubject(courseIdOfBody(request), request.actor),
       ),
     },
     async (request, reply) =>

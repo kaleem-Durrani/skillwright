@@ -41,6 +41,20 @@ export const courseSummarySchema = z.object({
 });
 export type CourseSummary = z.infer<typeof courseSummarySchema>;
 
+/**
+ * The minimal naming block for a course's prerequisite — just enough for the UI
+ * to say "Requires: SMAW Level 1" without a second fetch. Deliberately NOT the
+ * whole `courseSummarySchema`: a summary embeds a department and a teacher, and
+ * nesting a course inside a course that way would drag half the catalogue onto
+ * every row.
+ */
+export const coursePrerequisiteSchema = z.object({
+  id: idSchema,
+  code: z.string(),
+  name: z.string(),
+});
+export type CoursePrerequisite = z.infer<typeof coursePrerequisiteSchema>;
+
 export const courseDetailSchema = courseSummarySchema.extend({
   description: z.string().nullable(),
   startDate: nullableIsoDateTimeSchema,
@@ -52,6 +66,9 @@ export const courseDetailSchema = courseSummarySchema.extend({
   viewerEnrollmentStatus: z
     .enum(['PENDING', 'APPROVED', 'REJECTED', 'WITHDRAWN', 'COMPLETED'])
     .nullable(),
+  /** The raw pointer, and the named block the enrol button reads. Both additive. */
+  prerequisiteCourseId: idSchema.nullable(),
+  prerequisite: coursePrerequisiteSchema.nullable(),
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,
 });
@@ -77,6 +94,9 @@ export type CourseDetail = z.infer<typeof courseDetailSchema>;
 export const courseListItemSchema = courseSummarySchema.extend({
   description: z.string().nullable(),
   viewerEnrollmentStatus: courseDetailSchema.shape.viewerEnrollmentStatus,
+  /** Same prerequisite block as the detail page, so the catalogue can badge a card. */
+  prerequisiteCourseId: courseDetailSchema.shape.prerequisiteCourseId,
+  prerequisite: courseDetailSchema.shape.prerequisite,
 });
 export type CourseListItem = z.infer<typeof courseListItemSchema>;
 
@@ -129,6 +149,12 @@ export const updateCourseSchema = z
     startDate: z.string().datetime({ offset: true }).nullable(),
     endDate: z.string().datetime({ offset: true }).nullable(),
     syllabusUploadId: idSchema.nullable(),
+    /**
+     * Setting the ladder rung. Nullable, not just optional: explicit null CLEARS
+     * the requirement. The service validates existence, non-self and acyclicity —
+     * a foreign key the client chose is a 422, never a 500.
+     */
+    prerequisiteCourseId: idSchema.nullable(),
   })
   .partial()
   .superRefine(courseDatesRefinement);

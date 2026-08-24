@@ -346,6 +346,21 @@ model Course {
   syllabusUpload   Upload? @relation("CourseSyllabus", fields: [syllabusUploadId], references: [id], onDelete: SetNull)
   syllabusUploadId String? @unique
 
+  /// The course a student must hold an APPROVED seat in before they may request
+  /// this one. Self-relation; chains fall out of pointing each rung at the one
+  /// below it (101 -> 201 -> 301). Enforced by `hasCompletedPrerequisite` on
+  /// `enrollment:request`, not by anything in the database.
+  ///
+  /// onDelete: SetNull, not Restrict or Cascade — losing the prerequisite must
+  /// not delete courses. Cascade would destroy real courses because their ladder
+  /// rung was retired; Restrict would make the rung undeletable forever. Clearing
+  /// the pointer degrades honestly to "no prerequisite".
+  prerequisite   Course? @relation("CoursePrerequisite", fields: [prerequisiteCourseId], references: [id], onDelete: SetNull)
+  prerequisiteCourseId String?
+
+  /// Courses this one gates. Back-relation Prisma requires; nothing reads it yet.
+  prerequisiteFor Course[] @relation("CoursePrerequisite")
+
   publishedAt DateTime?
 
   createdAt DateTime  @default(now())
@@ -360,6 +375,7 @@ model Course {
   @@index([publishedAt])
   @@index([deletedAt])
   @@index([departmentId, publishedAt])
+  @@index([prerequisiteCourseId])
 }
 
 model Enrollment {

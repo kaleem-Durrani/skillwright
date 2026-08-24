@@ -92,6 +92,26 @@ export interface Subject {
 
   /** `Message.senderId`. */
   senderId?: string;
+
+  /**
+   * The subject COURSE's own requirement: the id of the course a student must
+   * complete first, or null when the course names no prerequisite.
+   *
+   * ABSENT (the key left off) DENIES `hasCompletedPrerequisite`. Only explicit
+   * null means "no requirement" — so a loader that forgot to select the column
+   * refuses rather than silently waving students through an ungated course,
+   * which is LESSONS-LEARNED #15/#31 pointed in the dangerous direction.
+   */
+  prerequisiteCourseId?: string | null;
+
+  /**
+   * The REQUESTING actor's completed courses — the ids they hold an APPROVED
+   * enrollment for. Viewer-relative exactly like `enrollmentStatus`: it is the
+   * caller's own record, never some other student's, and passing someone else's
+   * list is the one documented way to misuse it. Loaded by whichever subject
+   * loader feeds a rule that reads it (`hasCompletedPrerequisite`).
+   */
+  completedCourseIds?: readonly string[];
 }
 
 /** Shared frozen blank so `can(actor, action)` with no subject allocates nothing. */

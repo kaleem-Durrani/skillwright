@@ -90,6 +90,25 @@ const COURSE_A_LIVE_APPROVED: Subject = { ...COURSE_A_LIVE, enrollmentStatus: 'A
 const COURSE_A_DRAFT_APPROVED: Subject = { ...COURSE_A_DRAFT, enrollmentStatus: 'APPROVED' };
 const COURSE_A_LIVE_PENDING: Subject = { ...COURSE_A_LIVE, enrollmentStatus: 'PENDING' };
 
+/*
+ * `enrollment:request`'s subject is the course WITH its prerequisite fields
+ * (actor.ts): `prerequisiteCourseId` — explicit null means ungated, ABSENT means
+ * the loader never loaded it and must deny — and `completedCourseIds`, the
+ * requesting actor's APPROVED seats.
+ */
+const COURSE_A_LIVE_UNGATED: Subject = { ...COURSE_A_LIVE, prerequisiteCourseId: null };
+const COURSE_A_DRAFT_UNGATED: Subject = { ...COURSE_A_DRAFT, prerequisiteCourseId: null };
+/** Requires completing c_b first. */
+const COURSE_A_LIVE_GATED: Subject = { ...COURSE_A_LIVE, prerequisiteCourseId: 'c_b' };
+const COURSE_A_LIVE_GATED_COMPLETED: Subject = {
+  ...COURSE_A_LIVE_GATED,
+  completedCourseIds: ['c_b'],
+};
+const COURSE_A_LIVE_GATED_WRONG_COMPLETION: Subject = {
+  ...COURSE_A_LIVE_GATED,
+  completedCourseIds: ['c_z'],
+};
+
 const ENROLLMENT_S1_IN_A: Subject = {
   id: 'e_1',
   studentId: STUDENT_IN.id,
@@ -327,18 +346,68 @@ const COURSE_CELLS: readonly Cell[] = [
 ];
 
 const ENROLLMENT_CELLS: readonly Cell[] = [
+  /*
+   * The prerequisite ladder. The STUDENT row of `enrollment:request` is now
+   * `and(isPublished, hasCompletedPrerequisite)`, so every refusal on this action
+   * reports the whole composition — `and()` does not name which conjunct failed,
+   * exactly as the resource rows above report their full `or(...)` chains.
+   */
   ok(
-    'student requests enrollment in a published course',
+    'student requests enrollment in an ungated published course',
     STUDENT_OUT,
     'enrollment:request',
-    COURSE_A_LIVE,
+    COURSE_A_LIVE_UNGATED,
   ),
   no(
     'student requests enrollment in a draft course',
     STUDENT_OUT,
     'enrollment:request',
-    'STUDENT:isPublished',
-    COURSE_A_DRAFT,
+    'STUDENT:and(isPublished, hasCompletedPrerequisite)',
+    COURSE_A_DRAFT_UNGATED,
+  ),
+  ok(
+    'student who completed the prerequisite requests the gated course',
+    STUDENT_OUT,
+    'enrollment:request',
+    COURSE_A_LIVE_GATED_COMPLETED,
+  ),
+  no(
+    'student who never completed the prerequisite requests the gated course',
+    STUDENT_OUT,
+    'enrollment:request',
+    'STUDENT:and(isPublished, hasCompletedPrerequisite)',
+    COURSE_A_LIVE_GATED,
+  ),
+  no(
+    'completing an unrelated course does not satisfy the prerequisite',
+    STUDENT_OUT,
+    'enrollment:request',
+    'STUDENT:and(isPublished, hasCompletedPrerequisite)',
+    COURSE_A_LIVE_GATED_WRONG_COMPLETION,
+  ),
+  no(
+    'completing the prerequisite still does not open a draft course',
+    STUDENT_OUT,
+    'enrollment:request',
+    'STUDENT:and(isPublished, hasCompletedPrerequisite)',
+    { ...COURSE_A_LIVE_GATED_COMPLETED, publishedAt: null },
+  ),
+  // LESSONS-LEARNED #31 pointed in the dangerous direction: an ABSENT
+  // `prerequisiteCourseId` must read as "loader forgot", and deny — only explicit
+  // null means "no requirement". Otherwise forgetting the column opens every gate.
+  no(
+    'a subject missing the prerequisite field denies rather than waving through',
+    STUDENT_OUT,
+    'enrollment:request',
+    'STUDENT:and(isPublished, hasCompletedPrerequisite)',
+    COURSE_A_LIVE,
+  ),
+  no(
+    'anonymous requests enrollment even on an ungated course',
+    ANON,
+    'enrollment:request',
+    'anonymous:deny',
+    COURSE_A_LIVE_UNGATED,
   ),
   no('teacher requests enrollment', TEACHER_A, 'enrollment:request', 'TEACHER:deny', COURSE_A_LIVE),
   ok('admin enrolls a student directly', ADMIN, 'enrollment:request', COURSE_A_LIVE),

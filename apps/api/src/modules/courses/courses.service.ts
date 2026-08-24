@@ -3,14 +3,11 @@ import {
   paginationMeta,
   toSkipTake,
   type Actor,
+  type CoursePrerequisite,
   type Paginated,
   type Subject,
 } from '@skillwright/shared';
-import {
-  COURSE_SUMMARY_INCLUDE,
-  toCourseSummary,
-  type CourseWithSummaryRelations,
-} from '../../lib/dto.js';
+import { COURSE_SUMMARY_INCLUDE, toCourseSummary } from '../../lib/dto.js';
 import { notFound, validationFailed } from '../../lib/errors.js';
 // The Upload row belongs to the uploads module, and so does the question of whether
 // this actor may claim it. Before this, `syllabusUploadId` was written unchecked.
@@ -40,21 +37,37 @@ import type {
  * Soft delete is not enforced by the ORM, so the nested count filters `deletedAt`
  * by hand exactly like every other read in this file.
  */
-const COURSE_DETAIL_INCLUDE = {
+const COURSE_LIST_INCLUDE = {
   ...COURSE_SUMMARY_INCLUDE,
+  // Exactly what `coursePrerequisiteSchema` (course.ts) serialises: enough to name
+  // "Requires: SMAW Level 1" on a card, and no second fetch for it.
+  prerequisite: { select: { id: true, code: true, name: true } },
+} as const;
+
+type CourseWithPrerequisiteRelations = Prisma.CourseGetPayload<{
+  include: typeof COURSE_LIST_INCLUDE;
+}>;
+
+const COURSE_DETAIL_INCLUDE = {
+  ...COURSE_LIST_INCLUDE,
   syllabusUpload: { select: { key: true, originalName: true, status: true } },
   _count: { select: { resources: { where: { deletedAt: null } } } },
 } as const;
 
 type CourseWithDetail = Prisma.CourseGetPayload<{ include: typeof COURSE_DETAIL_INCLUDE }>;
 
-/** The five fields the `course:*` policy rows read, and nothing else. */
+/**
+ * The five fields the `course:*` policy rows read, plus the prerequisite pointer
+ * `hasCompletedPrerequisite` reads on the `enrollment:request` subject built from
+ * this select. Nothing else reads it yet; carrying it costs one nullable column.
+ */
 const SUBJECT_SELECT = {
   id: true,
   teacherId: true,
   departmentId: true,
   publishedAt: true,
   deletedAt: true,
+  prerequisiteCourseId: true,
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -66,6 +79,15 @@ const SUBJECT_SELECT = {
  * DTOs besides this module's, and it owns the `seatsRemaining`/`isFull` derivation,
  * which has to exist in exactly one place.
  */
+
+/** The ONLY shape a prerequisite is serialised as — null means the course is ungated. */
+function toCoursePrerequisite(
+  prerequisite: CourseWithPrerequisiteRelations['prerequisite'],
+): CoursePrerequisite | null {
+  return prerequisite === null
+    ? null
+    : { id: prerequisite.id, code: prerequisite.code, name: prerequisite.name };
+}
 
 /**
  * `viewerEnrollmentStatus` is a parameter rather than a column because it is the
@@ -104,6 +126,8 @@ export async function toCourseDetail(
     syllabusUrl,
     resourceCount: course._count.resources,
     viewerEnrollmentStatus,
+    prerequisiteCourseId: course.prerequisiteCourseId,
+    prerequisite: toCoursePrerequisite(course.prerequisite),
     createdAt: course.createdAt.toISOString(),
     updatedAt: course.updatedAt.toISOString(),
   };
@@ -115,17 +139,20 @@ export async function toCourseDetail(
  * no include can express — but the list resolves it for the WHOLE page in one query
  * (`viewerEnrollmentStatusByCourse`) and hands each row its answer from a Map.
  *
- * `description` is a plain Course column, and `CourseWithSummaryRelations` carries every
- * scalar because an `include` narrows relations, not columns.
+ * `description` is a plain Course column, and `CourseWithPrerequisiteRelations` carries
+ * every scalar because an `include` narrows relations, not columns — so the prerequisite
+ * block costs no second query.
  */
 export function toCourseListItem(
-  course: CourseWithSummaryRelations,
+  course: CourseWithPrerequisiteRelations,
   viewerEnrollmentStatus: CourseListItem['viewerEnrollmentStatus'],
 ): CourseListItem {
   return {
     ...toCourseSummary(course),
     description: course.description,
     viewerEnrollmentStatus,
+    prerequisiteCourseId: course.prerequisiteCourseId,
+    prerequisite: toCoursePrerequisite(course.prerequisite),
   };
 }
 
@@ -151,6 +178,11 @@ export async function loadCourseSubject(id: string): Promise<Subject | undefined
     departmentId: course.departmentId,
     publishedAt: course.publishedAt,
     deletedAt: course.deletedAt,
+    // Selected but never RETURNED once — every nested-route enrollment request
+    // denied, because an absent `prerequisiteCourseId` means "loader forgot" and
+    // `hasCompletedPrerequisite` refuses (LESSONS-LEARNED #31, caught by the
+    // prerequisites suite within one run). Explicit null = ungated.
+    prerequisiteCourseId: course.prerequisiteCourseId,
   };
 }
 
@@ -174,6 +206,11 @@ export async function loadCourseSubjectForActor(
  * The subject is still the COURSE (policy.ts:153-159), with `studentId` added for a
  * student so `isEnrolledStudent` can match — the row-level scoping of what a student
  * actually sees is the enrollments service's WHERE clause, not this gate.
+ *
+ * For a student it also carries `completedCourseIds`: `hasCompletedPrerequisite`
+ * reads it on `enrollment:request`, and a subject that omits it denies EVERY gated
+ * request silently — LESSONS-LEARNED #15/#31. One indexed query
+ * (`@@index([studentId, status])`), whatever the catalogue looks like.
  */
 export async function loadCourseEnrollmentSubject(
   courseId: string,
@@ -184,8 +221,25 @@ export async function loadCourseEnrollmentSubject(
   return {
     ...subject,
     courseId,
-    ...(actor?.role === 'STUDENT' ? { studentId: actor.id } : {}),
+    ...(actor?.role === 'STUDENT'
+      ? { studentId: actor.id, completedCourseIds: await completedCourseIds(actor.id) }
+      : {}),
   };
+}
+
+/**
+ * The ids the student holds APPROVED enrollments for — "completed" for
+ * prerequisite purposes, exactly as `enrolledApproved` defines completion for the
+ * rest of policy (a PENDING request is not a seat). Duplicated in
+ * enrollments.service.ts on purpose: each module owns its own loader's database
+ * access, per the same note on that file.
+ */
+async function completedCourseIds(studentId: string): Promise<string[]> {
+  const rows = await prisma.enrollment.findMany({
+    where: { studentId, status: 'APPROVED' },
+    select: { courseId: true },
+  });
+  return rows.map((row) => row.courseId);
 }
 
 /**
@@ -353,7 +407,7 @@ export async function list(
       where,
       ...toSkipTake(query),
       orderBy: orderFor(query),
-      include: COURSE_SUMMARY_INCLUDE,
+      include: COURSE_LIST_INCLUDE,
     }),
     prisma.course.count({ where }),
   ]);
@@ -427,7 +481,7 @@ async function listRanked(
   const [courseRows, statuses] = await Promise.all([
     prisma.course.findMany({
       where: { id: { in: orderedIds } },
-      include: COURSE_SUMMARY_INCLUDE,
+      include: COURSE_LIST_INCLUDE,
     }),
     viewerEnrollmentStatusByCourse(actor, orderedIds),
   ]);
@@ -492,6 +546,58 @@ async function assertTeacherExists(teacherId: string): Promise<void> {
   });
   if (!teacher) {
     throw validationFailed([{ path: 'teacherId', message: 'Unknown teacher' }]);
+  }
+}
+
+/**
+ * A prerequisite the client chose is validated, not trusted — same shape as
+ * `assertDepartmentExists`: a foreign key turns into a field-level 422, never a
+ * foreign-key 500.
+ *
+ * Cycles are impossible ONLY because every write through here walks the chain:
+ * a 2-level check is not enough, because depth grows one PATCH at a time —
+ * A -> B is fine, B -> A needs level 2, and A -> B -> C -> A needs level 3. The
+ * walk starts above the candidate and refuses if it ever arrives back at the
+ * course being edited; by induction the graph stays acyclic, so the walk always
+ * terminates on its own and the visited set is belt-and-braces.
+ */
+async function assertPrerequisiteAllowed(
+  id: string,
+  prerequisiteCourseId: string | null,
+): Promise<void> {
+  // Explicit null clears the requirement; there is nothing to validate.
+  if (prerequisiteCourseId === null) return;
+
+  if (prerequisiteCourseId === id) {
+    throw validationFailed([
+      { path: 'prerequisiteCourseId', message: 'A course cannot be its own prerequisite' },
+    ]);
+  }
+
+  const exists = await prisma.course.findFirst({
+    where: { id: prerequisiteCourseId, deletedAt: null },
+    select: { id: true },
+  });
+  if (!exists) {
+    throw validationFailed([{ path: 'prerequisiteCourseId', message: 'Unknown course' }]);
+  }
+
+  // Chains are short (101 -> 201 -> 301), so point queries beat loading the table.
+  const seen = new Set<string>([id]);
+  let cursor: string | null = prerequisiteCourseId;
+  while (cursor !== null && !seen.has(cursor)) {
+    seen.add(cursor);
+    const next: { prerequisiteCourseId: string | null } | null = await prisma.course.findUnique({
+      where: { id: cursor },
+      select: { prerequisiteCourseId: true },
+    });
+    // Defensive only: no dangling edge can exist through this API.
+    cursor = next?.prerequisiteCourseId ?? null;
+  }
+  if (cursor !== null) {
+    throw validationFailed([
+      { path: 'prerequisiteCourseId', message: 'Setting this prerequisite would create a cycle' },
+    ]);
   }
 }
 
@@ -575,6 +681,10 @@ export async function update(
 
   if (input.departmentId !== undefined) await assertDepartmentExists(input.departmentId);
 
+  if (input.prerequisiteCourseId !== undefined) {
+    await assertPrerequisiteAllowed(id, input.prerequisiteCourseId);
+  }
+
   // Same data shaping as create: a teacher may not hand their course to someone else,
   // nor take another's. The `course:update` decision itself happened at the route.
   const teacherId = actor.role === 'ADMIN' ? input.teacherId : undefined;
@@ -594,6 +704,9 @@ export async function update(
       ...(input.startDate !== undefined ? { startDate } : {}),
       ...(input.endDate !== undefined ? { endDate } : {}),
       ...(input.syllabusUploadId !== undefined ? { syllabusUploadId: input.syllabusUploadId } : {}),
+      ...(input.prerequisiteCourseId !== undefined
+        ? { prerequisiteCourseId: input.prerequisiteCourseId }
+        : {}),
     },
     include: COURSE_DETAIL_INCLUDE,
   });

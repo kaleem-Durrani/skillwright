@@ -65,7 +65,7 @@ rule reads named fields off `Subject` and denies when they are absent.
 | `enrollment:approve` | ✗ deny | ✗ deny | `ownsCourse` | ✓ allow |
 | `enrollment:read` | ✗ deny | `isEnrolledStudent` | `ownsCourse` | ✓ allow |
 | `enrollment:reject` | ✗ deny | ✗ deny | `ownsCourse` | ✓ allow |
-| `enrollment:request` | ✗ deny | `isPublished` | ✗ deny | ✓ allow |
+| `enrollment:request` | ✗ deny | `and(isPublished, hasCompletedPrerequisite)` | ✗ deny | ✓ allow |
 | `enrollment:withdraw` | ✗ deny | `isEnrolledStudent` | ✗ deny | ✓ allow |
 | `mfa:disable` | ✗ deny | ✓ allow | ✓ allow | ✓ allow |
 | `mfa:enroll` | ✗ deny | ✓ allow | ✓ allow | ✓ allow |

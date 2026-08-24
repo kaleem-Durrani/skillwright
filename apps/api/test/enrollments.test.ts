@@ -166,7 +166,7 @@ describe('requesting a seat', () => {
     const response = await post('/', { courseId }, student.token);
     expect(response.statusCode).toBe(403);
     expect(response.json().code).toBe('FORBIDDEN');
-    expect(response.json().detail).toContain('STUDENT:isPublished');
+    expect(response.json().detail).toContain('STUDENT:and(isPublished, hasCompletedPrerequisite)');
   });
 
   it('refuses a second live application but re-uses the row after a withdrawal', async () => {

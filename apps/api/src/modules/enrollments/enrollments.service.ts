@@ -122,14 +122,29 @@ export async function loadEnrollmentSubject(id: string): Promise<Subject | undef
  * policy.ts:155: "Subject is the COURSE. A draft course cannot accumulate a waiting
  * list." That is why this module owns two loaders rather than the usual one.
  *
+ * For a STUDENT it also carries `completedCourseIds`, which `hasCompletedPrerequisite`
+ * reads: without it every gated request is denied silently, the LESSONS-LEARNED #15/#31
+ * failure. One indexed query (`@@index([studentId, status])`). Admins skip it — their
+ * row is `allow` and enrolling by hand IS the escape hatch.
+ *
  * It duplicates courses.service.ts's `loadCourseSubject` on purpose: the module that
  * declares the route owns the gate, and importing across modules to save five lines
  * would make an enrollment write fail to load when the courses module is refactored.
  */
-export async function loadRequestedCourseSubject(courseId: string): Promise<Subject | undefined> {
+export async function loadRequestedCourseSubject(
+  courseId: string,
+  actor: Actor | null,
+): Promise<Subject | undefined> {
   const course = await prisma.course.findFirst({
     where: { id: courseId, deletedAt: null },
-    select: { id: true, teacherId: true, departmentId: true, publishedAt: true, deletedAt: true },
+    select: {
+      id: true,
+      teacherId: true,
+      departmentId: true,
+      publishedAt: true,
+      deletedAt: true,
+      prerequisiteCourseId: true,
+    },
   });
   if (!course) return undefined;
 
@@ -141,7 +156,25 @@ export async function loadRequestedCourseSubject(courseId: string): Promise<Subj
     // isPublished reads `publishedAt` (combinators.ts:95-98).
     publishedAt: course.publishedAt,
     deletedAt: course.deletedAt,
+    // hasCompletedPrerequisite reads both (combinators.ts). ABSENT would deny.
+    prerequisiteCourseId: course.prerequisiteCourseId,
+    ...(actor?.role === 'STUDENT'
+      ? { completedCourseIds: await completedCourseIds(actor.id) }
+      : {}),
   };
+}
+
+/**
+ * The ids the student holds APPROVED enrollments for — duplicated from
+ * courses.service.ts for the same reason that module's subject loader is duplicated
+ * here rather than imported.
+ */
+async function completedCourseIds(studentId: string): Promise<string[]> {
+  const rows = await prisma.enrollment.findMany({
+    where: { studentId, status: 'APPROVED' },
+    select: { courseId: true },
+  });
+  return rows.map((row) => row.courseId);
 }
 
 // ---------------------------------------------------------------------------
