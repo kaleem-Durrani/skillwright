@@ -191,6 +191,21 @@ const SESSIONS: Session[] = [
           });
         },
       },
+      {
+        name: 'search-results',
+        arrive: async (page) => {
+          await page.goto(`${BASE_URL}/search?q=WELD`);
+          await settle(page);
+          // Each entity renders its own <section aria-labelledby> with an <h2>
+          // (SearchResults.tsx:112-114); any section heading on screen means the
+          // query ran — including the honest no-results state, which is still a
+          // true picture of this screen.
+          await page.locator('#main-content section h2').first().waitFor({
+            state: 'visible',
+            timeout: 10_000,
+          });
+        },
+      },
     ],
   },
   {
@@ -375,6 +390,7 @@ const ROUTE_CAPTURES: Record<string, readonly string[]> = {
   'apps/web/src/routes/_app/messages.tsx': ['messages', 'messages-thread'],
   'apps/web/src/routes/_app/settings.tsx': ['settings-profile'],
   'apps/web/src/routes/_app/notifications.tsx': ['notifications'],
+  'apps/web/src/routes/_app/search.tsx': ['search-results'],
   'apps/web/src/routes/_app/admin.index.tsx': ['admin-console'],
   'apps/web/src/routes/_app/admin.users.tsx': ['admin-users'],
   'apps/web/src/routes/_app/admin.departments.tsx': ['admin-departments'],
