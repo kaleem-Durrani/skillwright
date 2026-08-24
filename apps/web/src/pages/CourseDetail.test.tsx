@@ -15,7 +15,8 @@
 import type { ReactNode } from 'react';
 import type { SessionUser } from '@/lib/session';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { qk } from '@/lib/query';
 import type { CourseDetail } from '@/lib/types';
@@ -110,6 +111,8 @@ function course(overrides: Partial<CourseDetail> = {}): CourseDetail {
     syllabusUrl: SIGNED_SYLLABUS_URL,
     resourceCount: 0,
     viewerEnrollmentStatus: 'APPROVED',
+    prerequisiteCourseId: null,
+    prerequisite: null,
     createdAt: '2026-08-01T09:00:00.000Z',
     updatedAt: '2026-08-01T09:00:00.000Z',
     ...overrides,
@@ -166,5 +169,205 @@ describe('CourseDetail header', () => {
     expect(screen.queryByRole('link', { name: /syllabus/i })).toBeNull();
     // And no dead affordance wearing a disabled state either.
     expect(screen.queryByText(/syllabus/i)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Attendance — Phase 5
+// ---------------------------------------------------------------------------
+
+const ENROLLMENT_ID = '01JGXDFAM0K2Z1GYCSNM5F5RD3';
+const OTHER_STUDENT_ID = '01JGXDFAM0K2Z1GYCSNM5F5RD4';
+const TEACHER_USER: SessionUser = {
+  id: TEACHER_ID,
+  email: 'teacher@example.edu',
+  name: 'Dana Okafor',
+  role: 'TEACHER',
+  status: 'ACTIVE',
+  provenance: 'PASSWORD',
+  avatarUrl: null,
+  totpEnabled: false,
+};
+
+/** The viewer's own APPROVED row, as `GET /enrollments?courseId=…` self-scopes it. */
+const OWN_ENROLLMENT = {
+  id: ENROLLMENT_ID,
+  status: 'APPROVED',
+  requestedAt: '2026-08-01T09:00:00.000Z',
+  decidedAt: '2026-08-02T09:00:00.000Z',
+  decidedBy: null,
+  decisionNote: null,
+  student: { id: STUDENT_ID, name: 'Ada Okafor', role: 'STUDENT', avatarUrl: null },
+  course: {
+    id: COURSE_ID,
+    code: 'WELD-101',
+    slug: 'welding-fundamentals',
+    name: 'Welding Fundamentals',
+    department: { id: DEPARTMENT_ID, name: 'Welding', slug: 'welding' },
+    teacher: { id: TEACHER_ID, name: 'Dana Okafor', role: 'TEACHER', avatarUrl: null },
+    duration: { value: 6, unit: 'WEEK' },
+    capacity: 12,
+    approvedCount: 3,
+    seatsRemaining: 9,
+    isFull: false,
+    publishedAt: '2026-08-01T09:00:00.000Z',
+  },
+};
+
+/** A second seat on the roster, for the register's teacher-side fixture. */
+const ROSTER_PAGE = {
+  data: [
+    OWN_ENROLLMENT,
+    {
+      ...OWN_ENROLLMENT,
+      id: '01JGXDFAM0K2Z1GYCSNM5F5RD5',
+      student: {
+        id: OTHER_STUDENT_ID,
+        name: 'Ben Ruiz',
+        role: 'STUDENT',
+        avatarUrl: null,
+      },
+    },
+  ],
+  meta: EMPTY_PAGE.meta,
+};
+
+const ATTENDANCE_SUMMARY = {
+  counts: { present: 4, absent: 1, late: 2 },
+  total: 7,
+  recent: [
+    {
+      id: '01JGXDFAM0K2Z1GYCSNM5F5RD6',
+      enrollmentId: ENROLLMENT_ID,
+      sessionDate: '2026-08-21T09:00:00.000Z',
+      status: 'LATE',
+      note: 'Bus broke down',
+      markedBy: { id: TEACHER_ID, name: 'Dana Okafor', role: 'TEACHER', avatarUrl: null },
+    },
+  ],
+};
+
+/**
+ * The register answers with whatever date it was asked for — the component's own
+ * "today" decides that, and no assertion should depend on which day the suite ran.
+ */
+function attendanceRegister(date: string) {
+  return {
+    date,
+    rows: ROSTER_PAGE.data.map((entry, index) => ({
+      enrollmentId: entry.id,
+      student: entry.student,
+      status: index === 1 ? ('ABSENT' as const) : null,
+      note: null,
+      markedBy: null,
+    })),
+  };
+}
+
+interface ApiHandlers {
+  [path: string]: (path: string, options?: unknown) => unknown;
+}
+
+/**
+ * The richer harness the attendance tests need: routes by path prefix and serves
+ * query-aware answers for the two endpoints whose RESPONSE depends on who asks.
+ */
+function renderAttendance(
+  served: CourseDetail,
+  user: SessionUser,
+  handlers: ApiHandlers = {},
+): void {
+  apiGet.mockImplementation((path, options) => {
+    const route = Object.keys(handlers).find((key) => path.startsWith(key));
+    if (route) return Promise.resolve(handlers[route](path, options));
+
+    if (path === `/courses/${COURSE_ID}`) return Promise.resolve(served);
+    return Promise.resolve(EMPTY_PAGE);
+  });
+
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  client.setQueryData(qk.session, { user });
+  render(
+    <QueryClientProvider client={client}>
+      <CourseDetailPage />
+    </QueryClientProvider>,
+  );
+}
+
+describe('CourseDetail attendance — a student looking at their own course', () => {
+  it('shows an approved student their own summary below the tabs, never the register', async () => {
+    renderAttendance(course(), VIEWER, {
+      // Most specific prefix FIRST: both endpoints live under /enrollments.
+      [`/enrollments/${ENROLLMENT_ID}/attendance`]: () => ATTENDANCE_SUMMARY,
+      '/enrollments': () => ROSTER_PAGE, // self-scoped to their own row server-side
+    });
+
+    expect(await screen.findByRole('heading', { name: 'Your attendance' })).toBeInTheDocument();
+    expect(await screen.findByText('Recent sessions')).toBeInTheDocument();
+
+    // No mark controls exist for the one role the policy denies outright.
+    expect(screen.queryByRole('button', { name: /save register/i })).toBeNull();
+    expect(screen.queryByRole('radio')).toBeNull();
+  });
+
+  it('renders nothing new for a student without an APPROVED enrolment', async () => {
+    renderAttendance(course({ viewerEnrollmentStatus: 'PENDING' }), VIEWER);
+
+    await screen.findByRole('heading', { level: 1, name: 'Welding Fundamentals' });
+
+    expect(screen.queryByText('Your attendance')).toBeNull();
+    // And it never asked: no enrolment lookup, no summary request.
+    const enrollmentCalls = apiGet.mock.calls.filter(([path]) =>
+      String(path).startsWith('/enrollments'),
+    );
+    expect(enrollmentCalls).toHaveLength(0);
+  });
+});
+
+describe('CourseDetail attendance — the owning teacher', () => {
+  it('serves the register on the Students tab above the approval list', async () => {
+    renderAttendance(course(), TEACHER_USER, {
+      [`/courses/${COURSE_ID}/enrollments`]: () => ROSTER_PAGE,
+      [`/courses/${COURSE_ID}/attendance`]: (_path, options) =>
+        attendanceRegister((options as { query?: { date?: string } }).query?.date ?? '1970-01-01'),
+    });
+
+    await screen.findByRole('heading', { level: 1, name: 'Welding Fundamentals' });
+    await userEvent.click(await screen.findByRole('tab', { name: /students/i }));
+
+    expect(await screen.findByText('Attendance register')).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Attendance for Ada Okafor' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Attendance for Ben Ruiz' })).toBeInTheDocument();
+    // Ben's loaded mark from the fixture is visible before anyone touches a radio.
+    expect(
+      within(screen.getByRole('group', { name: 'Attendance for Ben Ruiz' })).getByRole('radio', {
+        name: 'Absent',
+      }),
+    ).toBeChecked();
+    expect(screen.getByRole('button', { name: /save register/i })).toBeEnabled();
+
+    // And the approval list the tab has always had is still underneath.
+    expect(await screen.findByText('Enrolled students and requests')).toBeInTheDocument();
+  });
+
+  it('offers a non-owning teacher neither the Students tab nor the register', async () => {
+    renderAttendance(
+      course({
+        teacher: { id: OTHER_STUDENT_ID, name: 'Someone Else', role: 'TEACHER', avatarUrl: null },
+      }),
+      TEACHER_USER,
+    );
+
+    await screen.findByRole('heading', { level: 1, name: 'Welding Fundamentals' });
+
+    // `enrollment:read` gates the WHOLE tab on `ownsCourse`, so the tab trigger
+    // itself is absent — and with it every register affordance.
+    await waitFor(() =>
+      expect(screen.queryByRole('tab', { name: /students/i })).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByText('Attendance register')).toBeNull();
+    expect(screen.queryByRole('button', { name: /save register/i })).toBeNull();
   });
 });

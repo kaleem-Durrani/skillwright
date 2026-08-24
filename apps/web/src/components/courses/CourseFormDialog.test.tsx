@@ -85,6 +85,8 @@ const EXISTING_COURSE: CourseDetail = {
   syllabusUrl: null,
   resourceCount: 0,
   viewerEnrollmentStatus: null,
+  prerequisiteCourseId: null,
+  prerequisite: null,
   createdAt: '2026-08-01T09:00:00.000Z',
   updatedAt: '2026-08-01T09:00:00.000Z',
 };

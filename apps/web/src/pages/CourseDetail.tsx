@@ -27,6 +27,8 @@ import type {
   ResourceTypeValue,
 } from '@/lib/types';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { AttendanceRegister } from '@/components/attendance/AttendanceRegister';
+import { EnrollmentAttendance } from '@/components/attendance/EnrollmentAttendance';
 import { ResourceFormDialog } from '@/components/resources/ResourceFormDialog';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button, IconButton } from '@/components/ui/Button';
@@ -617,6 +619,24 @@ export function CourseDetailPage() {
 
         {policy.can('enrollment:read', viewerSubject) ? (
           <TabsContent value="students">
+            {/*
+              The register, and deliberately ABOVE the roster list: it is this tab's
+              working surface, while the list below is approvals bookkeeping.
+
+              Gated on `attendance:mark` asked with the COURSE subject — the shape the
+              server loads for both register endpoints (`loadCourseSubject`,
+              attendance.service.ts:63-71), where `ownsCourse` reads
+              `courseTeacherId`. A student is denied by their own policy cell before
+              the subject even matters, so this branch never renders for them; a
+              teacher who does not own the course fails `ownsCourse` exactly as they
+              would server-side.
+            */}
+            {policy.can('attendance:mark', viewerSubject) ? (
+              <div className="pb-6">
+                <AttendanceRegister courseId={courseId} />
+              </div>
+            ) : null}
+
             <DataList
               items={enrollments.data?.data ?? []}
               loading={enrollments.isPending}
@@ -710,6 +730,16 @@ export function CourseDetailPage() {
         ) : null}
       </Tabs>
 
+      {/*
+        The viewer's OWN attendance, for a student with an APPROVED seat — the second
+        half of Phase 5's frontend line. It sits below the tabs because the Students
+        tab itself is teacher-only (`enrollment:read` is asked client-side with the
+        course subject, whose shape denies `isEnrolledStudent` on purpose), so there
+        is no tab to fold it into without widening that gate and opening the whole
+        roster to students.
+      */}
+      <ViewerAttendanceSection course={data} />
+
       <RejectDialog
         // Remounts per request, so the reason box never opens holding the text typed
         // for the previous student.
@@ -761,6 +791,45 @@ export function CourseDetailPage() {
         onClose={() => setDeletingResource(null)}
         onConfirm={() => deletingResource && removeResource.mutate(deletingResource.id)}
       />
+    </div>
+  );
+}
+
+/**
+ * The signed-in viewer's own attendance on THIS course.
+ *
+ * The gate is deliberately NOT a role read: `viewerEnrollmentStatus` is served only
+ * for STUDENT viewers — the server sends it as null for everyone else
+ * (courses.service.ts:196) — so "APPROVED" here already means "an approved student".
+ * A visitor without an APPROVED enrolment renders nothing at all: no heading, no
+ * card, no request for data they are not entitled to.
+ *
+ * Finding their OWN enrolment id is a lookup, not an assumption: `GET /enrollments`
+ * has no per-subject policy gate because it self-scopes (`visibilityWhere` narrows
+ * a student's rows to `studentId = actor.id`, enrollments.routes.ts:38-40), and the
+ * same scoping is what makes it safe to call with just the course filter. The row
+ * that comes back is what `EnrollmentAttendance` builds its enrollment-shaped
+ * subject from — the shape `attendance:read`'s `isEnrolledStudent` cell demands.
+ */
+function ViewerAttendanceSection({ course }: { course: CourseDetail }) {
+  const approved = course.viewerEnrollmentStatus === 'APPROVED';
+
+  const mine = useQuery({
+    queryKey: qk.enrollments({ courseId: course.id, status: 'APPROVED', limit: 1 }),
+    queryFn: () =>
+      api.get<Paginated<EnrollmentDto>>('/enrollments', {
+        query: { courseId: course.id, status: 'APPROVED', limit: 1 },
+      }),
+    enabled: approved,
+  });
+
+  const own = approved ? mine.data?.data.find((entry) => entry.status === 'APPROVED') : undefined;
+
+  if (!own) return null;
+
+  return (
+    <div className="pt-8">
+      <EnrollmentAttendance enrollment={own} title="Your attendance" />
     </div>
   );
 }

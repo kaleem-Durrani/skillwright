@@ -109,6 +109,35 @@ export type {
 export type { EnrollmentDto, EnrollmentStatusValue } from '@skillwright/shared/schema';
 
 // ---------------------------------------------------------------------------
+// Attendance
+// ---------------------------------------------------------------------------
+
+/**
+ * `AttendanceRegisterDto` is the body of BOTH `GET /courses/:id/attendance?date=`
+ * and `PUT /courses/:id/attendance` — marking answers with the register as it now
+ * reads. Its `rows` are the CURRENT APPROVED roster joined with that date's
+ * records: a seat with no record yet carries `status: null`, `note: null`,
+ * `markedBy: null`. There is no row for a PENDING request — the register reads
+ * who may be in the room, not who has asked to be.
+ *
+ * `AttendanceSummaryDto` is the body of `GET /enrollments/:id/attendance` —
+ * counts by status, the total, and up to ten `recent` records newest-first.
+ * Both DTOs nest people as `UserSummary` (`student`, and `markedBy` on a record),
+ * so a marked-by name never drags an email along with it.
+ *
+ * `MarkRegisterInput`, like every other request BODY, is imported straight from
+ * `@skillwright/shared/schema` at the point of use rather than re-exported here.
+ */
+export type {
+  AttendanceCounts,
+  AttendanceRecordDto,
+  AttendanceRegisterDto,
+  AttendanceRegisterRow,
+  AttendanceStatusValue,
+  AttendanceSummaryDto,
+} from '@skillwright/shared/schema';
+
+// ---------------------------------------------------------------------------
 // Resources, announcements
 // ---------------------------------------------------------------------------
 

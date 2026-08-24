@@ -29,6 +29,10 @@ const STATUS_MAP = {
   // Visibility
   PUBLIC: { tone: 'info', label: 'Public' },
   PRIVATE: { tone: 'neutral', label: 'Enrolled only' },
+  // AttendanceStatus — presence, not a judgement of work
+  PRESENT: { tone: 'success', label: 'Present' },
+  ABSENT: { tone: 'danger', label: 'Absent' },
+  LATE: { tone: 'warning', label: 'Late' },
   // Capacity
   FULL: { tone: 'danger', label: 'Full' },
   OPEN: { tone: 'success', label: 'Open' },

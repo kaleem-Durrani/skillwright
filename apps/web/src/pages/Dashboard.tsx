@@ -37,6 +37,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { SkeletonCard, SkeletonStats } from '@/components/ui/Skeleton';
 import { WORKSPACE_LABEL } from '@/components/layout/nav';
 import { Gate } from '@/components/Gate';
+import { EnrollmentAttendance } from '@/components/attendance/EnrollmentAttendance';
 import { CourseFormDialog } from '@/components/courses/CourseFormDialog';
 import { CoursePublishButton } from '@/components/courses/CoursePublishButton';
 import { CourseRowActions } from '@/components/courses/CourseRowActions';
@@ -137,6 +138,30 @@ export function DashboardPage() {
         query: { status: 'PENDING', limit: 5 },
       }),
     enabled: canReviewRequests,
+  });
+
+  /*
+   * The rows behind a student's "My attendance" section. Reading `user.role` here
+   * chooses WHICH self-scoped list to ask for — the one legitimate role read
+   * CONTRIBUTING.md names, the same move `courseQuery` above makes for a teacher.
+   *
+   * `GET /enrollments` has no per-subject policy gate because it self-scopes
+   * (`visibilityWhere` narrows a STUDENT's rows to `studentId = actor.id`,
+   * enrollments.service.ts:217-236), so this is safe to run for any signed-in user;
+   * it is simply wasted on everyone who is not a student. Each returned row then
+   * carries what `EnrollmentAttendance` needs to build the ENROLLMENT-shaped
+   * subject for `attendance:read` — including `course.teacher.id`, which is where
+   * `courseTeacherId` comes from on this screen.
+   */
+  const isStudent = user?.role === 'STUDENT';
+
+  const myEnrollments = useQuery({
+    queryKey: qk.enrollments({ status: 'APPROVED', limit: 20 }),
+    queryFn: () =>
+      api.get<Paginated<EnrollmentDto>>('/enrollments', {
+        query: { status: 'APPROVED', limit: 20 },
+      }),
+    enabled: isStudent,
   });
 
   if (!user) return null;
@@ -320,6 +345,28 @@ export function DashboardPage() {
           </ul>
         )}
       </section>
+
+      {/*
+        A student's attendance across their approved courses, one compact summary
+        each. The section exists only once the list has ANSWERED with rows — a
+        student with no APPROVED enrolment gets neither heading nor skeleton, which
+        is the "sees nothing new" contract. The per-row `attendance:read` gate lives
+        inside `EnrollmentAttendance`, next to the subject it is asked with.
+      */}
+      {isStudent && myEnrollments.isSuccess ? (
+        (myEnrollments.data?.data.length ?? 0) > 0 ? (
+          <section className="pt-8" aria-labelledby="dashboard-attendance">
+            <h2 id="dashboard-attendance" className="pb-3 font-display text-lg font-semibold">
+              My attendance
+            </h2>
+            <div className="flex flex-col gap-3">
+              {(myEnrollments.data?.data ?? []).map((row) => (
+                <EnrollmentAttendance key={row.id} enrollment={row} title={row.course.name} />
+              ))}
+            </div>
+          </section>
+        ) : null
+      ) : null}
 
       <CourseFormDialog open={creating} onOpenChange={setCreating} />
       {editing ? (
