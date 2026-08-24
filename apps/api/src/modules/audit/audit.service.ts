@@ -1,6 +1,14 @@
 import { prisma, type Prisma } from '@skillwright/db';
 import { paginationMeta, toSkipTake, type Paginated } from '@skillwright/shared';
-import type { AuditEventDto, ListAuditEventsQuery } from './audit.schema.js';
+import { Readable } from 'node:stream';
+import { csvStream } from '../../lib/csv.js';
+import { notFound } from '../../lib/errors.js';
+import type {
+  AuditEventDetailDto,
+  AuditEventDto,
+  ExportAuditEventsQuery,
+  ListAuditEventsQuery,
+} from './audit.schema.js';
 
 /**
  * Only the actor's display name is loaded, not the whole `User` row.
@@ -52,6 +60,25 @@ export function toAuditEvent(event: AuditEventWithActor): AuditEventDto {
   };
 }
 
+/**
+ * The detail shape: the list mapper PLUS the stored forensics, and nothing else.
+ *
+ * `before` / `after` arrive from the Json column already redacted (audit.ts:61-73) —
+ * the denylist ran at write time — so this cast only restores what Prisma's loose
+ * `JsonValue` typing erased, it does not filter. A row whose diff was empty stores
+ * `{}` rather than DbNull on that side; both are legal and both pass through.
+ */
+export function toAuditEventDetail(event: AuditEventWithActor): AuditEventDetailDto {
+  return {
+    ...toAuditEvent(event),
+    before: (event.before as Record<string, unknown> | null) ?? null,
+    after: (event.after as Record<string, unknown> | null) ?? null,
+    ip: event.ip,
+    userAgent: event.userAgent,
+    requestId: event.requestId,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Queries
 // ---------------------------------------------------------------------------
@@ -73,7 +100,14 @@ export function toAuditEvent(event: AuditEventWithActor): AuditEventDto {
  * The four filters are spread rather than assigned so an absent one is an absent key
  * rather than an explicit `undefined`, which `exactOptionalPropertyTypes` rejects.
  */
-function listWhere(query: ListAuditEventsQuery): Prisma.AuditEventWhereInput {
+/**
+ * The structural subsets the two helpers read, so the export's paging-free query
+ * satisfies them without inventing page numbers it does not have.
+ */
+type AuditFilters = Pick<ListAuditEventsQuery, 'action' | 'entityType' | 'entityId' | 'actorId'>;
+type AuditSort = Pick<ListAuditEventsQuery, 'sort' | 'order'>;
+
+function listWhere(query: AuditFilters): Prisma.AuditEventWhereInput {
   return {
     ...(query.action !== undefined ? { action: query.action } : {}),
     ...(query.entityType !== undefined ? { entityType: query.entityType } : {}),
@@ -95,7 +129,7 @@ function listWhere(query: ListAuditEventsQuery): Prisma.AuditEventWhereInput {
  * oldest-first; it defaults to `desc` (pagination.ts:17), which is the newest-first
  * order AdminOverview.tsx expects from its bare `?limit=8`.
  */
-function orderFor(query: ListAuditEventsQuery): Prisma.AuditEventOrderByWithRelationInput {
+function orderFor(query: AuditSort): Prisma.AuditEventOrderByWithRelationInput {
   return { createdAt: query.order };
 }
 
@@ -122,4 +156,72 @@ export async function list(query: ListAuditEventsQuery): Promise<Paginated<Audit
   ]);
 
   return { data: rows.map(toAuditEvent), meta: paginationMeta(query.page, query.limit, total) };
+}
+
+/**
+ * One event, forensics included, `GET /audit-events/:id`.
+ *
+ * Same gate as the feed (`audit:read`, bare — the policy row is four terminal cells
+ * that read no Subject), so this endpoint widens the SHAPE for admins and nothing
+ * else: a caller who cannot read the list cannot read one row either.
+ */
+export async function getById(id: string): Promise<AuditEventDetailDto> {
+  const event = await prisma.auditEvent.findUnique({
+    where: { id },
+    include: AUDIT_EVENT_INCLUDE,
+  });
+  if (!event) throw notFound('Audit event');
+  return toAuditEventDetail(event);
+}
+
+// ---------------------------------------------------------------------------
+// The feed export (Phase 8)
+// ---------------------------------------------------------------------------
+
+/** How many events one batched query loads while streaming. */
+const EXPORT_BATCH = 500;
+
+/**
+ * The audit feed as a CSV stream, `GET /audit-events/export`.
+ *
+ * `listWhere` and `orderFor` are THE FEED'S, reused verbatim — same filters, same
+ * createdAt-only ordering, same fallback for an unrecognised `sort` — so the file is
+ * the feed unpaginated and nothing more. Columns mirror `auditEventSchema` exactly:
+ * the CSV is an export of what the LIST serves, so the forensics stay off it; they
+ * are detail-only surface (the scoping note in docs/roadmap/00-FEATURE-PLAN.md).
+ *
+ * The `{ id: 'asc' }` tiebreaker makes each batched page deterministic — two rows can
+ * share a createdAt, and without it a page boundary could skip or repeat one.
+ */
+async function* feedRows(query: ExportAuditEventsQuery): AsyncGenerator<readonly string[]> {
+  yield ['id', 'action', 'entity_type', 'entity_id', 'actor_id', 'actor_name', 'recorded_at'];
+
+  const where = listWhere(query);
+
+  for (let skip = 0; ; skip += EXPORT_BATCH) {
+    const rows = await prisma.auditEvent.findMany({
+      where,
+      orderBy: [orderFor(query), { id: 'asc' }],
+      skip,
+      take: EXPORT_BATCH,
+      include: AUDIT_EVENT_INCLUDE,
+    });
+
+    for (const event of rows) {
+      yield [
+        event.id,
+        event.action,
+        event.entityType,
+        event.entityId,
+        event.actorId ?? '',
+        event.actor?.name ?? '',
+        event.createdAt.toISOString(),
+      ];
+    }
+    if (rows.length < EXPORT_BATCH) return;
+  }
+}
+
+export function streamFeed(query: ExportAuditEventsQuery): Readable {
+  return csvStream(feedRows(query));
 }

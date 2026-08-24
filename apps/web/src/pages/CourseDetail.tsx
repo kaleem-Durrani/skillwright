@@ -31,6 +31,7 @@ import type {
 import { PageHeader } from '@/components/layout/PageHeader';
 import { AttendanceRegister } from '@/components/attendance/AttendanceRegister';
 import { EnrollmentAttendance } from '@/components/attendance/EnrollmentAttendance';
+import { RegisterExportButtons } from '@/components/courses/RegisterExportButtons';
 import { ResourceFormDialog } from '@/components/resources/ResourceFormDialog';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button, IconButton } from '@/components/ui/Button';
@@ -741,6 +742,17 @@ export function CourseDetailPage() {
 
         {policy.can('enrollment:read', viewerSubject) ? (
           <TabsContent value="students">
+            {/*
+              Phase 8's register exports, at the top of the tab that lists the same
+              data. The component asks the policy itself (`enrollment:read` /
+              `attendance:read` with the COURSE subject — the shapes the export
+              endpoints are gated by server-side), so a viewer who may not read one of
+              the registers is not shown its file.
+            */}
+            <div className="flex flex-col pb-4 sm:flex-row sm:justify-end">
+              <RegisterExportButtons courseId={courseId} teacherId={data.teacher.id} />
+            </div>
+
             {/*
               The register, and deliberately ABOVE the roster list: it is this tab's
               working surface, while the list below is approvals bookkeeping.

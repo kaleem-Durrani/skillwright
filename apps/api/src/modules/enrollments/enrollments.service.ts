@@ -6,6 +6,8 @@ import {
   type Paginated,
   type Subject,
 } from '@skillwright/shared';
+import { Readable } from 'node:stream';
+import { csvStream } from '../../lib/csv.js';
 import { COURSE_SUMMARY_INCLUDE, toCourseSummary, toUserSummary } from '../../lib/dto.js';
 import { capacityExceeded, conflict, validationFailed } from '../../lib/errors.js';
 import { notify } from '../notifications/notifications.service.js';
@@ -13,6 +15,7 @@ import type {
   ApproveEnrollmentInput,
   EnrollmentDto,
   EnrollmentStatusValue,
+  ExportEnrollmentsQuery,
   ListEnrollmentsQuery,
   RejectEnrollmentInput,
   RequestEnrollmentInput,
@@ -225,10 +228,18 @@ const DEFAULT_ORDER = (order: SortDirection): Prisma.EnrollmentOrderByWithRelati
   requestedAt: order,
 });
 
-function orderFor(query: ListEnrollmentsQuery): Prisma.EnrollmentOrderByWithRelationInput {
+function orderFor(query: EnrollmentSort): Prisma.EnrollmentOrderByWithRelationInput {
   const build = query.sort === undefined ? undefined : ORDER_BY[query.sort];
   return (build ?? DEFAULT_ORDER)(query.order);
 }
+
+/**
+ * The fields of `ListEnrollmentsQuery` the shared helpers actually read, so the
+ * export's paging-free query satisfies them structurally without inventing page
+ * numbers it does not have.
+ */
+type EnrollmentFilters = Pick<ListEnrollmentsQuery, 'courseId' | 'studentId' | 'status'>;
+type EnrollmentSort = Pick<ListEnrollmentsQuery, 'sort' | 'order'>;
 
 /**
  * The WHERE clause that mirrors the `enrollment:read` row rules, policy.ts:160-165:
@@ -247,7 +258,7 @@ function orderFor(query: ListEnrollmentsQuery): Prisma.EnrollmentOrderByWithRela
  * check: if this function and policy.ts ever disagree, this function is the bug.
  * That is why the mirror lives in exactly one named place.
  */
-function visibilityWhere(actor: Actor, query: ListEnrollmentsQuery): Prisma.EnrollmentWhereInput {
+function visibilityWhere(actor: Actor, query: EnrollmentFilters): Prisma.EnrollmentWhereInput {
   const scope: Prisma.EnrollmentWhereInput =
     actor.role === 'STUDENT'
       ? { studentId: actor.id }
@@ -309,6 +320,84 @@ export async function getById(id: string): Promise<EnrollmentDto> {
     include: ENROLLMENT_INCLUDE,
   });
   return toEnrollmentDto(enrollment);
+}
+
+// ---------------------------------------------------------------------------
+// The register export (Phase 8)
+// ---------------------------------------------------------------------------
+
+/**
+ * How many enrollment rows one batched query loads while streaming. The generator
+ * below walks the register in pages of this size and never accumulates them, so a
+ * full intake costs this many rows of memory, not the whole table.
+ */
+const EXPORT_BATCH = 500;
+
+/**
+ * The enrolment register as a CSV stream, `GET /enrollments/export`.
+ *
+ * The WHERE clause and the ordering are THE LIST'S — `visibilityWhere` and `orderFor`
+ * above, not parallel copies — so the file can never serve a row the list would
+ * refuse, and a filter the list honours narrows the export identically. The only new
+ * decisions are presentation: which columns an accreditor's register needs, and the
+ * `{ id: 'asc' }` tiebreaker that makes each batched page deterministic (a sort key
+ * alone can order two rows either way between queries; with the tiebreaker every row
+ * is visited exactly once).
+ *
+ * Rows are yielded one at a time from inside Prisma batches, so nothing is buffered:
+ * csvStream (lib/csv.ts) pulls only as Fastify drains.
+ */
+async function* registerRows(
+  actor: Actor,
+  query: ExportEnrollmentsQuery,
+): AsyncGenerator<readonly (string | null)[]> {
+  yield [
+    'enrollment_id',
+    'status',
+    'student_name',
+    'student_id',
+    'course_code',
+    'course_name',
+    'requested_at',
+    'decided_at',
+    'decided_by',
+    'decision_note',
+  ];
+
+  const where = visibilityWhere(actor, query);
+  // `orderFor` is the list's own sort resolution — free-text `sort` falls back to
+  // requestedAt there rather than ever reaching an orderBy key raw.
+  const orderBy: Prisma.EnrollmentOrderByWithRelationInput[] = [orderFor(query), { id: 'asc' }];
+
+  for (let skip = 0; ; skip += EXPORT_BATCH) {
+    const rows = await prisma.enrollment.findMany({
+      where,
+      orderBy,
+      skip,
+      take: EXPORT_BATCH,
+      include: ENROLLMENT_INCLUDE,
+    });
+
+    for (const row of rows) {
+      yield [
+        row.id,
+        row.status,
+        row.student.name,
+        row.student.id,
+        row.course.code,
+        row.course.name,
+        row.requestedAt.toISOString(),
+        row.decidedAt?.toISOString() ?? '',
+        row.decidedBy?.name ?? '',
+        row.decisionNote,
+      ];
+    }
+    if (rows.length < EXPORT_BATCH) return;
+  }
+}
+
+export function streamRegister(actor: Actor, query: ExportEnrollmentsQuery): Readable {
+  return csvStream(registerRows(actor, query));
 }
 
 // ---------------------------------------------------------------------------

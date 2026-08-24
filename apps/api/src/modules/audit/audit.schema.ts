@@ -74,6 +74,28 @@ export const auditEventSchema = z.object({
 export type AuditEventDto = z.infer<typeof auditEventSchema>;
 
 /**
+ * The SINGLE-EVENT shape, extended in place (Phase 8) — the same seven fields plus
+ * the stored forensics the extension has written all along
+ * (packages/db/src/audit.ts:259-269): the redacted before/after diffs and the request
+ * metadata. The LIST schema above stays narrow on purpose; this shape exists only for
+ * `GET /audit-events/:id`, where an admin who has already chosen one row asks what it
+ * changed.
+ *
+ * `before` / `after` are object snapshots or a diff — or null when there was nothing
+ * on that side to record (`Prisma.DbNull`, audit.ts:260-267). They are redacted at
+ * WRITE time (audit.ts:61-73), so serving them here re-exposes nothing: the denylist
+ * ran before the row ever existed.
+ */
+export const auditEventDetailSchema = auditEventSchema.extend({
+  before: z.record(z.string(), z.unknown()).nullable(),
+  after: z.record(z.string(), z.unknown()).nullable(),
+  ip: z.string().nullable(),
+  userAgent: z.string().nullable(),
+  requestId: z.string().nullable(),
+});
+export type AuditEventDetailDto = z.infer<typeof auditEventDetailSchema>;
+
+/**
  * Offset paging plus the four filters the table's indexes actually support:
  * `[actorId, createdAt]`, `[entityType, entityId, createdAt]` and `[action, createdAt]`
  * (schema.prisma:641-644). Every one of them is optional, so the SPA's bare
@@ -90,3 +112,15 @@ export const listAuditEventsQuerySchema = paginationQuerySchema.extend({
   actorId: idSchema.optional(),
 });
 export type ListAuditEventsQuery = z.infer<typeof listAuditEventsQuerySchema>;
+
+/**
+ * The feed's filters and ordering with the paging keys dropped — the query
+ * `GET /audit-events/export` binds. Derived from the list's schema rather than
+ * restated, so a filter the feed honours cannot silently miss the file that mirrors
+ * it (the enrollments.schema.ts:30-45 argument).
+ */
+export const exportAuditEventsQuerySchema = listAuditEventsQuerySchema.omit({
+  page: true,
+  limit: true,
+});
+export type ExportAuditEventsQuery = z.infer<typeof exportAuditEventsQuerySchema>;

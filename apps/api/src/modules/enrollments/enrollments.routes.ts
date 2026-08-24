@@ -5,6 +5,7 @@ import { authorize, requireActor } from '../../plugins/auth.plugin.js';
 import {
   approveEnrollmentSchema,
   enrollmentSchema,
+  exportEnrollmentsQuerySchema,
   idParamSchema,
   listEnrollmentsQuerySchema,
   rejectEnrollmentSchema,
@@ -47,6 +48,36 @@ const enrollmentsRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request) => enrollmentService.list(requireActor(request), request.query),
+  );
+
+  /*
+   * Phase 8: the same list as a CSV register. The gate is the LIST'S — no
+   * `authorize('enrollment:read')` here, for exactly the reason the route above
+   * states: with no subject, both non-admin row rules read absent fields and deny,
+   * which would 403 every legitimate caller (LESSONS-LEARNED #15). Authentication is
+   * checked in the handler and the policy becomes the service's `visibilityWhere`,
+   * so this file can never serve a row `GET /enrollments` would refuse.
+   *
+   * No response schema and no pagination envelope: the handler returns a Readable
+   * (lib/csv.ts) that Fastify streams to the socket, so a full intake register is
+   * never assembled in memory. Content-Disposition makes the browser file it rather
+   * than navigate to it; the filename names its scope.
+   */
+  app.get(
+    '/export',
+    {
+      schema: { querystring: exportEnrollmentsQuerySchema },
+    },
+    async (request, reply) => {
+      const query = request.query;
+      reply.type('text/csv; charset=utf-8').header(
+        'content-disposition',
+        // A bare id keeps the filename filesystem-safe; the course's name lives in
+        // the first data rows anyway.
+        `attachment; filename="enrollments${query.courseId ? `-${query.courseId}` : ''}.csv"`,
+      );
+      return enrollmentService.streamRegister(requireActor(request), query);
+    },
   );
 
   app.post(

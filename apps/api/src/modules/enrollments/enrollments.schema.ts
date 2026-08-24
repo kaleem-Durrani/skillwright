@@ -10,7 +10,7 @@
  * would make this file look like an API when it is an index.
  */
 import { z } from 'zod';
-import { idSchema } from '@skillwright/shared';
+import { idSchema, listEnrollmentsQuerySchema } from '@skillwright/shared';
 
 /**
  * THE ONE LOCAL DECLARATION, and the reason it is allowed.
@@ -26,6 +26,22 @@ import { idSchema } from '@skillwright/shared';
  */
 export const courseIdParamSchema = z.object({ courseId: idSchema });
 export type CourseIdParam = z.infer<typeof courseIdParamSchema>;
+
+/**
+ * The query `GET /enrollments/export` binds — the list's filters and ordering with the
+ * paging keys dropped, because a register is one file, not pages.
+ *
+ * Derived from `listEnrollmentsQuerySchema` rather than restated, so a filter added to
+ * the list arrives here automatically; an export that silently ignored a filter the
+ * list honours would serve rows the caller did not ask for under the name of the ones
+ * they had. The CSV endpoints are API-local wire surface (the audit.schema.ts:1-18
+ * argument), so this declaration is not migrated into @skillwright/shared.
+ */
+export const exportEnrollmentsQuerySchema = listEnrollmentsQuerySchema.omit({
+  page: true,
+  limit: true,
+});
+export type ExportEnrollmentsQuery = z.infer<typeof exportEnrollmentsQuerySchema>;
 
 export {
   approveEnrollmentSchema,

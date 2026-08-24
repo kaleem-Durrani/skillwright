@@ -56,6 +56,20 @@ async function readProblem(response: Response): Promise<Problem> {
   };
 }
 
+/**
+ * An absolute API URL for a plain browser navigation — the download anchors.
+ *
+ * `request()` is for JSON conversations; it cannot serve a file the browser should
+ * FILE (Content-Disposition) without turning it into a blob and losing the filename,
+ * the streaming, and the browser's own progress UI. A same-origin anchor needs no
+ * fetch at all: `API_BASE` is `/api/v1` here and in production (the SPA is served by
+ * the same process, app.ts), so navigating to this URL carries the session cookie
+ * automatically — the same argument `credentials: 'include'` makes one method up.
+ */
+export function apiUrl(path: string, query?: RequestOptions['query']): string {
+  return buildUrl(path, query);
+}
+
 async function request<T>(
   method: string,
   path: string,

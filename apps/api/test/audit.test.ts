@@ -449,3 +449,109 @@ describe('the feed is written by the extension, not by this module', () => {
     });
   });
 });
+
+describe('GET /audit-events/:id — the forensics are detail-only surface', () => {
+  it('serves one event with its stored before/after, ip, userAgent and requestId', async () => {
+    const admin = await signedIn('detail@example.com', 'ADMIN', 'Ada Admin');
+    await clearAudit();
+
+    const id = await seedEvent({
+      action: 'UPDATE',
+      entityType: 'User',
+      before: { name: 'Before', status: 'ACTIVE' },
+      after: { name: 'After', status: 'SUSPENDED' },
+      ip: '203.0.113.7',
+      userAgent: 'vitest/2.1.8',
+      requestId: '01JGXDFAM0K2Z1GYCSNM5F5RCX',
+    });
+
+    const response = await get(`/${id}`, admin);
+    expect(response.statusCode).toBe(200);
+
+    const body = response.json();
+    // Every list field PLUS the five forensics — the shape auditEventDetailSchema
+    // declares, nothing more.
+    expect(Object.keys(body).sort()).toEqual([
+      'action',
+      'actorId',
+      'actorName',
+      'after',
+      'before',
+      'createdAt',
+      'entityId',
+      'entityType',
+      'id',
+      'ip',
+      'requestId',
+      'userAgent',
+    ]);
+    expect(body.before).toEqual({ name: 'Before', status: 'ACTIVE' });
+    expect(body.after).toEqual({ name: 'After', status: 'SUSPENDED' });
+    expect(body.ip).toBe('203.0.113.7');
+    expect(body.userAgent).toBe('vitest/2.1.8');
+    expect(body.requestId).toBe('01JGXDFAM0K2Z1GYCSNM5F5RCX');
+  });
+
+  it('keeps the LIST narrow on the same row that the DETAIL opens wide', async () => {
+    const admin = await signedIn('pair@example.com', 'ADMIN');
+    await clearAudit();
+
+    const id = await seedEvent({
+      action: 'UPDATE',
+      entityType: 'User',
+      before: { name: 'Before' },
+      after: { name: 'After' },
+      ip: '203.0.113.7',
+      userAgent: 'vitest',
+      requestId: '01JGXDFAM0K2Z1GYCSNM5F5RCX',
+    });
+
+    const [listEntry] = (await get('', admin)).json().data;
+    expect(listEntry.id).toBe(id);
+    for (const forensic of ['before', 'after', 'ip', 'userAgent', 'requestId']) {
+      expect(listEntry[forensic]).toBeUndefined();
+    }
+
+    const detail = (await get(`/${id}`, admin)).json();
+    expect(detail.ip).toBe('203.0.113.7');
+  });
+
+  it('serves null forensics for a system-initiated event rather than failing', async () => {
+    const admin = await signedIn('nulls@example.com', 'ADMIN');
+    await clearAudit();
+
+    const id = await seedEvent({ actorId: null });
+
+    const response = await get(`/${id}`, admin);
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      before: null,
+      after: null,
+      ip: null,
+      userAgent: null,
+      requestId: null,
+      actorName: null,
+    });
+  });
+
+  it('404s an unknown id', async () => {
+    const admin = await signedIn('missing@example.com', 'ADMIN');
+
+    const response = await get('/01JGXDFAM0K2Z1GYCSNM5F5RCY', admin);
+    expect(response.statusCode).toBe(404);
+    expect(response.json().code).toBe('NOT_FOUND');
+  });
+
+  it('is gated exactly like the feed: anonymous 401, student 403 naming the rule', async () => {
+    const student = await signedIn('peeker@example.com', 'STUDENT');
+    await clearAudit();
+    const id = await seedEvent();
+
+    const anonymous = await get(`/${id}`);
+    expect(anonymous.statusCode).toBe(401);
+
+    const refused = await get(`/${id}`, student);
+    expect(refused.statusCode).toBe(403);
+    expect(refused.json().detail).toContain('rule: STUDENT:deny');
+  });
+});

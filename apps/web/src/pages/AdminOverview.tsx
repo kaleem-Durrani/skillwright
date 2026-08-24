@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
-import { Building2, ScrollText, ShieldAlert, Users } from 'lucide-react';
+import { Building2, Download, ScrollText, ShieldAlert, Users } from 'lucide-react';
 /*
  * `Paginated<T>`, from the package that DEFINES the envelope: `GET /audit-events`
  * validates its own response against `paginated(auditEventSchema)`
@@ -9,11 +9,13 @@ import { Building2, ScrollText, ShieldAlert, Users } from 'lucide-react';
  * importing this rather than hand-declaring it.
  */
 import type { Paginated } from '@skillwright/shared/schema';
-import { api } from '@/lib/api';
+import { api, apiUrl } from '@/lib/api';
 import { qk } from '@/lib/query';
 import { usePolicy } from '@/lib/policy';
 import { formatRelative } from '@/lib/format';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { AuditDetailDialog } from '@/components/audit/AuditDetailDialog';
+import { Button } from '@/components/ui/Button';
 import { Card, CardTitle } from '@/components/ui/Card';
 import { DataList } from '@/components/ui/DataList';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -39,6 +41,9 @@ interface AuditEntry {
 export function AdminOverviewPage() {
   const policy = usePolicy();
   const [auditPage, setAuditPage] = useState(1);
+  // The feed row the detail dialog is open on, null when none. The dialog fetches
+  // `/audit-events/:id` itself; this page stays a feed.
+  const [openAuditId, setOpenAuditId] = useState<string | null>(null);
 
   const stats = useQuery({
     queryKey: ['admin', 'stats'],
@@ -134,9 +139,25 @@ export function AdminOverviewPage() {
 
       {policy.can('audit:read') ? (
         <section className="pt-8" aria-labelledby="admin-audit">
-          <h2 id="admin-audit" className="pb-3 font-display text-lg font-semibold">
-            Recent activity
-          </h2>
+          <div className="flex flex-col gap-2 pb-3 sm:flex-row sm:items-center sm:justify-between">
+            <h2 id="admin-audit" className="font-display text-lg font-semibold">
+              Recent activity
+            </h2>
+            {/*
+              Phase 8's feed export — a plain anchor, same reasoning as the course
+              register exports (RegisterExportButtons.tsx): the endpoint is
+              cookie-authed and same-origin, so navigation carries the session, keeps
+              Content-Disposition's filename and streams rather than buffering. The
+              whole section is already inside `policy.can('audit:read')`, which is the
+              exact gate `GET /audit-events/export` enforces server-side.
+            */}
+            <Button variant="secondary" size="sm" asChild className="self-start sm:self-auto">
+              <a href={apiUrl('/audit-events/export')} download="audit-events.csv">
+                <Download aria-hidden="true" className="size-4" />
+                Export CSV
+              </a>
+            </Button>
+          </div>
 
           <DataList
             items={audit.data?.data ?? []}
@@ -144,6 +165,12 @@ export function AdminOverviewPage() {
             skeletonRows={5}
             caption="Recent activity"
             getKey={(entry) => entry.id}
+            /*
+             * A row opens its forensics. DataList wires BOTH renderings to this one
+             * callback — the card list wraps each card in a real button, so the tap
+             * target on a phone is the whole card (DataList.tsx:83-97).
+             */
+            onRowClick={(entry) => setOpenAuditId(entry.id)}
             columns={[
               { id: 'actor', header: 'Actor', cell: (entry) => entry.actorName ?? 'system' },
               { id: 'action', header: 'Action', cell: (entry) => entry.action },
@@ -201,6 +228,8 @@ export function AdminOverviewPage() {
           ) : null}
         </section>
       ) : null}
+
+      <AuditDetailDialog eventId={openAuditId} onClose={() => setOpenAuditId(null)} />
     </div>
   );
 }

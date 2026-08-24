@@ -1,8 +1,13 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { paginated } from '@skillwright/shared';
+import { idParamSchema, paginated } from '@skillwright/shared';
 import { authorize } from '../../plugins/auth.plugin.js';
-import { auditEventSchema, listAuditEventsQuerySchema } from './audit.schema.js';
+import {
+  auditEventDetailSchema,
+  auditEventSchema,
+  exportAuditEventsQuerySchema,
+  listAuditEventsQuerySchema,
+} from './audit.schema.js';
 import * as auditService from './audit.service.js';
 
 /**
@@ -40,6 +45,47 @@ const auditRoutes: FastifyPluginAsync = async (fastify) => {
       preHandler: authorize('audit:read'),
     },
     async (request) => auditService.list(request.query),
+  );
+
+  /*
+   * Phase 8: the feed as a file, same gate as the feed itself — a bare
+   * `authorize('audit:read')`, because that policy row is four terminal cells and no
+   * subject loader can change the answer (the argument at the top of this file).
+   * Filters ride the feed's own query schema minus paging; the columns mirror
+   * `auditEventSchema`, so the forensics stay detail-only surface and are NOT in the
+   * file. The handler returns a Readable (lib/csv.ts) that Fastify streams, so a
+   * growing table is never assembled in memory.
+   */
+  app.get(
+    '/export',
+    {
+      schema: { querystring: exportAuditEventsQuerySchema },
+      preHandler: authorize('audit:read'),
+    },
+    async (request, reply) => {
+      reply
+        .type('text/csv; charset=utf-8')
+        .header('content-disposition', 'attachment; filename="audit-events.csv"');
+      return auditService.streamFeed(request.query);
+    },
+  );
+
+  /*
+   * Phase 8: one event with its stored forensics — `before`/`after`/`ip`/
+   * `userAgent`/`requestId` (packages/db/src/audit.ts:259-269), which the LIST DTO
+   * deliberately drops. Same bare gate as the feed, so the wider shape reaches admins
+   * only. This module still performs no writes of any kind.
+   */
+  app.get(
+    '/:id',
+    {
+      schema: {
+        params: idParamSchema,
+        response: { 200: auditEventDetailSchema },
+      },
+      preHandler: authorize('audit:read'),
+    },
+    async (request) => auditService.getById(request.params.id),
   );
 };
 

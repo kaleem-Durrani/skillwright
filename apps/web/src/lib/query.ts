@@ -170,6 +170,10 @@ export const qk = {
   // list was filtered by. A blanket `['departments']` invalidation still reaches it.
   department: (departmentId: string) => ['departments', departmentId] as QueryKey,
   auditEvents: (params: Record<string, unknown> = {}) => ['audit', params] as QueryKey,
+  // Single-row key beside the feed above, for the detail dialog: it reads ONE event
+  // with its stored forensics (GET /audit-events/:id), a shape the feed rows never
+  // carry. Same head so a blanket ['audit'] sweep still reaches it.
+  auditEvent: (eventId: string) => ['audit', 'detail', eventId] as QueryKey,
   // Cross-entity search. Keyed on the RAW q the URL carries (not a trimmed copy)
   // so back/forward between two typed variants cannot share an entry; the
   // whitespace guard lives in the query's `enabled`, not in the key.

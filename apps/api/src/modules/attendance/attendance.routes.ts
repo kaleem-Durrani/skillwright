@@ -3,6 +3,7 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { authorize, requireActor } from '../../plugins/auth.plugin.js';
 import * as attendanceService from './attendance.service.js';
 import {
+  attendanceExportQuerySchema,
   attendanceRegisterSchema,
   attendanceSummarySchema,
   courseIdParamSchema,
@@ -72,6 +73,36 @@ const attendanceRoutes: FastifyPluginAsync = async (fastify) => {
     },
     async (request) =>
       attendanceService.registerForDate(request.params.courseId, request.query.date),
+  );
+
+  /*
+   * Phase 8: the register over a date range as a CSV stream. The gate is the
+   * SINGLE-DATE READ'S — `attendance:read` with `loadCourseSubject` — so the file
+   * cannot serve a row `GET …/attendance?date=` would refuse. No response schema and
+   * no envelope: the handler returns a Readable (lib/csv.ts) that Fastify streams,
+   * and Content-Disposition files it in the browser rather than navigating to it.
+   */
+  app.get(
+    '/courses/:courseId/attendance/export',
+    {
+      schema: {
+        params: courseIdParamSchema,
+        querystring: attendanceExportQuerySchema,
+      },
+      preHandler: authorize('attendance:read', (request) =>
+        attendanceService.loadCourseSubject(courseIdOf(request)),
+      ),
+    },
+    async (request, reply) => {
+      const { courseId } = request.params;
+      const { from, to } = request.query;
+      reply.type('text/csv; charset=utf-8').header(
+        'content-disposition',
+        // Filesystem-safe characters only; ids and bare dates need nothing escaped.
+        `attachment; filename="attendance-${courseId}${from ? `-${from}` : ''}${to ? `-to-${to}` : ''}.csv"`,
+      );
+      return attendanceService.exportRegister(courseId, { from, to });
+    },
   );
 
   app.get(

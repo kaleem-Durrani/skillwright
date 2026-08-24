@@ -1,8 +1,11 @@
 import { prisma, type Prisma, type Db } from '@skillwright/db';
 import type { Actor, Subject } from '@skillwright/shared';
+import { Readable } from 'node:stream';
+import { csvStream } from '../../lib/csv.js';
 import { toUserSummary } from '../../lib/dto.js';
 import { conflict, notFound } from '../../lib/errors.js';
 import type {
+  AttendanceExportQuery,
   AttendanceRecordDto,
   AttendanceRegisterDto,
   AttendanceSummaryDto,
@@ -256,4 +259,97 @@ export async function summaryForEnrollment(enrollmentId: string): Promise<Attend
   }
 
   return { counts, total, recent: recent.map(toAttendanceRecordDto) };
+}
+
+// ---------------------------------------------------------------------------
+// The register export (Phase 8)
+// ---------------------------------------------------------------------------
+
+/** How many records one batched query loads while streaming (lib/csv.ts pulls lazily). */
+const EXPORT_BATCH = 500;
+
+/**
+ * The attendance register over a date range, `GET /courses/:courseId/attendance/export`.
+ *
+ * The gate is the ONE the whole module reads a course register through —
+ * `attendance:read` with `loadCourseSubject`, exactly as `registerForDate` above — so
+ * the export can never serve a row a single-day read would refuse. What is new is
+ * only the range: both ends are inclusive and either may be omitted, which reads as
+ * "everything recorded" on that side.
+ *
+ * Rows are the RECORDS, not roster × dates: an unmarked seat has no row to export,
+ * and synthesising one for every day of the range would fabricate data the accreditor
+ * would file as fact. Ordered by session date then student name, with `{ id: 'asc' }`
+ * as the tiebreaker that makes each batched page deterministic.
+ */
+async function* attendanceExportRows(
+  courseId: string,
+  query: AttendanceExportQuery,
+): AsyncGenerator<readonly (string | null)[]> {
+  yield [
+    'session_date',
+    'student_name',
+    'student_id',
+    'status',
+    'note',
+    'marked_by',
+    'enrollment_id',
+  ];
+
+  const where: Prisma.AttendanceRecordWhereInput = {
+    // The course scope rides the relation, so a record from another course's
+    // enrollment can never slip in through a guessed id.
+    enrollment: { courseId },
+    ...(query.from !== undefined || query.to !== undefined
+      ? {
+          sessionDate: {
+            ...(query.from !== undefined ? { gte: toSessionDate(query.from) } : {}),
+            ...(query.to !== undefined ? { lte: toSessionDate(query.to) } : {}),
+          },
+        }
+      : {}),
+  };
+
+  for (let skip = 0; ; skip += EXPORT_BATCH) {
+    const rows = await prisma.attendanceRecord.findMany({
+      where,
+      orderBy: [{ sessionDate: 'asc' }, { id: 'asc' }],
+      skip,
+      take: EXPORT_BATCH,
+      include: { enrollment: { include: { student: true } }, markedBy: true },
+    });
+
+    for (const row of rows) {
+      yield [
+        // A session date is a DAY (the DATE column stores UTC midnight); the register
+        // speaks days, so the bare form goes in the file rather than the instant.
+        row.sessionDate.toISOString().slice(0, 10),
+        row.enrollment.student.name,
+        row.enrollment.student.id,
+        row.status,
+        row.note,
+        row.markedBy?.name ?? '',
+        row.enrollmentId,
+      ];
+    }
+    if (rows.length < EXPORT_BATCH) return;
+  }
+}
+
+/**
+ * Streams the export after the same post-gate 404 `registerForDate` performs:
+ * `attendance:read`'s ADMIN cell is `allow`, which ignores the subject entirely, so an
+ * admin naming a missing course reaches this function and an empty CSV must never
+ * masquerade as a real course's register.
+ */
+export async function exportRegister(
+  courseId: string,
+  query: AttendanceExportQuery,
+): Promise<Readable> {
+  const course = await prisma.course.findFirst({
+    where: { id: courseId, deletedAt: null },
+    select: { id: true },
+  });
+  if (!course) throw notFound('Course');
+  return csvStream(attendanceExportRows(courseId, query));
 }
