@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { MoreVertical, Search, UserRoundX } from 'lucide-react';
+import { MoreVertical, Plus, Search, UserRoundX } from 'lucide-react';
 import { api, type Paginated } from '@/lib/api';
 import { qk } from '@/lib/query';
 import { subject, usePolicy } from '@/lib/policy';
 import { formatRelative } from '@/lib/format';
 import type { UserDetail } from '@/lib/types';
+import { Gate } from '@/components/Gate';
+import { UserCreateDialog } from '@/components/users/UserCreateDialog';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Avatar } from '@/components/ui/Avatar';
 import { Badge } from '@/components/ui/Badge';
@@ -65,6 +67,7 @@ export function AdminUsersPage() {
 
   const [term, setTerm] = useState(search.q ?? '');
   const [suspending, setSuspending] = useState<UserDetail | null>(null);
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -130,6 +133,24 @@ export function AdminUsersPage() {
         eyebrow="Admin workspace"
         title="Users"
         description="One identity table. Role is a column, and suspension destroys sessions immediately."
+        actions={
+          /*
+            `user:create` is subject-free — every cell is a terminal allow/deny
+            decided by role alone (policy.ts:338-347), which is what makes it safe to
+            gate an affordance with no target on it. A teacher or student never sees
+            the button; the API would refuse them anyway.
+          */
+          <Gate action="user:create">
+            <Button
+              block
+              className="sm:w-auto"
+              leadingIcon={<Plus aria-hidden="true" className="size-4" />}
+              onClick={() => setCreating(true)}
+            >
+              Add a user
+            </Button>
+          </Gate>
+        }
       />
 
       <div className="flex flex-col gap-3 pb-5 md:flex-row md:items-center">
@@ -255,6 +276,13 @@ export function AdminUsersPage() {
           onPageChange={(page) => void navigate({ search: (previous) => ({ ...previous, page }) })}
         />
       ) : null}
+
+      {/*
+        Mounted once, toggled by the header button. The create mutation sweeps the
+        `users` prefix, so a successful POST re-reads this list and the new row is
+        on screen without any local bookkeeping here.
+      */}
+      <UserCreateDialog open={creating} onOpenChange={setCreating} />
 
       <Dialog open={suspending !== null} onOpenChange={(open) => !open && setSuspending(null)}>
         <DialogContent

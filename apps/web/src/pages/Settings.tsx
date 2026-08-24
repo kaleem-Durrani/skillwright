@@ -56,6 +56,23 @@ const profileFormSchema = z.object({
       message: 'Enter a valid phone number.',
     }),
   bio: z.string().trim().max(600, 'Keep it under 600 characters'),
+  /*
+   * Phase 4b's profile columns. Their constraints are mirrored here rather than
+   * imported because `updateUserSchema` declares them inline (user.ts:87-93) and —
+   * being `.partial().refine()`d, a ZodEffects — offers no `.shape` to reach them
+   * through; only `phoneSchema` above is exported to reuse. An empty box means "not
+   * provided"; what may and may not be CLEARED is decided where nullability is law,
+   * in `toUpdate`.
+   */
+  qualification: z
+    .string()
+    .trim()
+    .refine((value) => value === '' || (value.length >= 2 && value.length <= 200), {
+      message: 'Enter between 2 and 200 characters.',
+    }),
+  specialization: z.string().trim().max(200, 'Keep it under 200 characters'),
+  staffNo: z.string().trim().max(40, 'Keep it under 40 characters'),
+  enrollmentNo: z.string().trim().max(40, 'Keep it under 40 characters'),
 });
 
 type ProfileValues = z.infer<typeof profileFormSchema>;
@@ -63,23 +80,38 @@ type ProfileValues = z.infer<typeof profileFormSchema>;
 /** What react-hook-form reports as touched-and-changed, for a flat string form. */
 type DirtyProfileFields = { readonly [K in keyof ProfileValues]?: boolean };
 
-const PROFILE_FIELDS = ['name', 'phoneNumber', 'bio'] as const;
+const PROFILE_FIELDS = [
+  'name',
+  'phoneNumber',
+  'bio',
+  'qualification',
+  'specialization',
+  'staffNo',
+  'enrollmentNo',
+] as const;
 
 /**
  * Server field errors arrive as dot-joined zod paths (errors.plugin.ts:13-18) and
- * include `(root)` for whole-body refinements. Only the three that name a control
- * may be handed to `setError`; the rest belong in the toast.
+ * include `(root)` for whole-body refinements. Only the ones naming a control may
+ * be handed to `setError`; the rest belong in the toast.
  */
 function isProfileField(path: string): path is keyof ProfileValues {
   return (PROFILE_FIELDS as readonly string[]).includes(path);
 }
 
-/** The served record, flattened into the three controls this form owns. */
+/** The served record, flattened into the controls this form owns. */
 function toFormValues(profile: UserDetail): ProfileValues {
   return {
     name: profile.name,
     phoneNumber: profile.phoneNumber ?? '',
     bio: profile.bio ?? '',
+    // The role-appropriate satellite carries these; an account without one (a
+    // legacy row predating provisioning) shows blanks, which `ProfileTab` says
+    // out loud rather than leaving unexplained.
+    qualification: profile.teacherProfile?.qualification ?? '',
+    specialization: profile.teacherProfile?.specialization ?? '',
+    staffNo: profile.teacherProfile?.staffNo ?? '',
+    enrollmentNo: profile.studentProfile?.enrollmentNo ?? '',
   };
 }
 
@@ -106,6 +138,24 @@ function toUpdate(values: ProfileValues, dirty: DirtyProfileFields): UpdateUserI
       ? { phoneNumber: values.phoneNumber === '' ? null : values.phoneNumber }
       : {}),
     ...(dirty.bio ? { bio: values.bio === '' ? null : values.bio } : {}),
+    /*
+     * The profile columns (Phase 4b). `specialization` and `staffNo` are nullable on
+     * the schema, so an emptied box becomes `null` — the phone-number translation.
+     * `qualification` and `enrollmentNo` are NOT NULL with no null representation
+     * (user.ts:87-93), so '' cannot be SENT; a changed-and-non-empty value goes as
+     * is, and a changed-and-emptied one is refused by the submit handler below
+     * rather than silently kept here.
+     */
+    ...(dirty.qualification && values.qualification.trim() !== ''
+      ? { qualification: values.qualification.trim() }
+      : {}),
+    ...(dirty.specialization
+      ? { specialization: values.specialization === '' ? null : values.specialization.trim() }
+      : {}),
+    ...(dirty.staffNo ? { staffNo: values.staffNo === '' ? null : values.staffNo.trim() } : {}),
+    ...(dirty.enrollmentNo && values.enrollmentNo.trim() !== ''
+      ? { enrollmentNo: values.enrollmentNo.trim() }
+      : {}),
   };
 }
 
@@ -181,9 +231,19 @@ function ProfileTab({ canEdit, isDemo }: { canEdit: boolean; isDemo: boolean }) 
 
   const form = useForm<ProfileValues>({
     resolver: zodResolver(profileFormSchema),
-    defaultValues: { name: user?.name ?? '', phoneNumber: '', bio: '' },
+    // Blanks until /me lands and `reset` seeds from it — including the profile
+    // columns, so a resolver pass never meets an `undefined`.
+    defaultValues: {
+      name: user?.name ?? '',
+      phoneNumber: '',
+      bio: '',
+      qualification: '',
+      specialization: '',
+      staffNo: '',
+      enrollmentNo: '',
+    },
   });
-  const { reset } = form;
+  const { reset, setError } = form;
 
   /**
    * Seed the controls from the record the server actually holds.
@@ -217,7 +277,21 @@ function ProfileTab({ canEdit, isDemo }: { canEdit: boolean; isDemo: boolean }) 
     onError: (error) => {
       if (error instanceof ApiError) {
         for (const [path, message] of Object.entries(error.byField)) {
-          if (isProfileField(path)) form.setError(path, { message });
+          if (isProfileField(path)) setError(path, { message });
+        }
+        /*
+         * A duplicate enrolment number is a P2002 → 409 naming no field
+         * (errors.plugin.ts:74-78), and PATCH /me has exactly one unique column in
+         * play. The other student-reachable 409 — no profile row to update
+         * (users.service.applyProfileUpdate) — names itself in the detail, and no
+         * form field can fix it, so it stays with the toast.
+         */
+        if (
+          error.code === 'CONFLICT' &&
+          user?.role === 'STUDENT' &&
+          /unique|already/i.test(error.message)
+        ) {
+          setError('enrollmentNo', { message: 'That enrolment number is already in use.' });
         }
       }
       toast.fromError(error, 'Could not save your profile');
@@ -285,6 +359,27 @@ function ProfileTab({ canEdit, isDemo }: { canEdit: boolean; isDemo: boolean }) 
           className="flex flex-col gap-4"
           noValidate
           onSubmit={form.handleSubmit((values) => {
+            /*
+             * `qualification` and `enrollmentNo` are NOT NULL on their tables and
+             * their PATCH fields accept neither '' nor null (user.ts:87-93), so
+             * clearing one cannot be expressed on the wire. Refuse it here rather
+             * than let `toUpdate` silently keep the old value.
+             */
+            let blocked = false;
+            if (dirtyFields.qualification && values.qualification === '') {
+              setError('qualification', {
+                message: 'Enter your qualification — it cannot be cleared.',
+              });
+              blocked = true;
+            }
+            if (dirtyFields.enrollmentNo && values.enrollmentNo === '') {
+              setError('enrollmentNo', {
+                message: 'Enter your enrolment number — it cannot be cleared.',
+              });
+              blocked = true;
+            }
+            if (blocked) return;
+
             const body = toUpdate(values, dirtyFields);
             // `updateUserSchema` refuses an empty body (user.ts:78-80). Save is
             // already disabled until something is dirty; this is the second lock.
@@ -313,6 +408,77 @@ function ProfileTab({ canEdit, isDemo }: { canEdit: boolean; isDemo: boolean }) 
           <FormField label="Bio" error={form.formState.errors.bio?.message}>
             <Textarea autoResize disabled={fieldsDisabled} rows={3} {...form.register('bio')} />
           </FormField>
+
+          {/*
+            Phase 4b's editable profile columns. WHICH of them exist is decided by
+            the VIEWER's role — the same pairing the server enforces with a
+            field-level 422 (PROFILE_FIELD_ROLES, users.service.ts) — so a teacher is
+            never offered an enrolment number and a student never sees a
+            qualification box. An ADMIN has neither satellite and gets neither.
+            They ride the SAME form and the SAME save: one PATCH carrying whatever
+            the person actually changed.
+          */}
+          {user.role === 'TEACHER' ? (
+            <>
+              <Separator />
+              <CardTitle className="text-base">Teaching details</CardTitle>
+
+              {profile.data && profile.data.teacherProfile === null ? (
+                <p className="rounded-md border border-warning-line bg-warning-soft px-3 py-2 text-xs text-warning-fg">
+                  Your account has no teaching record yet, so these details are blank and cannot be
+                  saved until an administrator creates one.
+                </p>
+              ) : null}
+
+              <FormField
+                label="Qualification"
+                required
+                hint="Your teaching qualification, e.g. City & Guilds Level 3 Welding."
+                error={form.formState.errors.qualification?.message}
+              >
+                <Input disabled={fieldsDisabled} {...form.register('qualification')} />
+              </FormField>
+
+              <FormField
+                label="Specialization"
+                hint="Optional — your trade or subject area."
+                error={form.formState.errors.specialization?.message}
+              >
+                <Input disabled={fieldsDisabled} {...form.register('specialization')} />
+              </FormField>
+
+              <FormField
+                label="Staff number"
+                hint="Optional."
+                error={form.formState.errors.staffNo?.message}
+              >
+                <Input disabled={fieldsDisabled} {...form.register('staffNo')} />
+              </FormField>
+            </>
+          ) : null}
+
+          {user.role === 'STUDENT' ? (
+            <>
+              <Separator />
+              <CardTitle className="text-base">Student details</CardTitle>
+
+              {profile.data && profile.data.studentProfile === null ? (
+                <p className="rounded-md border border-warning-line bg-warning-soft px-3 py-2 text-xs text-warning-fg">
+                  Your account has no student record yet, so these details are blank and cannot be
+                  saved until an administrator creates one.
+                </p>
+              ) : null}
+
+              <FormField
+                label="Enrolment number"
+                required
+                hint="Identifies you on course registers. It cannot be cleared once set."
+                error={form.formState.errors.enrollmentNo?.message}
+              >
+                <Input disabled={fieldsDisabled} {...form.register('enrollmentNo')} />
+              </FormField>
+            </>
+          ) : null}
 
           <Button
             type="submit"
