@@ -50,6 +50,8 @@ docs/*
 # The feature roadmap. `docs/*` above would swallow it, and a plan nobody can read from
 # the repository is a plan that only exists on one machine.
 !docs/roadmap/
+# The UI-enhancement roadmap — same reasoning as docs/roadmap/ above.
+!docs/ui-roadmap/
 
 # editor & os
 .DS_Store
