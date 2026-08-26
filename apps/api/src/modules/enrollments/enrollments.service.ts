@@ -719,16 +719,25 @@ async function settle(
     return { enrollment: updated, changed: true };
   }, TX_OPTIONS);
 
-  // A rejection is news to its student; it lands after the transaction has committed,
-  // best-effort (notify() never throws). A withdrawal announces nothing because no
-  // enum member names that event yet — recorded as a deliberate gap in the Phase 1
-  // section of docs/roadmap/00-FEATURE-PLAN.md, not an omission here.
+  // A rejection is news to its student; a withdrawal is news to the COURSE'S TEACHER,
+  // who now holds a seat to re-offer — both land after the transaction has committed,
+  // best-effort (notify() never throws). The two are separate verbs with separate
+  // notifications for exactly the reason policy.ts:180-182 gives.
   if (next === 'REJECTED' && settled.changed) {
     await notify({
       userIds: [settled.enrollment.studentId],
       type: 'ENROLLMENT_REJECTED',
       title: 'Enrolment declined',
       body: `Your request for ${settled.enrollment.offering.course.name} was not approved.`,
+      linkPath: `/courses/${settled.enrollment.offering.courseId}`,
+    });
+  }
+  if (next === 'WITHDRAWN' && settled.changed) {
+    await notify({
+      userIds: [settled.enrollment.offering.course.teacherId],
+      type: 'ENROLLMENT_WITHDRAWN',
+      title: 'Enrolment withdrawn',
+      body: `${settled.enrollment.student.name} withdrew from ${settled.enrollment.offering.course.name}.`,
       linkPath: `/courses/${settled.enrollment.offering.courseId}`,
     });
   }

@@ -13,6 +13,7 @@ import { conflict, notFound, validationFailed } from '../../lib/errors.js';
 // The Upload row belongs to the uploads module, and so does the question of whether
 // this actor may claim it. Before this, `syllabusUploadId` was written unchecked.
 import { assertUploadClaimable } from '../uploads/uploads.service.js';
+import { notify } from '../notifications/notifications.service.js';
 import { presignGet, safeFilename } from '../../lib/storage.js';
 // The raw-SQL vocabulary for ranked search — match predicate, rank expression and the
 // two-query page-plus-total shape. Shared with resources and announcements so the three
@@ -805,7 +806,10 @@ export async function publish(
 ): Promise<CourseDetail> {
   const current = await prisma.course.findFirst({
     where: { id, deletedAt: null },
-    select: { id: true },
+    // `publishedAt` is read back so only the draft -> live transition announces;
+    // a republish of an already-live course is the announcements.service.ts idempotency
+    // case, not a second event. `name` rides along for the notification copy.
+    select: { id: true, name: true, publishedAt: true },
   });
   if (!current) throw notFound('Course');
 
@@ -814,6 +818,30 @@ export async function publish(
     data: { publishedAt: input.published ? new Date() : null },
     include: COURSE_DETAIL_INCLUDE,
   });
+
+  /*
+   * Only the draft -> live transition announces, and only after the update has
+   * committed; best-effort (notify() never throws). Unpublishing is silent — a bell
+   * telling students about a course that just went dark would be noise with a link to
+   * it. The audience is every APPROVED student on any intake of THIS course except the
+   * actor (an admin publishing their own seat must not ring their own bell), deduped
+   * by notify() itself for the multi-intake case.
+   */
+  if (input.published && current.publishedAt === null) {
+    const seated = await prisma.enrollment.findMany({
+      where: { status: 'APPROVED', offering: { courseId: id } },
+      select: { studentId: true },
+      distinct: ['studentId'],
+    });
+    await notify({
+      userIds: seated.map((row) => row.studentId).filter((studentId) => studentId !== actor.id),
+      type: 'COURSE_PUBLISHED',
+      title: 'Course published',
+      body: `${current.name} is now open for enrolment.`,
+      linkPath: `/courses/${id}`,
+    });
+  }
+
   return getDetailForActor(id, actor);
 }
 

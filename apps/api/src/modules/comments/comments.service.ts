@@ -394,9 +394,7 @@ export async function create(actor: Actor, input: CreateCommentInput): Promise<C
     // COMMENT_REPLIED, after the create above has committed — best-effort, never
     // throws. The reply to a top-level comment is the only shape threading allows
     // (assertValidParent), and the self-reply case is excluded here: answering your
-    // own comment is not news worth a bell. There is deliberately no enum member for
-    // a top-level comment yet — recorded as a known debt in the Phase 1 section of
-    // docs/roadmap/00-FEATURE-PLAN.md.
+    // own comment is not news worth a bell.
     if (parent.authorId !== actor.id) {
       await notify({
         userIds: [parent.authorId],
@@ -407,6 +405,51 @@ export async function create(actor: Actor, input: CreateCommentInput): Promise<C
           parent.resourceId !== null
             ? `/resources/${parent.resourceId}`
             : `/announcements/${parent.announcementId}`,
+      });
+    }
+  } else {
+    /*
+     * A TOP-LEVEL comment announces COMMENT_POSTED to the author of the thing being
+     * discussed — the resource's or the announcement's author, never the commenter
+     * themself. COMMENT_REPLIED covers the threaded case; this closes the debt the old
+     * comment here recorded ("there is deliberately no enum member for a top-level
+     * comment yet"): the enum member exists now, and starting a thread is exactly as
+     * much news as continuing one. Best-effort like every notify() call — after the
+     * create has committed, failures caught inside the writer.
+     *
+     * The extra read is one select of one column on the row the caller can already
+     * see (assertCanReadParent proved that), so it leaks nothing and costs a lookup.
+     */
+    let ownerId: string | undefined;
+    if (comment.resourceId !== null) {
+      ownerId = (
+        await prisma.resource.findUnique({
+          where: { id: comment.resourceId },
+          select: { authorId: true },
+        })
+      )?.authorId;
+    } else if (comment.announcementId !== null) {
+      ownerId = (
+        await prisma.announcement.findUnique({
+          where: { id: comment.announcementId },
+          select: { authorId: true },
+        })
+      )?.authorId;
+    }
+
+    if (ownerId !== undefined && ownerId !== actor.id) {
+      await notify({
+        userIds: [ownerId],
+        type: 'COMMENT_POSTED',
+        title: 'New comment',
+        body:
+          comment.resourceId !== null
+            ? `${comment.author.name} commented on your resource.`
+            : `${comment.author.name} commented on your announcement.`,
+        linkPath:
+          comment.resourceId !== null
+            ? `/resources/${comment.resourceId}`
+            : `/announcements/${comment.announcementId}`,
       });
     }
   }

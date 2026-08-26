@@ -701,22 +701,152 @@ describe('ENROLLMENT_REJECTED', () => {
     expect(rows[0]?.type).toBe('ENROLLMENT_REJECTED');
     expect(rows[0]?.linkPath).toBe(`/courses/${course.id}`);
   });
+});
 
-  it('stays silent on withdrawal — no enum member names that event yet', async () => {
+describe('ENROLLMENT_WITHDRAWN', () => {
+  it('tells the course’s teacher a seat was given up — never the student who withdrew', async () => {
     const teacher = await signIn(`wd-t${sequence}@example.com`, 'TEACHER', 'Tara Teacher');
     const student = await signIn(`wd-s${sequence}@example.com`, 'STUDENT', 'Walt Withdrew');
     const course = await makeCourse(teacher.id);
-    const { id: enrollmentId } = await seedEnrollment(student.id, course.id, 'PENDING');
+    const { id: enrollmentId } = await seedEnrollment(student.id, course.id, 'APPROVED');
 
     const response = await api('POST', `/enrollments/${enrollmentId}/withdraw`, {
       person: student,
     });
     expect(response.statusCode).toBe(200);
 
-    // Deliberate, not forgotten: the Phase 1 section of docs/roadmap/00-FEATURE-PLAN.md
-    // records that NotificationType has no member for a withdrawal.
+    // The debt this closes was recorded in the Phase 1 section of
+    // docs/roadmap/00-FEATURE-PLAN.md: the enum had no member for a withdrawal, so
+    // the teacher holding the freed seat heard nothing. The copy names both facts a
+    // teacher needs — who left, and from what.
+    const rows = await notificationsFor(teacher.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.type).toBe('ENROLLMENT_WITHDRAWN');
+    expect(rows[0]?.linkPath).toBe(`/courses/${course.id}`);
+    expect(rows[0]?.payload).toEqual({
+      title: 'Enrolment withdrawn',
+      body: `Walt Withdrew withdrew from ${course.name}.`,
+    });
+    // Withdrawing is the actor's own decision; they are not told about it.
     expect(await notificationsFor(student.id)).toHaveLength(0);
+  });
+
+  it('does not re-notify when withdrawal is repeated against an already-WITHDRAWN row', async () => {
+    const teacher = await signIn(`wd2-t${sequence}@example.com`, 'TEACHER', 'Tara Teacher');
+    const student = await signIn(`wd2-s${sequence}@example.com`, 'STUDENT', 'Walt Withdrew');
+    const course = await makeCourse(teacher.id);
+    const { id: enrollmentId } = await seedEnrollment(student.id, course.id, 'APPROVED');
+
+    expect(
+      (await api('POST', `/enrollments/${enrollmentId}/withdraw`, { person: student })).statusCode,
+    ).toBe(200);
+    // Same-state repeat: settle() returns the row unchanged, so no second bell.
+    expect(
+      (await api('POST', `/enrollments/${enrollmentId}/withdraw`, { person: student })).statusCode,
+    ).toBe(200);
+
+    expect(await notificationsFor(teacher.id)).toHaveLength(1);
+  });
+});
+
+describe('COURSE_PUBLISHED', () => {
+  /** makeCourse publishes by default; the publish event needs the DRAFT state first. */
+  async function makeDraftCourse(teacherId: string): Promise<{ id: string; name: string }> {
+    sequence += 1;
+    const course = await prisma.course.create({
+      data: {
+        code: `DRAFT-${1000 + sequence}`,
+        slug: `draft-welding-${sequence}`,
+        name: `Draft Welding ${sequence}`,
+        departmentId,
+        teacherId,
+        durationValue: 6,
+        durationUnit: 'WEEK',
+        publishedAt: null,
+      },
+      select: { id: true, name: true },
+    });
+    await prisma.courseOffering.create({ data: { courseId: course.id, capacity: 10 } });
+    return course;
+  }
+
+  it('reaches every APPROVED student of the course except the acting teacher, once', async () => {
+    const teacher = await signIn(`pub-t${sequence}@example.com`, 'TEACHER', 'Tara Teacher');
+    const seatedA = await signIn(`pub-a${sequence}@example.com`, 'STUDENT', 'Ada Approved');
+    const seatedB = await signIn(`pub-b${sequence}@example.com`, 'STUDENT', 'Bilal Booked');
+    const waiting = await signIn(`pub-w${sequence}@example.com`, 'STUDENT', 'Wai Pending');
+    const elsewhere = await signIn(`pub-e${sequence}@example.com`, 'STUDENT', 'Ela Elsewhere');
+
+    const course = await makeDraftCourse(teacher.id);
+    await seedEnrollment(seatedA.id, course.id, 'APPROVED');
+    await seedEnrollment(seatedB.id, course.id, 'APPROVED');
+    await seedEnrollment(waiting.id, course.id, 'PENDING');
+    const otherCourse = await makeCourse(teacher.id);
+    await seedEnrollment(elsewhere.id, otherCourse.id, 'APPROVED');
+    // The publisher holding their own approved seat is contrived but exactly the
+    // exclusion worth proving: publishing must not ring your own bell.
+    await seedEnrollment(teacher.id, course.id, 'APPROVED');
+
+    const response = await api('POST', `/courses/${course.id}/publish`, {
+      person: teacher,
+      payload: { published: true },
+    });
+    expect(response.statusCode).toBe(200);
+
+    for (const person of [seatedA, seatedB]) {
+      const rows = await notificationsFor(person.id);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.type).toBe('COURSE_PUBLISHED');
+      expect(rows[0]?.linkPath).toBe(`/courses/${course.id}`);
+      expect(rows[0]?.payload).toEqual({
+        title: 'Course published',
+        body: `${course.name} is now open for enrolment.`,
+      });
+    }
+    // A PENDING request cannot read the course yet, so no bell pointing at a 403; a
+    // student seated elsewhere hears nothing; the acting teacher is excluded even with
+    // their own approved seat on the course.
+    expect(await notificationsFor(waiting.id)).toHaveLength(0);
+    expect(await notificationsFor(elsewhere.id)).toHaveLength(0);
     expect(await notificationsFor(teacher.id)).toHaveLength(0);
+
+    // Republishing a live course is not a second go-live, and unpublishing is silent:
+    // only the draft -> live transition rings.
+    await api('POST', `/courses/${course.id}/publish`, {
+      person: teacher,
+      payload: { published: true },
+    });
+    expect(await notificationsFor(seatedA.id)).toHaveLength(1);
+    await api('POST', `/courses/${course.id}/publish`, {
+      person: teacher,
+      payload: { published: false },
+    });
+    expect(await notificationsFor(seatedA.id)).toHaveLength(1);
+  });
+
+  it('announces again after a genuine unpublish -> republish cycle', async () => {
+    const teacher = await signIn(`pub2-t${sequence}@example.com`, 'TEACHER', 'Tara Teacher');
+    const student = await signIn(`pub2-s${sequence}@example.com`, 'STUDENT', 'Sol Student');
+
+    const course = await makeDraftCourse(teacher.id);
+    await seedEnrollment(student.id, course.id, 'APPROVED');
+
+    await api('POST', `/courses/${course.id}/publish`, {
+      person: teacher,
+      payload: { published: true },
+    });
+    await api('POST', `/courses/${course.id}/publish`, {
+      person: teacher,
+      payload: { published: false },
+    });
+    await api('POST', `/courses/${course.id}/publish`, {
+      person: teacher,
+      payload: { published: true },
+    });
+
+    // Each draft -> live transition is a fresh event worth announcing — the same
+    // semantics ANNOUNCEMENT_PUBLISHED pins for its own publish verb.
+    expect(await notificationsFor(student.id)).toHaveLength(2);
   });
 });
 
@@ -955,9 +1085,12 @@ describe('COMMENT_REPLIED', () => {
       payload: { resourceId, content: 'Which photo shows undercut?' },
     });
     expect(topComment.statusCode).toBe(201);
-    // The top-level comment announces nothing — there is no enum member for it yet
-    // (recorded as a known debt in the Phase 1 section of docs/roadmap).
-    expect(await notificationsFor(teacher.id)).toHaveLength(0);
+    // The top-level comment itself rings the resource's author — that is
+    // COMMENT_POSTED's contract, pinned in its own describe below. What matters HERE
+    // is that no COMMENT_REPLIED row exists yet: a reply is a separate event.
+    const before = await notificationsFor(teacher.id);
+    expect(before).toHaveLength(1);
+    expect(before[0]?.type).toBe('COMMENT_POSTED');
 
     const reply = await api('POST', '/comments', {
       person: teacher,
@@ -977,7 +1110,12 @@ describe('COMMENT_REPLIED', () => {
       title: 'New reply',
       body: 'Tara Teacher replied to your comment.',
     });
-    expect(await notificationsFor(teacher.id)).toHaveLength(0);
+    // The teacher's page still holds exactly the one COMMENT_POSTED row from the
+    // top-level comment — the teacher replying to a thread on their own resource is
+    // the author of the reply, and repliers are never notified.
+    const after = await notificationsFor(teacher.id);
+    expect(after).toHaveLength(1);
+    expect(after[0]?.type).toBe('COMMENT_POSTED');
   });
 
   it('never fires on a self-reply', async () => {
@@ -1036,6 +1174,85 @@ describe('COMMENT_REPLIED', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]?.type).toBe('COMMENT_REPLIED');
     expect(rows[0]?.linkPath).toBe(`/announcements/${announcementId}`);
+  });
+});
+
+describe('COMMENT_POSTED', () => {
+  it('tells the resource’s author a thread started — never the commenter, and not on self-comments', async () => {
+    const teacher = await signIn(`cpt-t${sequence}@example.com`, 'TEACHER', 'Tara Teacher');
+    const student = await signIn(`cpt-s${sequence}@example.com`, 'STUDENT', 'Cara Commenter');
+    const course = await makeCourse(teacher.id);
+    const created = await api('POST', '/resources', {
+      person: teacher,
+      payload: {
+        courseId: course.id,
+        title: 'Weld defect gallery',
+        type: 'LINK',
+        externalUrl: 'https://example.com/gallery',
+        isPublic: false,
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const resourceId = created.json().id as string;
+    await seedEnrollment(student.id, course.id, 'APPROVED');
+
+    const first = await api('POST', '/comments', {
+      person: student,
+      payload: { resourceId, content: 'Which photo shows undercut?' },
+    });
+    expect(first.statusCode).toBe(201);
+
+    const rows = await notificationsFor(teacher.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.type).toBe('COMMENT_POSTED');
+    expect(rows[0]?.linkPath).toBe(`/resources/${resourceId}`);
+    expect(rows[0]?.payload).toEqual({
+      title: 'New comment',
+      body: 'Cara Commenter commented on your resource.',
+    });
+    // The commenter is never told about their own comment...
+    expect(await notificationsFor(student.id)).toHaveLength(0);
+
+    // ...not even when the comment is on their OWN resource: starting a thread is
+    // news to the author of the thing, and the author acting is not news at all.
+    const self = await api('POST', '/comments', {
+      person: teacher,
+      payload: { resourceId, content: 'Third one down.' },
+    });
+    expect(self.statusCode).toBe(201);
+    expect(await notificationsFor(teacher.id)).toHaveLength(1);
+  });
+
+  it('points at the announcement when the thread starts on one', async () => {
+    const admin = await signIn(`cpt-a${sequence}@example.com`, 'ADMIN', 'Ada Admin');
+    const student = await signIn(`cpt-as${sequence}@example.com`, 'STUDENT', 'Cara Commenter');
+
+    const created = await api('POST', '/announcements', {
+      person: admin,
+      payload: {
+        title: 'Workshop closures',
+        content: 'Shop 2 closed Friday.',
+        type: 'NEWS',
+        publish: true,
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const announcementId = created.json().id as string;
+
+    const posted = await api('POST', '/comments', {
+      person: student,
+      payload: { announcementId, content: 'All day Friday?' },
+    });
+    expect(posted.statusCode).toBe(201);
+
+    const rows = await notificationsFor(admin.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.type).toBe('COMMENT_POSTED');
+    expect(rows[0]?.linkPath).toBe(`/announcements/${announcementId}`);
+    expect(rows[0]?.payload).toEqual({
+      title: 'New comment',
+      body: 'Cara Commenter commented on your announcement.',
+    });
   });
 });
 

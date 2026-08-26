@@ -6,10 +6,13 @@ export const notificationTypeSchema = z.enum([
   'ENROLLMENT_REQUESTED',
   'ENROLLMENT_APPROVED',
   'ENROLLMENT_REJECTED',
+  'ENROLLMENT_WITHDRAWN',
+  'COURSE_PUBLISHED',
   'RESOURCE_PUBLISHED',
   'ANNOUNCEMENT_PUBLISHED',
   'MESSAGE_RECEIVED',
   'COMMENT_REPLIED',
+  'COMMENT_POSTED',
   'ACCOUNT_SUSPENDED',
 ]);
 export type NotificationTypeValue = z.infer<typeof notificationTypeSchema>;
