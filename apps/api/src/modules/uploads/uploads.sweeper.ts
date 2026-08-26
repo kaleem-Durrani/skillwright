@@ -2,7 +2,7 @@ import { prisma } from '@skillwright/db';
 import type { AppInstance } from '../../app.js';
 import { env } from '../../env.js';
 import { baseLogger } from '../../lib/logger.js';
-import { deleteObject } from '../../lib/storage.js';
+import { deleteObject, stagingKeyFor } from '../../lib/storage.js';
 
 const log = baseLogger.child({ module: 'uploads.sweeper' });
 
@@ -78,9 +78,12 @@ export async function sweepAbandonedUploads(options?: {
   let swept = 0;
   for (const row of stale) {
     try {
-      // Idempotent by S3 semantics: a key that holds no object still deletes cleanly,
-      // which is the common case — most abandoned claims never received a PUT.
-      await deleteObject(row.key);
+      // The row's key is the object's FINAL home; while the row is PENDING the bytes
+      // sit at its staging shadow (storage.ts `stagingKeyFor`) — the same mapping
+      // presign signed and commit verified against. Idempotent by S3 semantics: a key
+      // that holds no object still deletes cleanly, which is the common case — most
+      // abandoned claims never received a PUT.
+      await deleteObject(stagingKeyFor(row.key));
       await prisma.upload.delete({ where: { id: row.id } });
       swept += 1;
     } catch (error) {

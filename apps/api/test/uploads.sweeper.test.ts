@@ -3,7 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 // tests — should name this type. Plain FastifyInstance is a type error, not a widening."
 import type { AppInstance } from '../src/app.js';
 import { hashPassword } from '../src/lib/password.js';
-import { headObject } from '../src/lib/storage.js';
+import { headObject, stagingKeyFor } from '../src/lib/storage.js';
 import { sweepAbandonedUploads } from '../src/modules/uploads/uploads.sweeper.js';
 import {
   buildApp,
@@ -167,14 +167,17 @@ describe('sweepAbandonedUploads', () => {
     await backdate(uploadId);
 
     // The object IS there before the sweep — otherwise deleting it proves nothing.
-    expect(await headObject(key)).not.toBeNull();
+    // While the row is PENDING its bytes live at the STAGING shadow of the row's key
+    // (storage.ts `stagingKeyFor`): the presigned PUT never wrote to the final key,
+    // because only commit's verified copy may.
+    expect(await headObject(stagingKeyFor(key))).not.toBeNull();
 
     const swept = await sweepAbandonedUploads({ maxAgeMs: 3_600_000 });
     expect(swept).toBe(1);
 
     const remaining = await prisma.upload.count({ where: { id: uploadId } });
     expect(remaining).toBe(0);
-    expect(await headObject(key)).toBeNull();
+    expect(await headObject(stagingKeyFor(key))).toBeNull();
   });
 
   it('leaves a fresh PENDING row and its object alone', async () => {
@@ -196,7 +199,8 @@ describe('sweepAbandonedUploads', () => {
 
     const row = await prisma.upload.findUniqueOrThrow({ where: { id: uploadId } });
     expect(row.status).toBe('PENDING');
-    expect(await headObject(key)).not.toBeNull();
+    // Untouched, at the staging shadow — a fresh claim keeps its bytes.
+    expect(await headObject(stagingKeyFor(key))).not.toBeNull();
   });
 
   /**

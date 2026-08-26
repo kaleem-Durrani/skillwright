@@ -1,14 +1,20 @@
 import { prisma, type Prisma } from '@skillwright/db';
 import type { Actor, Subject, UploadPurpose } from '@skillwright/shared';
+import { baseLogger } from '../../lib/logger.js';
 import { notFound, validationFailed } from '../../lib/errors.js';
 import {
   BUCKET,
   buildObjectKey,
+  copyObject,
+  deleteObject,
   headObject,
-  PURPOSE_FOLDER,
   presignPut,
+  stagingKeyFor,
+  PURPOSE_FOLDER,
 } from '../../lib/storage.js';
 import type { PresignUploadInput, PresignUploadResponse, UploadDto } from './uploads.schema.js';
+
+const log = baseLogger.child({ module: 'uploads' });
 
 /**
  * Exactly the columns `toUploadDto` reads, as one select every query spreads.
@@ -145,11 +151,18 @@ export async function presign(
     select: { id: true },
   });
 
-  // `sizeBytes` goes into the SIGNATURE, not just the row: without it the store accepts
-  // a body of any length at this key and `UPLOAD_LIMITS` is enforced only by the zod
-  // check above. See the measurement table on `presignPut`.
+  /*
+   * The PUT is signed for the STAGING shadow of `key` (storage.ts `stagingKeyFor`), not
+   * for `key` itself — that gap IS the immutability guarantee. While the row is PENDING
+   * its bytes live under `_pending/`; only `commit` verifies them there and copies them
+   * onto the final key. A replayed PUT after commit can at worst re-create a file in
+   * the staging prefix, where no reader ever looks; it can never touch the verified
+   * object. The row stores the FINAL key throughout, so the wire shape, the
+   * purpose-prefix evidence `assertUploadClaimable` reads, and the sweeper's
+   * row-key-to-object mapping all stay one function away from the truth.
+   */
   const signed = await presignPut({
-    key,
+    key: stagingKeyFor(key),
     contentType: input.contentType,
     sizeBytes: input.sizeBytes,
   });
@@ -223,7 +236,12 @@ export async function commit(uploadId: string): Promise<UploadDto> {
 
   if (upload.status === 'COMMITTED') return toUploadDto(upload);
 
-  const stored = await headObject(upload.key);
+  /*
+   * The bytes are verified where the PUT put them: the staging shadow of the row's
+   * final key (storage.ts `stagingKeyFor`).
+   */
+  const stagedKey = stagingKeyFor(upload.key);
+  const stored = await headObject(stagedKey);
   if (stored === null) {
     throw validationFailed([
       {
@@ -251,11 +269,39 @@ export async function commit(uploadId: string): Promise<UploadDto> {
     ]);
   }
 
+  /*
+   * Copy-to-final-key — the immutability fix, and this commit's whole point beyond
+   * verification. WHY THE COPY and not an ETag re-check on download: a replayed PUT
+   * after verification physically REPLACES a same-key object; recording its ETag would
+   * let downloads REFUSE the replacement but never prevent it, leaving verified bytes
+   * mutable in place and every reader one bug away from serving them. The copy puts
+   * the published object beyond every write URL's reach instead. It also beats the
+   * alternative honestly: it costs one store-side CopyObject per upload — bytes never
+   * cross this process — and no HeadObject tax on any download.
+   *
+   * Ordering survives crashes in the safe direction. COPY first (a crash here leaves
+   * the row PENDING with both copies present; the retry re-heads the staged object,
+   * still there, and repeats the copy idempotently); UPDATE second (the row goes
+   * COMMITTED only when the final key provably holds verified bytes); DELETE last,
+   * best-effort like notify() — its failure is logged and nothing else, because the
+   * row is already correct and the leftover staging file is bookkeeping, not truth.
+   */
+  await copyObject({ fromKey: stagedKey, toKey: upload.key });
+
   const committed = await prisma.upload.update({
     where: { id: uploadId },
     data: { status: 'COMMITTED', committedAt: new Date() },
     select: UPLOAD_SELECT,
   });
+
+  try {
+    await deleteObject(stagedKey);
+  } catch (error) {
+    log.warn(
+      { err: error, uploadId, stagedKey },
+      'committed upload staged copy could not be deleted; ignoring',
+    );
+  }
 
   return toUploadDto(committed);
 }

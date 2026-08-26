@@ -1,4 +1,5 @@
 import {
+  CopyObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
@@ -106,6 +107,43 @@ function extensionOf(originalName: string): string {
  */
 export function buildObjectKey(purpose: UploadPurpose, originalName: string): string {
   return `${PURPOSE_FOLDER[purpose]}/${ulid()}${extensionOf(originalName)}`;
+}
+
+/*
+ * The shadow key a presigned PUT writes to, and the reason it exists: immutability of
+ * committed objects (Phase 5, closing NEXT.md's "presigned PUTs outlive commit").
+ *
+ * SigV4 carries no nonce and a PUT URL lives fifteen minutes, so when the bytes went
+ * straight to the object's final key, a caller could commit — have the bytes verified
+ * and the resource published — and then re-PUT different same-length bytes over the
+ * verified object before the signature expired. The upload test suite reproduces that
+ * replacement verbatim. The layout answer is to give the URL a target whose
+ * replacement costs nothing: the browser PUTs to `_pending/<final-key>`, `commit`
+ * verifies there, SERVER-SIDE-COPIES to the final key, and only then promotes the row.
+ * A replayed PUT can at worst re-create a file under `_pending/`, where no reader ever
+ * looks; the object every download, avatar and syllabus serves was copied after
+ * verification and has no valid write URL at all.
+ *
+ * The mapping is total in both directions on purpose. `presign` stores the FINAL key
+ * on the row (so the wire shape, the purpose-prefix evidence assertUploadClaimable
+ * reads, and every existing reader stay exactly as they were), and derives the shadow
+ * with `stagingKeyFor` at the two moments that need it — signing the PUT, and commit's
+ * HeadObject/copy/delete of the staged bytes. The sweeper uses the same function on
+ * PENDING rows for the identical reason. `_committedFromStaging` is its inverse,
+ * kept beside it so neither spelling of the convention can drift.
+ */
+export const STAGING_PREFIX = '_pending/';
+
+/** Where a presigned PUT writes: the shadow of the object's final home. */
+export function stagingKeyFor(committedKey: string): string {
+  return `${STAGING_PREFIX}${committedKey}`;
+}
+
+/** Inverse of `stagingKeyFor`; identity for keys that were never staged. */
+export function committedFromStaging(stagingKey: string): string {
+  return stagingKey.startsWith(STAGING_PREFIX)
+    ? stagingKey.slice(STAGING_PREFIX.length)
+    : stagingKey;
 }
 
 let client: S3Client | null = null;
@@ -341,6 +379,28 @@ export async function headObject(
     if (isMissingObject(error)) return null;
     throw error;
   }
+}
+
+/**
+ * A server-side copy inside the bucket: the step that makes a committed object
+ * immutable.
+ *
+ * `commit` has just verified the staged bytes against their declaration; copying them
+ * to the final key — with the store doing the work, no bytes through this process, the
+ * same rule as every other path here — is what puts verification and residence on the
+ * same side of every later PUT. The CopySource is URL-encoded per the S3 contract;
+ * `encodeURIComponent` leaves `/` alone, so the bucket/key path shape survives.
+ */
+export async function copyObject(input: { fromKey: string; toKey: string }): Promise<void> {
+  await getClient().send(
+    new CopyObjectCommand({
+      Bucket: BUCKET,
+      // `/bucket/key`, encoded: keys here are ULIDs and safe suffixes, but encoding is
+      // the contract and costs nothing.
+      CopySource: `/${BUCKET}/${encodeURIComponent(input.fromKey)}`,
+      Key: input.toKey,
+    }),
+  );
 }
 
 /**

@@ -1048,6 +1048,96 @@ describe('POST /uploads/commit', () => {
     expect(committed.json().sizeBytes).toBe(bytes.length);
   });
 
+  /**
+   * THE TOCTOU REPRODUCTION, now a regression pin (Phase 5 of the UI roadmap).
+   *
+   * A presigned PUT is valid for fifteen minutes and SigV4 carries no nonce, so after
+   * `commit` has verified the bytes the URL is STILL a valid write to the same key:
+   * a caller could commit, have the resource published, and then silently replace
+   * committed bytes with a same-length, same-type body. This test walks that exact
+   * attack and demands the honest outcome — the download serves what was verified,
+   * not what arrived later. It first ran against the single-key layout and FAILED
+   * there by serving the replacement bytes; against the copy-to-final-key commit
+   * (storage.ts `stagingKeyFor`) it holds.
+   */
+  it('keeps a committed upload immutable against a re-PUT through its still-valid URL', async () => {
+    const teacher = await signIn('teacher-immutable@example.com', 'TEACHER');
+    const courseId = await makeCourse(teacher.id);
+
+    // Same length on purpose: the signature pins content-length, so only an
+    // equal-length body could ever ride the old URL past the store.
+    const original = pdfBytes('ORIGINAL-MARKER');
+    const replacement = pdfBytes('REPLACEDMARKER!');
+    expect(replacement.length).toBe(original.length);
+
+    const presigned = await send(
+      'POST',
+      '/uploads/presign',
+      {
+        purpose: 'RESOURCE',
+        originalName: 'immutable-handbook.pdf',
+        contentType: 'application/pdf',
+        sizeBytes: original.length,
+      },
+      teacher.token,
+    );
+    expect(presigned.statusCode).toBe(201);
+    const signed: PresignBody = presigned.json();
+
+    const firstPut = await fetch(signed.url, {
+      method: 'PUT',
+      headers: signed.headers,
+      body: original,
+    });
+    if (!firstPut.ok) throw new Error(`PUT failed: ${firstPut.status} ${await firstPut.text()}`);
+    const committed = await send(
+      'POST',
+      '/uploads/commit',
+      { uploadId: signed.uploadId },
+      teacher.token,
+    );
+    expect(committed.statusCode).toBe(200);
+
+    // The attack itself: minutes later, the SAME URL accepts DIFFERENT bytes. The
+    // store answering 200 here is not the bug — it is the premise. The bug would be
+    // that answer changing what readers receive.
+    const rePut = await fetch(signed.url, {
+      method: 'PUT',
+      headers: signed.headers,
+      body: replacement,
+    });
+    expect(rePut.status).toBe(200);
+
+    const created = await send(
+      'POST',
+      '/resources',
+      {
+        courseId,
+        title: 'Immutability probe',
+        type: 'DOCUMENT',
+        uploadId: signed.uploadId,
+        isPublic: false,
+      },
+      teacher.token,
+    );
+    expect(created.statusCode).toBe(201);
+
+    const download = await get(`/resources/${created.json().id}/download`, teacher.token);
+    expect(download.statusCode).toBe(200);
+    const fetched = await fetch(download.json().url);
+    expect(fetched.status).toBe(200);
+    const downloaded = Buffer.from(await fetched.arrayBuffer());
+
+    // The verified bytes, and nothing else.
+    expect(downloaded.equals(original)).toBe(true);
+    expect(downloaded.equals(replacement)).toBe(false);
+
+    // And the row still answers with the key it was minted with — the committed home
+    // never moved, so every reader of Upload.key (downloads, avatars, syllabi) reads
+    // the object commit verified.
+    expect(committed.json().key).toBe(signed.key);
+  });
+
   it('is idempotent: a second commit returns the same committed row', async () => {
     const student = await signIn('student-twice@example.com', 'STUDENT');
     const file = await storeFile(student, { originalName: 'twice.pdf', marker: 'twice' });
