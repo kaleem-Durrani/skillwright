@@ -69,30 +69,34 @@ function row(
   };
 }
 
-const TODAY = '2026-08-24';
+/**
+ * The session's first date, derived exactly as the component derives it — its own
+ * `todayISO()` decides what the first fetch carries, so the fixture has to read the
+ * same LOCAL calendar rather than pin a literal. (A pinned `2026-08-24` silently
+ * rotted the whole file the day the calendar moved on.)
+ */
+function todayISO(): string {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
+const TODAY = todayISO();
+
+/** A fixed date that is never today, for the "another day" register below. */
+const ANOTHER_DAY = '2001-01-01';
 
 /**
- * What GET answers for TODAY: three seats, one already marked. The component's own
- * `todayISO()` decides the first date fetched; the mock keys off whatever date the
- * query carries, and the assertions read the date input's value back instead of
- * assuming which day the test ran on.
+ * What GET answers: three seats, one already marked, on ANY date — except the one
+ * fixed ANOTHER_DAY, which returns a different intake slice so the refetch test can
+ * prove the second answer really replaced the first.
  */
 function registerFor(date: string): AttendanceRegisterDto {
-  if (date === TODAY) {
+  if (date === ANOTHER_DAY) {
     return {
       date,
       rows: [
-        row({
-          enrollmentId: ENROLLMENT_A,
-          student: { id: 's-a', name: 'Ada Okafor', role: 'STUDENT', avatarUrl: null },
-        }),
-        row({
-          enrollmentId: ENROLLMENT_B,
-          student: { id: 's-b', name: 'Ben Ruiz', role: 'STUDENT', avatarUrl: null },
-          status: 'LATE',
-          note: 'Arrived 10 minutes late',
-          markedBy: MARKER,
-        }),
         row({
           enrollmentId: ENROLLMENT_C,
           student: { id: 's-c', name: 'Cara Voss', role: 'STUDENT', avatarUrl: null },
@@ -100,10 +104,20 @@ function registerFor(date: string): AttendanceRegisterDto {
       ],
     };
   }
-  // Another day, another intake slice: only Cara appears.
   return {
     date,
     rows: [
+      row({
+        enrollmentId: ENROLLMENT_A,
+        student: { id: 's-a', name: 'Ada Okafor', role: 'STUDENT', avatarUrl: null },
+      }),
+      row({
+        enrollmentId: ENROLLMENT_B,
+        student: { id: 's-b', name: 'Ben Ruiz', role: 'STUDENT', avatarUrl: null },
+        status: 'LATE',
+        note: 'Arrived 10 minutes late',
+        markedBy: MARKER,
+      }),
       row({
         enrollmentId: ENROLLMENT_C,
         student: { id: 's-c', name: 'Cara Voss', role: 'STUDENT', avatarUrl: null },
@@ -289,12 +303,12 @@ describe('AttendanceRegister — marking and saving', () => {
     await screen.findByRole('group', { name: 'Attendance for Ada Okafor' });
 
     fireEvent.change(screen.getByLabelText('Session date'), {
-      target: { value: '2026-08-20' },
+      target: { value: ANOTHER_DAY },
     });
 
     await waitFor(() =>
       expect(apiGet).toHaveBeenCalledWith(`/courses/${COURSE_ID}/attendance`, {
-        query: { offeringId: OFFERING_ID, date: '2026-08-20' },
+        query: { offeringId: OFFERING_ID, date: ANOTHER_DAY },
       }),
     );
     // The other day's roster replaced this one's.
