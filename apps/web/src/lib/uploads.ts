@@ -73,6 +73,15 @@ export interface UploadedFile {
 }
 
 /**
+ * Optional behaviour for `uploadFile`. Progress is a whole percentage (0–100) of the
+ * PUT's bytes, fired as the browser measures them off the wire — never simulated, and
+ * never fired for callers that omit the callback.
+ */
+export interface UploadProgressOptions {
+  onProgress?: (percent: number) => void;
+}
+
+/**
  * `presignUploadSchema` refuses `originalName` longer than 255 characters after a
  * trim (upload.ts:50). Mirrored here for the same reason the size and MIME limits
  * are: so an unusable filename is a message on the field rather than a 422 the user
@@ -148,26 +157,76 @@ function describePutFailure(status: number): string {
 }
 
 /**
+ * The PUT itself, moved onto `XMLHttpRequest` for one reason: byte-level progress.
+ *
+ * Everything else about this call is deliberately identical to the `fetch` it replaced
+ * — same URL, exactly the signed headers (only `content-type` ever arrives here;
+ * `content-length` is a forbidden header name that the runtime computes from the body,
+ * which is precisely the value the signature is checked against), no cookies. XHR
+ * without `withCredentials` never sends them cross-origin, so the object store stays as
+ * session-free as the `fetch` version's `credentials: 'omit'` made it.
+ *
+ * `upload.onprogress` is the ONLY upload-progress event any browser exposes; `fetch`
+ * has no request-body progress at all. The callback receives a whole percentage,
+ * clamped to 0–100 and guarded against a missing total, because a division by zero is
+ * nobody's idea of progress.
+ */
+function putToStore(
+  url: string,
+  headers: Record<string, string>,
+  file: File,
+  onProgress?: (percent: number) => void,
+): Promise<{ status: number; text: () => Promise<string> }> {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open('PUT', url);
+    for (const [name, value] of Object.entries(headers)) {
+      request.setRequestHeader(name, value);
+    }
+
+    if (onProgress !== undefined) {
+      request.upload.onprogress = (event) => {
+        if (event.lengthComputable && event.total > 0) {
+          onProgress(Math.min(100, Math.max(0, Math.round((event.loaded / event.total) * 100))));
+        }
+      };
+    }
+
+    // Shaped like the tail of a `fetch` so the caller's handling below does not care
+    // which transport answered: a status plus the body as text.
+    request.onload = () =>
+      resolve({ status: request.status, text: async () => String(request.responseText ?? '') });
+    request.onerror = () => reject(new TypeError('Network request failed'));
+
+    request.send(file);
+  });
+}
+
+/**
  * presign -> PUT -> commit. Resolves with the committed upload.
  *
  * Rejects with an `Error` whose message is fit to toast at every step, and NEVER
  * commits an upload whose PUT did not succeed: a committed row asserts that the
  * bytes are in the bucket, and `commit`'s HeadObject would refuse it anyway.
  *
- * NO BYTE-LEVEL PROGRESS. `fetch` cannot report request-body progress — the streaming
- * `duplex` upload path is not implemented across the browsers this app supports, and
- * `XMLHttpRequest` is the only API that has `upload.onprogress`. Introducing XHR for
- * one dialog is not this change, and a bar that animates on a timer rather than on
- * bytes is a lie about a 512 MB upload. Callers show a busy state instead.
+ * PROGRESS IS REAL BYTES, reported through `options.onProgress` as a whole percentage
+ * while the PUT runs. A bar that animates on a timer instead of on bytes is a lie
+ * about a 512 MB upload; this is measured off `xhr.upload.onprogress` events, which is
+ * why the PUT rides XHR rather than `fetch` (`fetch` exposes no request-body progress).
+ * Callers that do not pass the callback get exactly the old behaviour.
  *
  * The returned values come from the COMMITTED ROW, not from the `File`: `commit`
  * reads `sizeBytes` and `contentType` back off the stored object, so this is what the
  * server will tell every future reader the resource is.
  */
-export async function uploadFile(file: File, purpose: UploadPurpose): Promise<UploadedFile> {
+export async function uploadFile(
+  file: File,
+  purpose: UploadPurpose,
+  options: UploadProgressOptions = {},
+): Promise<UploadedFile> {
   // Re-checked here rather than trusted to the caller: `uploadFile` is reachable from
   // any form, and a file the limits already refuse should not cost a presign — which
-  // writes a PENDING row that nothing currently sweeps.
+  // writes a PENDING row that the sweeper would otherwise collect unused.
   const problem = describeFileProblem(file, purpose);
   if (problem !== null) throw uploadFailure(problem);
 
@@ -178,23 +237,9 @@ export async function uploadFile(file: File, purpose: UploadPurpose): Promise<Up
     sizeBytes: file.size,
   });
 
-  let stored: Response;
+  let stored: { status: number; text: () => Promise<string> };
   try {
-    stored = await fetch(presigned.url, {
-      method: presigned.method,
-      // EXACTLY the headers the server signed, verbatim. `content-type` is inside the
-      // signature, so adding to this set or dropping from it is a 403. `content-length`
-      // is deliberately absent: it is a forbidden header for `fetch`, the runtime
-      // computes it from the body, and that computed value is what the signature is
-      // checked against — which is why a File whose size no longer matches what was
-      // declared at presign is refused by the store rather than silently stored.
-      headers: presigned.headers,
-      body: file,
-      // Explicit, though `same-origin` would already withhold them cross-origin:
-      // the whole reason this call bypasses the api client is that no credential of
-      // ours may reach the object store, and that intent should be readable here.
-      credentials: 'omit',
-    });
+    stored = await putToStore(presigned.url, presigned.headers, file, options.onProgress);
   } catch (cause) {
     // A DNS failure, an offline device, or a CORS rule on the bucket that does not
     // allow PUT from this origin. None of them reached the store.
@@ -204,7 +249,9 @@ export async function uploadFile(file: File, purpose: UploadPurpose): Promise<Up
     );
   }
 
-  if (!stored.ok) {
+  // Any 2xx stores bytes; the store has no redirect flow for presigned PUTs, so
+  // everything else is a refusal worth translating.
+  if (stored.status < 200 || stored.status >= 300) {
     let detail = '';
     try {
       detail = await stored.text();

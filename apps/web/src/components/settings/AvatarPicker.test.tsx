@@ -2,8 +2,10 @@
  * Written in the shape of ResourceFormDialog.test.tsx, against the same contract:
  * queries a user could make (role + accessible name), the network stubbed at the one
  * client this SPA talks through, and `lib/uploads.ts` covered by that stub because it
- * presigns and commits through it. A PUT reaching the stubbed global `fetch` means an
- * upload started; a test asserting "nothing was sent" watches BOTH.
+ * presigns and commits through it. The direct-to-object-store PUT rides
+ * `XMLHttpRequest` (where `upload.onprogress` lives — Phase 5 of the UI roadmap), so a
+ * PUT reaching `fetch` means something bypassed BOTH clients; `fetch` stays stubbed as
+ * that tripwire, and a test asserting "nothing was sent" watches all three.
  *
  * What THIS file exists to pin, beyond the shared upload contract:
  * - the picker validates size and type BEFORE any round trip, so an unusable file
@@ -152,6 +154,58 @@ function imageFile(overrides: { type?: string; size?: number } = {}): File {
 }
 
 // ---------------------------------------------------------------------------
+// The object store, as an XHR stand-in
+// ---------------------------------------------------------------------------
+
+/**
+ * A minimal `XMLHttpRequest` double holding the PUT open until a test completes it —
+ * the same shape `lib/uploads.test.ts` drives, because both files talk to the same
+ * transport. No test here wants progress events; they exist on the fake only because
+ * the real object does.
+ */
+class FakeXhr {
+  static instances: FakeXhr[] = [];
+
+  upload = { onprogress: null };
+  onload: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  status = 0;
+  responseText = '';
+
+  constructor() {
+    FakeXhr.instances.push(this);
+  }
+
+  open(): void {}
+
+  setRequestHeader(): void {}
+
+  send(): void {}
+
+  /** Complete (or fail) the held request as a browser would report it. */
+  finish(options: { status?: number; error?: boolean } = {}): void {
+    if (!this.onload && !this.onerror) throw new Error('FakeXhr completed before it was wired');
+    if (options.error) {
+      this.onerror?.();
+      return;
+    }
+    this.status = options.status ?? 200;
+    this.responseText = '';
+    this.onload?.();
+  }
+}
+
+/** The PUT `uploadFile` opened, once the presign round trip has landed. */
+async function sentPut(): Promise<FakeXhr> {
+  await vi.waitFor(() => {
+    if (FakeXhr.instances.length === 0) throw new Error('no XHR was created');
+  });
+  const request = FakeXhr.instances.at(-1);
+  if (request === undefined) throw new Error('no XHR was created');
+  return request;
+}
+
+// ---------------------------------------------------------------------------
 // Harness
 // ---------------------------------------------------------------------------
 
@@ -166,13 +220,16 @@ beforeEach(() => {
   });
   apiPatch.mockResolvedValue(UPDATED_PROFILE);
 
-  // The direct-to-object-store PUT. Overridden per-test where a refusal is wanted.
+  // A fetch that reaches here means something bypassed the api client AND the XHR
+  // transport. Overridden per-test where a refusal is wanted on the PUT itself.
   vi.stubGlobal(
     'fetch',
     vi.fn(() =>
       Promise.resolve({ ok: true, status: 200, statusText: 'OK', headers: new Headers() }),
     ),
   );
+  FakeXhr.instances = [];
+  vi.stubGlobal('XMLHttpRequest', FakeXhr);
 });
 
 function renderPicker(profile: UserDetail = PROFILE): {
@@ -310,6 +367,9 @@ describe('AvatarPicker', () => {
 
     resolvePresign(PRESIGN);
 
+    // The PUT rides the XHR transport now; the fake holds it open until completed.
+    (await sentPut()).finish({ status: 200 });
+
     await waitFor(() => expect(apiPatch).toHaveBeenCalledTimes(1));
     expect(apiPatch).toHaveBeenCalledWith('/users/me', { avatarUploadId: UPLOAD_ID });
     await waitFor(() => expect(button).not.toHaveAttribute('aria-busy'));
@@ -324,14 +384,12 @@ describe('AvatarPicker', () => {
   });
 
   it('toasts the upload failure’s own sentence, not the generic fallback', async () => {
-    // A refused PUT: the store answered, `uploadFile` translated it into a sentence.
-    vi.mocked(fetch).mockImplementationOnce(() =>
-      Promise.resolve(new Response('SignatureDoesNotMatch', { status: 403 })),
-    );
-
     const { user } = renderPicker();
     await user.upload(picker(), imageFile());
     await user.click(saveButton());
+
+    // A refused PUT: the store answered, `uploadFile` translated it into a sentence.
+    (await sentPut()).finish({ status: 403 });
 
     await waitFor(() => expect(toastMock).toHaveBeenCalledTimes(1));
     const [title] = toastMock.mock.calls[0] as unknown[];

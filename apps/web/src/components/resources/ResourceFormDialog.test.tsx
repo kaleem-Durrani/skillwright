@@ -11,9 +11,11 @@
  * The network is stubbed at `@/lib/api` — the one client this SPA talks to our API
  * through (api.ts:98-108). `lib/uploads.ts` presigns and commits through that same
  * client, so this stub covers both halves of an upload without this file knowing
- * anything about how `uploadFile` is assembled. The direct-to-object-store PUT is a
- * PLAIN `fetch` by contract, so `fetch` is stubbed separately; if a test ever sees a
- * PUT reach it, the upload path ran when it should not have.
+ * anything about how `uploadFile` is assembled. The direct-to-object-store PUT rides
+ * `XMLHttpRequest` by contract (it is where `upload.onprogress` lives — Phase 5 of the
+ * UI roadmap), so `XMLHttpRequest` is stubbed the same way `lib/uploads.test.ts`
+ * stubs it; `fetch` stays stubbed as a tripwire, since nothing in this dialog has a
+ * reason to call it at all.
  */
 import type { ReactElement } from 'react';
 import type { SessionUser } from '@/lib/session';
@@ -146,13 +148,16 @@ beforeEach(() => {
   });
   apiPatch.mockResolvedValue(EXISTING_RESOURCE);
 
-  // A PUT that reaches here means an upload started. No test in this file wants one.
+  // A fetch that reaches here means something bypassed the api client AND the XHR
+  // transport. No test in this file wants one.
   vi.stubGlobal(
     'fetch',
     vi.fn(() =>
       Promise.resolve({ ok: true, status: 200, statusText: 'OK', headers: new Headers() }),
     ),
   );
+  FakeXhr.instances = [];
+  vi.stubGlobal('XMLHttpRequest', FakeXhr);
 });
 
 function renderDialog(ui: ReactElement): void {
@@ -258,6 +263,80 @@ function postsTo(pattern: RegExp): Array<Record<string, unknown>> {
   return apiPost.mock.calls
     .filter(([path]) => pattern.test(path))
     .map(([, body]) => asRecord(body));
+}
+
+// ---------------------------------------------------------------------------
+// The object store, as an XHR stand-in
+// ---------------------------------------------------------------------------
+
+/**
+ * A minimal `XMLHttpRequest` double holding the PUT open until a test completes it —
+ * the same shape `lib/uploads.test.ts` drives, because both files talk to the same
+ * transport. It exposes exactly what `putToStore` touches: open/setRequestHeader/send,
+ * `upload.onprogress`, `onload`, `onerror`.
+ */
+class FakeXhr {
+  static instances: FakeXhr[] = [];
+
+  upload: {
+    onprogress:
+      ((event: { loaded: number; total: number; lengthComputable: boolean }) => void) | null;
+  } = {
+    onprogress: null,
+  };
+  onload: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  status = 0;
+  responseText = '';
+
+  method = '';
+  url = '';
+  headers: Record<string, string> = {};
+  body: unknown = null;
+
+  constructor() {
+    FakeXhr.instances.push(this);
+  }
+
+  open(method: string, url: string): void {
+    this.method = method;
+    this.url = url;
+  }
+
+  setRequestHeader(name: string, value: string): void {
+    this.headers[name] = value;
+  }
+
+  send(body: unknown): void {
+    this.body = body;
+  }
+
+  /** Fire progress events as a browser would, then complete (or fail) the request. */
+  finish(
+    options: { status?: number; error?: boolean; progress?: Array<[number, number]> } = {},
+  ): void {
+    if (!this.onload && !this.onerror) throw new Error('FakeXhr completed before it was wired');
+    for (const [loaded, total] of options.progress ?? []) {
+      this.upload.onprogress?.({ loaded, total, lengthComputable: true });
+    }
+    if (options.error) {
+      this.onerror?.();
+      return;
+    }
+    this.status = options.status ?? 200;
+    this.responseText = '';
+    this.onload?.();
+  }
+}
+
+/** The PUT `uploadFile` opened, once the presign round trip has landed. */
+async function sentPut(): Promise<FakeXhr> {
+  await vi.waitFor(() => {
+    if (FakeXhr.instances.length === 0) throw new Error('no XHR was created');
+  });
+  const request = FakeXhr.instances.at(-1);
+  if (request === undefined) throw new Error('no XHR was created');
+  return request;
 }
 
 // ---------------------------------------------------------------------------
@@ -444,5 +523,49 @@ describe('ResourceFormDialog', () => {
     );
     expect(stops.includes(picker) || viaButton).toBe(true);
     expect(picker).toHaveAccessibleName();
+  });
+
+  it('surfaces real PUT progress while uploading, then posts the committed id', async () => {
+    const { user, dialog } = await openDialog();
+
+    await user.type(titleField(dialog), 'Structural analysis handbook');
+    await chooseType(user, dialog, /document/i);
+
+    const picker = requireFilePicker(dialog);
+    // Small but really a PDF: the resolver runs `describeFileProblem` on the choice,
+    // so the type has to be one the limits accept.
+    const file = new File(['%PDF-1.7'], 'handbook.pdf', { type: 'application/pdf' });
+    Object.defineProperty(file, 'size', { value: 8, configurable: true });
+    await user.upload(picker, file);
+    expect(picker.files?.length ?? 0).toBe(1);
+
+    await user.click(submitButton(dialog));
+
+    // The upload is in flight: presign has run, the PUT is held open by the fake, and
+    // the bar is mounted at zero before any byte is measured.
+    const put = await sentPut();
+    expect(within(dialog).getByRole('progressbar')).toHaveAttribute('aria-valuenow', '0');
+    expect(dialog.textContent ?? '').toMatch(/uploading handbook\.pdf/i);
+
+    // Half the bytes measured off the wire: the bar moves to what was measured —
+    // asserted here rather than after completion, because completing the PUT lets the
+    // submit finish and take the bar down again.
+    put.upload.onprogress?.({ loaded: 4, total: 8, lengthComputable: true });
+    await waitFor(() =>
+      expect(within(dialog).getByRole('progressbar')).toHaveAttribute('aria-valuenow', '50'),
+    );
+    expect(dialog.textContent ?? '').toMatch(/handbook\.pdf — 50%/i);
+
+    // Completion: commit runs only after the PUT answered 200, and the row carries its id.
+    put.finish({ status: 200 });
+    await waitFor(() => expect(postsTo(/uploads\/commit/)).toHaveLength(1));
+    const [body] = postsTo(/resources/);
+    expect(body).toMatchObject({ courseId: COURSE_ID, uploadId: UPLOAD_ID });
+
+    // Settled: the submit is over, so the step-specific bar is gone again.
+    await waitFor(() => expect(within(dialog).queryByRole('progressbar')).toBeNull());
+
+    // The store transport is XHR; fetch stays a tripwire nothing here trips.
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
   });
 });

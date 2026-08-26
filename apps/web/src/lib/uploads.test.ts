@@ -59,25 +59,80 @@ const COMMITTED: UploadDto = {
   committedAt: '2026-08-22T09:59:30.000Z',
 };
 
-interface RecordedPut {
-  url: string;
-  init: RequestInit;
+/**
+ * A minimal stand-in for `XMLHttpRequest`, holding the request open until a test
+ * drives it. `uploadFile`'s transport is chosen for ONE behaviour fetch lacks —
+ * `upload.onprogress` — so the fake exposes exactly that surface and nothing more:
+ * open/setRequestHeader/send, `upload.onprogress`, `onload`, `onerror`.
+ */
+class FakeXhr {
+  static instances: FakeXhr[] = [];
+
+  upload: {
+    onprogress:
+      ((event: { loaded: number; total: number; lengthComputable: boolean }) => void) | null;
+  } = {
+    onprogress: null,
+  };
+  onload: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  status = 0;
+  responseText = '';
+
+  url = '';
+  method = '';
+  headers: Record<string, string> = {};
+  body: unknown = null;
+
+  constructor() {
+    FakeXhr.instances.push(this);
+  }
+
+  open(method: string, url: string): void {
+    this.method = method;
+    this.url = url;
+  }
+
+  setRequestHeader(name: string, value: string): void {
+    this.headers[name] = value;
+  }
+
+  send(body: unknown): void {
+    this.body = body;
+  }
+
+  /** Emit a progress event as a browser would, then complete (or fail) the request. */
+  finish(
+    options: { status?: number; error?: boolean; progress?: Array<[number, number]> } = {},
+  ): void {
+    if (!this.onload && !this.onerror) throw new Error('FakeXhr completed before it was wired');
+    for (const [loaded, total] of options.progress ?? []) {
+      this.upload.onprogress?.({ loaded, total, lengthComputable: true });
+    }
+    if (options.error) {
+      this.onerror?.();
+      return;
+    }
+    this.status = options.status ?? 200;
+    this.responseText = '';
+    this.onload?.();
+  }
 }
 
-let puts: RecordedPut[] = [];
-
-/** Installs a `fetch` that records its call and answers with `response`. */
-function stubFetch(response: () => Promise<Response>): void {
-  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
-    puts.push({ url: String(input), init: init ?? {} });
-    return response();
+/** The in-flight request `uploadFile` created, once the presign round trip lands. */
+async function sentXhr(): Promise<FakeXhr> {
+  await vi.waitFor(() => {
+    if (FakeXhr.instances.length === 0) throw new Error('no XHR was created');
   });
-  vi.stubGlobal('fetch', fetchMock);
+  const request = FakeXhr.instances.at(-1);
+  if (request === undefined) throw new Error('no XHR was created');
+  return request;
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  puts = [];
+  FakeXhr.instances = [];
+  vi.stubGlobal('XMLHttpRequest', FakeXhr);
 });
 
 afterEach(() => {
@@ -150,10 +205,12 @@ describe('describeFileProblem', () => {
 describe('uploadFile', () => {
   it('presigns, PUTs, then commits, and resolves with the committed row', async () => {
     vi.mocked(api.post).mockResolvedValueOnce(PRESIGN).mockResolvedValueOnce(COMMITTED);
-    stubFetch(() => Promise.resolve(new Response('', { status: 200 })));
 
     const file = fileOfSize(4096, 'application/pdf');
-    const uploaded = await uploadFile(file, 'RESOURCE');
+    const pending = uploadFile(file, 'RESOURCE');
+    // The PUT is held open by the fake until the test completes it.
+    (await sentXhr()).finish({ status: 200 });
+    const uploaded = await pending;
 
     expect(api.post).toHaveBeenNthCalledWith(1, '/uploads/presign', {
       purpose: 'RESOURCE',
@@ -165,7 +222,7 @@ describe('uploadFile', () => {
       uploadId: PRESIGN.uploadId,
     });
     // Commit is the second call, so it cannot have preceded the PUT.
-    expect(puts).toHaveLength(1);
+    expect(api.post).toHaveBeenCalledWith('/uploads/commit', expect.anything());
     expect(uploaded).toEqual({
       uploadId: COMMITTED.id,
       sizeBytes: COMMITTED.sizeBytes,
@@ -176,33 +233,55 @@ describe('uploadFile', () => {
 
   it('PUTs to the signed URL with exactly the returned headers and no credentials', async () => {
     vi.mocked(api.post).mockResolvedValueOnce(PRESIGN).mockResolvedValueOnce(COMMITTED);
-    stubFetch(() => Promise.resolve(new Response('', { status: 200 })));
 
     const file = fileOfSize(4096, 'application/pdf');
-    await uploadFile(file, 'RESOURCE');
+    const pending = uploadFile(file, 'RESOURCE');
+    (await sentXhr()).finish({ status: 200 });
+    await pending;
 
-    const put = puts[0];
-    expect(put).toBeDefined();
-    expect(put?.url).toBe(PRESIGN.url);
-    expect(put?.init.method).toBe('PUT');
+    // The request already completed above; `sentXhr` hands back the same instance.
+    const put = await sentXhr();
+    expect(put.method).toBe(PRESIGN.method);
+    expect(put.url).toBe(PRESIGN.url);
     // EXACTLY the signed set: an extra header is outside the signature and a missing
-    // one breaks it (LESSONS-LEARNED #32). `content-length` is the runtime's job.
-    expect(put?.init.headers).toEqual(PRESIGN.headers);
-    expect(put?.init.body).toBe(file);
-    // The object store is a different origin; our session cookie must not go there.
-    expect(put?.init.credentials).toBe('omit');
+    // one breaks it (LESSONS-LEARNED #32). `content-length` stays absent — a forbidden
+    // header name the runtime computes from the body.
+    expect(put.headers).toEqual(PRESIGN.headers);
+    // The bytes themselves, unbuffered: XHR sends the File as-is.
+    expect(put.body).toBe(file);
+  });
+
+  it('reports real byte progress through onProgress while the PUT runs', async () => {
+    vi.mocked(api.post).mockResolvedValueOnce(PRESIGN).mockResolvedValueOnce(COMMITTED);
+    const percentages: number[] = [];
+
+    const file = fileOfSize(4096, 'application/pdf');
+    const pending = uploadFile(file, 'RESOURCE', {
+      onProgress: (percent) => percentages.push(percent),
+    });
+    (await sentXhr()).finish({
+      status: 200,
+      progress: [
+        [1024, 4096],
+        [2048, 4096],
+        [4096, 4096],
+      ],
+    });
+    await pending;
+
+    // Measured off the wire, in order, ending at completion: this is what lets the
+    // dialog show a percentage that means something on a 512 MB upload.
+    expect(percentages).toEqual([25, 50, 100]);
   });
 
   it('does not commit when the object store refuses the PUT', async () => {
     vi.mocked(api.post).mockResolvedValueOnce(PRESIGN);
-    stubFetch(() =>
-      Promise.resolve(
-        new Response('<Error><Code>SignatureDoesNotMatch</Code></Error>', { status: 403 }),
-      ),
-    );
 
     const file = fileOfSize(4096, 'application/pdf');
-    await expect(uploadFile(file, 'RESOURCE')).rejects.toMatchObject({
+    const pending = uploadFile(file, 'RESOURCE');
+    (await sentXhr()).finish({ status: 403 });
+
+    await expect(pending).rejects.toMatchObject({
       message: expect.stringContaining('upload link was refused'),
     });
 
@@ -212,10 +291,12 @@ describe('uploadFile', () => {
 
   it('does not commit when the PUT never reaches the store', async () => {
     vi.mocked(api.post).mockResolvedValueOnce(PRESIGN);
-    stubFetch(() => Promise.reject(new TypeError('Failed to fetch')));
 
     const file = fileOfSize(4096, 'application/pdf');
-    await expect(uploadFile(file, 'RESOURCE')).rejects.toMatchObject({
+    const pending = uploadFile(file, 'RESOURCE');
+    (await sentXhr()).finish({ error: true });
+
+    await expect(pending).rejects.toMatchObject({
       message: expect.stringContaining('could not be sent'),
     });
 
@@ -224,14 +305,14 @@ describe('uploadFile', () => {
 
   it('refuses a file the limits already reject without presigning it', async () => {
     const file = fileOfSize(UPLOAD_LIMITS.RESOURCE.maxBytes + 1, 'application/pdf');
-    stubFetch(() => Promise.resolve(new Response('', { status: 200 })));
 
     await expect(uploadFile(file, 'RESOURCE')).rejects.toMatchObject({
       message: expect.stringContaining('512 MB'),
     });
 
-    // No presign, so no PENDING row for a file that was never going to be accepted.
+    // No presign, so no PENDING row for a file that was never going to be accepted —
+    // and no XHR either, since there is nothing to PUT.
     expect(api.post).not.toHaveBeenCalled();
-    expect(puts).toHaveLength(0);
+    expect(FakeXhr.instances).toHaveLength(0);
   });
 });

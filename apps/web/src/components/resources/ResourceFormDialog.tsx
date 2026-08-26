@@ -313,6 +313,12 @@ export function ResourceFormDialog({
   const formId = useId();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [phase, setPhase] = useState<SubmitPhase>('idle');
+  /**
+   * The PUT's byte progress as a whole percentage, measured by `uploadFile` off
+   * `xhr.upload.onprogress` — never simulated, and only rendered while the upload is
+   * the step that is running.
+   */
+  const [progress, setProgress] = useState(0);
   /** The upload that already reached the store, so a failed POST is not paid for twice. */
   const uploadedRef = useRef<{ file: File; uploaded: UploadedFile } | null>(null);
 
@@ -343,6 +349,7 @@ export function ResourceFormDialog({
     if (!open) return;
     reset(toFormValues(resource));
     setPhase('idle');
+    setProgress(0);
     // A remembered upload belongs to the dialog session that produced it. Carrying one
     // into the next open would attach the previous file to a different resource.
     uploadedRef.current = null;
@@ -367,15 +374,13 @@ export function ResourceFormDialog({
        * posted. If the PUT throws, `uploadFile` rethrows and this function never
        * reaches the POST. That trade is deliberate but not free: a resource row
        * pointing at bytes that never arrived is permanent and visible, whereas a
-       * failed upload leaves a PENDING row that nothing sweeps yet — the job is named
-       * in uploads.service.ts and does not exist (NEXT.md records it).
+       * failed upload leaves a PENDING row the sweeper collects later.
        *
-       * There is no byte-level progress bar, and that is a decision rather than an
-       * omission: `fetch` exposes no upload-progress event at all, and moving the PUT
-       * onto XHR to get one is a change to `lib/uploads.ts` and its contract, not to
-       * this dialog. A bar that animates on a timer instead of on bytes is worse than
-       * no bar, so the live region below names the step that is running and nothing
-       * more.
+       * Progress is REAL BYTES, not a timer: `uploadFile` reports what
+       * `xhr.upload.onprogress` measured off the wire, and the bar below renders that
+       * number as it arrives (Phase 5 of the UI roadmap moved the PUT onto XHR for
+       * exactly this — `fetch` exposes no request-body progress at all). The live
+       * region keeps naming the step; the bar names the fraction.
        */
       /*
        * Remembered across retries, keyed on the File object itself.
@@ -391,9 +396,10 @@ export function ResourceFormDialog({
        */
       if (uploadedRef.current?.file !== plan.file) {
         setPhase('uploading');
+        setProgress(0);
         uploadedRef.current = {
           file: plan.file,
-          uploaded: await uploadFile(plan.file, 'RESOURCE'),
+          uploaded: await uploadFile(plan.file, 'RESOURCE', { onProgress: setProgress }),
         };
       }
       setPhase('saving');
@@ -471,7 +477,7 @@ export function ResourceFormDialog({
 
   const statusMessage =
     phase === 'uploading'
-      ? `Uploading ${selectedFile?.name ?? 'your file'}. A large file can take a while — leave this open.`
+      ? `Uploading ${selectedFile?.name ?? 'your file'} — ${progress}%. A large file can take a while — leave this open.`
       : phase === 'saving'
         ? isEditing
           ? 'Saving your changes.'
@@ -732,6 +738,29 @@ export function ResourceFormDialog({
             label="Make this resource public"
             hint="Public: once the course is published, anyone who can see it — including visitors who are not signed in — will see this listed. Opening it still requires signing in. Leave it off and only approved students, the course teacher and administrators can see it at all."
           />
+
+          {/*
+            The PUT's real byte fraction while the upload is the step running, and
+            nothing at any other time. Same idiom as the enrolment bars on the dashboard
+            (Dashboard.tsx `NextIntakeBar`): a progressbar role whose value is the
+            measured percentage, so a screen reader hears the fraction move rather than
+            guessing from the sentence alone.
+          */}
+          {phase === 'uploading' ? (
+            <div
+              role="progressbar"
+              aria-valuenow={progress}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-label={`Uploading ${selectedFile?.name ?? 'your file'}`}
+              className="h-1.5 w-full overflow-hidden rounded-full bg-sunken"
+            >
+              <div
+                className="h-full rounded-full bg-brand"
+                style={{ inlineSize: `${progress}%` }}
+              />
+            </div>
+          ) : null}
 
           {/*
             Mounted whether or not it has anything to say. A live region that appears at
