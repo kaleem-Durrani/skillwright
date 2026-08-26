@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -13,6 +13,7 @@ import { ApiError } from '@/lib/problem';
 import { useLogout, useSession } from '@/lib/session';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { AvatarPicker } from '@/components/settings/AvatarPicker';
+import { OtpInput } from '@/components/auth/OtpInput';
 import { Avatar } from '@/components/ui/Avatar';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -496,28 +497,108 @@ function ProfileTab({ canEdit, isDemo }: { canEdit: boolean; isDemo: boolean }) 
 }
 
 function SecurityTab() {
-  const { user } = useSession();
+  const { user, isDemo } = useSession();
   const policy = usePolicy();
+  const client = useQueryClient();
   const logout = useLogout();
   const navigate = useNavigate();
 
-  /**
-   * Matches `mfaEnrollResponseSchema` in @skillwright/shared. Note `otpauthUri`
-   * (not `Url`) and that recovery codes are NOT returned here — they come back
-   * from `POST /auth/mfa/activate` once a code has actually been proved.
+  /*
+   * The enrolment flow, end to end (Phase 5 of the UI roadmap deleted TODO(mfa-ui)):
    *
-   * TODO(mfa-ui): the response is discarded. Finishing this screen means
-   * rendering `qrDataUrl`, offering `secret` for manual entry, then posting the
-   * typed code to /auth/mfa/activate and displaying the recovery codes once.
+   *   idle --"Set up two-factor"--> enrolment --6-digit code--> enabled
+   *
+   * `enrolment` holds the POST /auth/mfa/enroll response — the QR the user scans and
+   * the base32 secret they may type instead — until a proved code promotes the
+   * account. `activate` then returns the recovery codes, which NO endpoint can read
+   * back, so they are held in component state and rendered exactly once; a remount of
+   * this tab loses them on purpose, because the server has no way to re-serve them.
+   * Both mutations end by invalidating the session query: `totpEnabled` flips on the
+   * server row, and every reader of the session (this tab, the header) must re-ask.
    */
+  const [enrolment, setEnrolment] = useState<{
+    secret: string;
+    otpauthUri: string;
+    qrDataUrl: string;
+  } | null>(null);
+  const [code, setCode] = useState('');
+  /** The activate endpoint's own sentence for a refused code, shown under the boxes. */
+  const [codeProblem, setCodeProblem] = useState<string | null>(null);
+  const [recoveryCodes, setRecoveryCodes] = useState<readonly string[] | null>(null);
+
+  /*
+   * Turning two-factor OFF is DELETE /auth/mfa with `{ password, code }` — both halves,
+   * because a stolen session alone must not be able to strip the second factor. The
+   * password is held in state only for the request and never persisted anywhere.
+   */
+  const [disabling, setDisabling] = useState(false);
+  const [password, setPassword] = useState('');
+  const [passwordProblem, setPasswordProblem] = useState<string | null>(null);
+
   const enroll = useMutation({
     mutationFn: () =>
       api.post<{ secret: string; otpauthUri: string; qrDataUrl: string }>('/auth/mfa/enroll'),
-    onSuccess: () => toast.info('Scan the code in your authenticator app, then confirm one code.'),
+    onSuccess: (data) => {
+      setEnrolment(data);
+      setCode('');
+      setCodeProblem(null);
+    },
     onError: (error) => toast.fromError(error, 'Could not start enrolment'),
   });
 
+  const activate = useMutation({
+    mutationFn: (confirmation: string) =>
+      api.post<{ recoveryCodes: string[] }>('/auth/mfa/activate', { code: confirmation }),
+    onSuccess: async (data) => {
+      setEnrolment(null);
+      setCode('');
+      setCodeProblem(null);
+      setRecoveryCodes(data.recoveryCodes);
+      await client.invalidateQueries({ queryKey: qk.session });
+    },
+    onError: (error) => {
+      // A refused code is an expected step of the flow, not a crash: clear the boxes,
+      // name the problem under them, let the person look at their app and retype. Any
+      // OTHER failure (rate limit, demo provenance, store down) goes to the toast.
+      setCode('');
+      if (error instanceof ApiError) {
+        const fieldError = error.fieldErrors.find((field) => field.path === 'code');
+        if (fieldError) {
+          setCodeProblem(fieldError.message);
+          return;
+        }
+      }
+      toast.fromError(error, 'Could not enable two-factor');
+    },
+  });
+
+  const disable = useMutation({
+    mutationFn: () => api.del<void>('/auth/mfa', { password, code }),
+    onSuccess: async () => {
+      setDisabling(false);
+      setPassword('');
+      setCode('');
+      setPasswordProblem(null);
+      await client.invalidateQueries({ queryKey: qk.session });
+      toast.success('Two-factor turned off', {
+        description: 'You can set it up again at any time.',
+      });
+    },
+    onError: (error) => {
+      if (error instanceof ApiError) {
+        const fieldError = error.fieldErrors.find((field) => field.path === 'password');
+        if (fieldError) {
+          setPasswordProblem(fieldError.message);
+          return;
+        }
+      }
+      toast.fromError(error, 'Could not turn off two-factor');
+    },
+  });
+
   if (!user) return null;
+
+  const canChangeMfa = !isDemo && policy.can('mfa:enroll');
 
   return (
     <div className="flex flex-col gap-4">
@@ -546,9 +627,161 @@ function SecurityTab() {
           </div>
         </div>
 
+        {/*
+          ENROLMENT PANEL — QR first, secret second, confirmation last. The QR sits on a
+          fixed light surface on purpose: authenticator apps scan black-on-white most
+          reliably, and a themed dark surface would be the one place in the app that is
+          harder to use with the lights off.
+        */}
+        {enrolment !== null && !user.totpEnabled ? (
+          <div className="flex flex-col gap-4 border-t border-line pt-4">
+            <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center">
+              <img
+                src={enrolment.qrDataUrl}
+                alt=""
+                className="size-44 shrink-0 rounded-[var(--control-radius)] bg-white p-2"
+              />
+              <div className="flex min-w-0 flex-col gap-2">
+                <p className="text-sm text-fg-secondary">
+                  Scan this with your authenticator app — or enter the key by hand.
+                </p>
+                {/* select-all so manual entry is a double-tap away on a phone. */}
+                <code className="w-full break-all rounded-md bg-sunken px-3 py-2 font-mono text-xs text-fg sm:text-sm">
+                  {enrolment.secret}
+                </code>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <p id="mfa-confirm-hint" className="text-sm text-fg-secondary">
+                Then confirm one 6-digit code from the app to switch it on.
+              </p>
+              <OtpInput
+                label="Confirmation code"
+                value={code}
+                onChange={(next) => {
+                  setCode(next);
+                  setCodeProblem(null);
+                }}
+                onComplete={(value) => activate.mutate(value)}
+                disabled={activate.isPending}
+                invalid={codeProblem !== null}
+                describedBy={codeProblem !== null ? 'mfa-confirm-error' : 'mfa-confirm-hint'}
+              />
+              {activate.isPending ? (
+                <p className="text-xs text-fg-tertiary">Checking that code…</p>
+              ) : null}
+              {codeProblem !== null ? (
+                <p
+                  id="mfa-confirm-error"
+                  role="alert"
+                  className="text-sm font-medium text-danger-fg"
+                >
+                  {codeProblem}
+                </p>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
+        {/*
+          RECOVERY CODES — shown ONCE, from activate's response. Rendered as a list of
+          discrete codes rather than one wrapped string, because the whole point is
+          copying ONE of them onto paper later.
+        */}
+        {recoveryCodes !== null ? (
+          <div
+            role="status"
+            className="flex flex-col gap-2 rounded-md border border-warning-line bg-warning-soft px-3 py-3"
+          >
+            <p className="text-sm font-medium text-warning-fg">
+              Save these recovery codes now — they are shown only once.
+            </p>
+            <p className="text-xs text-warning-fg">
+              Each one signs you in without your app. Store them somewhere safe; there is no way to
+              read them again.
+            </p>
+            <ul className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+              {recoveryCodes.map((recoveryCode) => (
+                <li key={recoveryCode}>
+                  <code className="font-mono text-sm text-fg">{recoveryCode}</code>
+                </li>
+              ))}
+            </ul>
+            <div>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setRecoveryCodes(null);
+                }}
+              >
+                I have saved them
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
         {user.totpEnabled ? (
-          policy.can('mfa:disable') ? (
-            <Button variant="danger" block className="sm:w-auto sm:self-start">
+          disabling ? (
+            <form
+              className="flex flex-col gap-3 border-t border-line pt-4"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (!disable.isPending) disable.mutate();
+              }}
+            >
+              <p className="text-sm text-fg-secondary">
+                Confirm your password and one code from your app to turn two-factor off.
+              </p>
+              <FormField label="Password" required error={passwordProblem ?? undefined}>
+                <Input
+                  type="password"
+                  value={password}
+                  onChange={(event) => {
+                    setPassword(event.target.value);
+                    setPasswordProblem(null);
+                  }}
+                  autoComplete="current-password"
+                  disabled={disable.isPending}
+                />
+              </FormField>
+              <OtpInput
+                label="Authentication code"
+                value={code}
+                onChange={setCode}
+                disabled={disable.isPending}
+              />
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Button
+                  type="submit"
+                  variant="danger"
+                  disabled={password.length === 0 || code.length < 6}
+                  loading={disable.isPending}
+                >
+                  Turn off two-factor
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => {
+                    setDisabling(false);
+                    setPassword('');
+                    setCode('');
+                    setPasswordProblem(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          ) : canChangeMfa ? (
+            <Button
+              variant="danger"
+              block
+              className="sm:w-auto sm:self-start"
+              onClick={() => setDisabling(true)}
+            >
               Turn off two-factor
             </Button>
           ) : (
@@ -556,7 +789,7 @@ function SecurityTab() {
               Demo sessions cannot change two-factor settings.
             </p>
           )
-        ) : policy.can('mfa:enroll') ? (
+        ) : canChangeMfa ? (
           <Button
             block
             className="sm:w-auto sm:self-start"
@@ -565,7 +798,11 @@ function SecurityTab() {
           >
             Set up two-factor
           </Button>
-        ) : null}
+        ) : (
+          <p className="text-xs text-fg-tertiary">
+            Demo sessions cannot change two-factor settings.
+          </p>
+        )}
       </Card>
 
       <Card className="flex flex-col gap-4">
