@@ -6,6 +6,7 @@ import {
   createUserSchema,
   idParamSchema,
   listUsersQuerySchema,
+  reinstateUserSchema,
   suspendUserSchema,
   updateUserSchema,
   userDetailSchema,
@@ -203,16 +204,29 @@ const usersRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   /*
-   * NOT BUILT, deliberately:
+   * The undo of `/:id/suspend` above, gated on `user:reinstate` — a subject-free action
+   * (policy.ts) whose every cell is a terminal allow/deny, so the SAME bare-gate
+   * argument as `user:suspend` applies: `targetSubject` is still passed because it is
+   * free (no loader query reads it) and keeps this route shaped like its twin.
    *
-   *   POST /users/:id/reinstate — `reinstateUserSchema` exists (user.ts:129), there is no
-   *                            `user:reinstate` action, and the SPA never calls it. If it
-   *                            is ever needed, `user:suspend` is the closest existing
-   *                            gate: identical ADMIN-only cell (policy.ts:348-354) and
-   *                            `not(isSelf)` is harmless there, since an admin cannot be
-   *                            suspended and reinstating oneself is not a thing a
-   *                            suspended session can reach anyway.
+   * Body handling mirrors suspend exactly: the SPA posts no body at all, Fastify hands
+   * a bodyless POST to the validator as `null`, so `.nullish()` + `?? undefined` is
+   * what keeps this route's own call from 422ing before the policy preHandler ran.
+   * `reinstateUserSchema.note` is optional (user.ts), so an absent body reaches the
+   * service as no note at all.
    */
+  app.post(
+    '/:id/reinstate',
+    {
+      schema: {
+        params: idParamSchema,
+        body: reinstateUserSchema.nullish(),
+        response: { 200: userDetailSchema },
+      },
+      preHandler: authorize('user:reinstate', targetSubject),
+    },
+    async (request) => userService.reinstate(request.params.id, request.body ?? undefined),
+  );
 };
 
 export default usersRoutes;

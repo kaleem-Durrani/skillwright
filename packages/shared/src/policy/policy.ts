@@ -63,6 +63,7 @@ export type Action =
   | 'user:update'
   | 'user:create'
   | 'user:suspend'
+  | 'user:reinstate'
   | 'user:list'
   // department
   | 'department:read'
@@ -398,6 +399,21 @@ export const POLICY: PolicyTable = definePolicy({
     // Self-suspension would lock the last admin out of the instance.
     ADMIN: not(isSelf),
   },
+  /*
+   * The undo of `user:suspend`, and deliberately its mirror image: every cell is
+   * terminal allow/deny decided by role alone, so no Subject field is read anywhere.
+   * `not(isSelf)` is NOT carried over — an ACTIVE admin reinstating their own id is a
+   * service-level no-op (there is nothing to reinstate), and a SUSPENDED session is
+   * already refused by the status gate in can.ts before any role rule runs. The action
+   * is subject-free for the same reason `user:create` is, which is what lets the SPA
+   * gate its affordance with a bare `can('user:reinstate')`.
+   */
+  'user:reinstate': {
+    anonymous: deny,
+    STUDENT: deny,
+    TEACHER: deny,
+    ADMIN: allow,
+  },
   'user:list': {
     anonymous: deny,
     STUDENT: deny,
@@ -591,6 +607,7 @@ export const SUBJECT_INDEPENDENT_ACTIONS = [
   'comment:create',
   'user:create',
   'user:list',
+  'user:reinstate',
   'department:read',
   'department:list',
   'department:create',

@@ -924,6 +924,14 @@ const USER_CELLS: readonly Cell[] = [
     SELF_ADMIN,
   ),
 
+  // The undo, and deliberately NOT its gate: every cell is a terminal allow/deny that
+  // reads no Subject field (`SUBJECT_INDEPENDENT_ACTIONS` recomputes this), so the
+  // denials below name plain `deny` and the allowance needs no subject at all.
+  no('anonymous reinstates a user', ANON, 'user:reinstate', 'anonymous:deny', OTHER_USER),
+  no('student reinstates a user', STUDENT_IN, 'user:reinstate', 'STUDENT:deny', OTHER_USER),
+  no('teacher reinstates a user', TEACHER_A, 'user:reinstate', 'TEACHER:deny', OTHER_USER),
+  ok('admin reinstates a suspended user', ADMIN, 'user:reinstate', OTHER_USER),
+
   no('student lists users', STUDENT_IN, 'user:list', 'STUDENT:deny'),
   no('teacher lists users', TEACHER_A, 'user:list', 'TEACHER:deny'),
   ok('admin lists users', ADMIN, 'user:list'),

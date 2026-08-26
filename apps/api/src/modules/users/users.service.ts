@@ -28,10 +28,12 @@ import { presignGet, safeFilename } from '../../lib/storage.js';
  */
 import { toUserDetail } from '../auth/auth.service.js';
 import { assertUploadClaimable } from '../uploads/uploads.service.js';
+import { notify } from '../notifications/notifications.service.js';
 import { destroyAllSessions } from '../auth/session.service.js';
 import type {
   CreateUserInput,
   ListUsersQuery,
+  ReinstateUserInput,
   SuspendUserInput,
   UpdateUserInput,
   UserDetail,
@@ -633,6 +635,63 @@ export async function suspend(id: string, input?: SuspendUserInput): Promise<Use
 
   // The only home the reason has today; see DEFAULT_SUSPENSION_REASON above.
   log.info({ userId: id, reason, revoked }, 'user suspended');
+
+  /*
+   * The last unwired enum member, wired here because THIS is the day it became
+   * writable: until `POST /:id/reinstate` existed, a row announcing a suspension was
+   * invisible to its recipient for the row's whole life — suspension destroys every
+   * session, so nobody could ever sign in to read it (docs/roadmap/00-FEATURE-PLAN.md,
+   * Phase 1: "wiring it becomes one line the day reinstate ships"). Reinstatement
+   * exists now, so the row has a reader waiting at the end of its possible future.
+   *
+   * After the writes above have committed, best-effort per notify()'s contract —
+   * it catches its own failures and never fails the suspension.
+   */
+  await notify({
+    userIds: [id],
+    type: 'ACCOUNT_SUSPENDED',
+    title: 'Account suspended',
+    body: 'An administrator suspended your account. Sign-in is disabled until it is reinstated.',
+    linkPath: '/',
+  });
+
+  return detailById(id);
+}
+
+/**
+ * `POST /users/:id/reinstate` — the undo of `suspend` above, and written in its
+ * image: two writes SEQUENTIALLY, never one interactive transaction, for the same
+ * audited-model/second-pool reason the suspend comment records. Nothing here needs
+ * atomicity; a crash between the update and the response leaves an ACTIVE account
+ * whose REINSTATE audit row already says so.
+ *
+ * The SUSPENDED -> ACTIVE transition is what makes the extension derive the REINSTATE
+ * action (audit.ts), closing the last unreachable branch of `deriveUpdateAction`. NO
+ * manual audit row is written.
+ */
+export async function reinstate(id: string, input?: ReinstateUserInput): Promise<UserDetail> {
+  const current = await prisma.user.findFirst({
+    where: { id, deletedAt: null },
+    select: { id: true, status: true },
+  });
+  if (!current) throw notFound('User');
+
+  if (current.status !== 'SUSPENDED') {
+    // Idempotent, on the same reasoning as suspend's own early return: the extension
+    // derives its action from a TRANSITION, so "reinstate" against an ACTIVE or
+    // PENDING_VERIFICATION account must return the row unchanged rather than write an
+    // UPDATE-shaped audit row that reads like an event.
+    return detailById(id);
+  }
+
+  await prisma.user.update({ where: { id }, data: { status: 'ACTIVE' } });
+
+  // The note has nowhere to be STORED — the same gap DEFAULT_SUSPENSION_REASON
+  // documents for the suspension reason — so it is logged, where an operator can find
+  // it beside the suspend entry.
+  if (input?.note !== undefined) {
+    log.info({ userId: id, note: input.note }, 'user reinstated');
+  }
 
   return detailById(id);
 }

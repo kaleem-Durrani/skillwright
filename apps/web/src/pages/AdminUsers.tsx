@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { MoreVertical, Plus, Search, UserRoundX } from 'lucide-react';
+import { MoreVertical, Plus, Search, UserRoundCheck, UserRoundX } from 'lucide-react';
 import { api, type Paginated } from '@/lib/api';
 import { qk } from '@/lib/query';
 import { subject, usePolicy } from '@/lib/policy';
@@ -125,6 +125,20 @@ export function AdminUsersPage() {
     onError: (error) => toast.fromError(error, 'Could not suspend that account'),
   });
 
+  const reinstate = useMutation({
+    // Same contract as suspend above: 200 with the updated detail row. The service is
+    // idempotent — reinstating an ACTIVE account returns it unchanged and writes no
+    // second audit event — so a double click costs nothing.
+    mutationFn: (id: string) => api.post<UserDetail>(`/users/${id}/reinstate`),
+    onSuccess: async () => {
+      toast.success('Account reinstated', {
+        description: 'They can sign in again immediately.',
+      });
+      await client.invalidateQueries({ queryKey: ['users'] });
+    },
+    onError: (error) => toast.fromError(error, 'Could not reinstate that account'),
+  });
+
   const isFiltered = Boolean(search.q || search.role || search.status);
 
   return (
@@ -218,7 +232,13 @@ export function AdminUsersPage() {
             id: 'actions',
             header: 'Actions',
             align: 'end',
-            cell: (entry) => <RowMenu user={entry} onSuspend={() => setSuspending(entry)} />,
+            cell: (entry) => (
+              <RowMenu
+                user={entry}
+                onSuspend={() => setSuspending(entry)}
+                onReinstate={() => reinstate.mutate(entry.id)}
+              />
+            ),
           },
         ]}
         renderCard={(entry) => {
@@ -231,7 +251,11 @@ export function AdminUsersPage() {
                   <span className="truncate text-sm font-medium">{entry.name}</span>
                   <span className="truncate text-xs text-fg-tertiary">{entry.email}</span>
                 </div>
-                <RowMenu user={entry} onSuspend={() => setSuspending(entry)} />
+                <RowMenu
+                  user={entry}
+                  onSuspend={() => setSuspending(entry)}
+                  onReinstate={() => reinstate.mutate(entry.id)}
+                />
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <Badge tone="neutral" size="sm">
@@ -318,17 +342,17 @@ export function AdminUsersPage() {
           }
         >
           {/*
-            This used to promise "an administrator can reinstate the account later".
-            Nothing in the system can: there is no `user:reinstate` action in the Action
-            union and no endpoint behind it — users.routes.ts:169-176 records the
-            omission as deliberate. Adding one is not a copy change; it costs a policy
-            action, its matrix rows including the denials, and a regenerated
-            docs/permissions.md (CONTRIBUTING.md:40-46). Until someone spends that, the
-            dialog says what is true.
+            This used to say "There is no way to undo this from the app — reinstating
+            the account takes a database change." That was true when it was written:
+            there was no `user:reinstate` action, no endpoint, and the audit
+            extension's REINSTATE branch could never fire. Phase 5 of the UI roadmap
+            spent the cost the old comment priced — policy action, matrix rows,
+            regenerated docs/permissions.md — so the copy now offers the real undo.
           */}
           <p className="text-fg-secondary">
-            There is no way to undo this from the app — reinstating the account takes a database
-            change. The action is written to the audit log with your name against it.
+            You can undo this later with <strong>Reinstate account</strong> in the row's action
+            menu. Every session is destroyed now, and both actions are written to the audit log with
+            your name against them.
           </p>
         </DialogContent>
       </Dialog>
@@ -336,15 +360,30 @@ export function AdminUsersPage() {
   );
 }
 
-function RowMenu({ user, onSuspend }: { user: UserDetail; onSuspend: () => void }) {
+function RowMenu({
+  user,
+  onSuspend,
+  onReinstate,
+}: {
+  user: UserDetail;
+  onSuspend: () => void;
+  onReinstate: () => void;
+}) {
   const policy = usePolicy();
   const target = userSubject(user);
 
   const canSuspend = policy.can('user:suspend', target) && user.status !== 'SUSPENDED';
   const canUpdate = policy.can('user:update', target);
+  /*
+   * `user:reinstate` is subject-free — every cell is a terminal allow/deny decided by
+   * role alone (policy.ts), the `user:create` argument — so the bare, no-subject call
+   * is a complete gate for an affordance whose row is right here anyway. Asking it per
+   * row keeps a suspended account's menu honest without a second subject build.
+   */
+  const canReinstate = policy.can('user:reinstate') && user.status === 'SUSPENDED';
 
   // Nothing permitted means no menu at all — an empty menu is worse than none.
-  if (!canSuspend && !canUpdate) return null;
+  if (!canSuspend && !canUpdate && !canReinstate) return null;
 
   return (
     <DropdownMenu>
@@ -364,6 +403,11 @@ function RowMenu({ user, onSuspend }: { user: UserDetail; onSuspend: () => void 
             onSelect={onSuspend}
           >
             Suspend account
+          </DropdownMenuItem>
+        ) : null}
+        {canReinstate ? (
+          <DropdownMenuItem icon={<UserRoundCheck className="size-4" />} onSelect={onReinstate}>
+            Reinstate account
           </DropdownMenuItem>
         ) : null}
       </DropdownMenuContent>

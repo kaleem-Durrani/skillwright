@@ -670,12 +670,137 @@ describe('POST /users/:id/suspend', () => {
       where: { entityType: 'User', entityId: victimId, action: 'SUSPEND' },
     });
     expect(rows).toBe(1);
+
+    // The last unwired enum member, wired now that reinstate exists: the recipient
+    // could never read this row before, because suspension destroys every session —
+    // but a suspension that later ends in REINSTATE leaves the reader able to sign
+    // back in. Idempotent repeat must not double it.
+    expect(
+      await prisma.notification.count({
+        where: { userId: victimId, type: 'ACCOUNT_SUSPENDED' },
+      }),
+    ).toBe(1);
   });
 
   it('404s an unknown id for an admin, who passes the gate unconditionally', async () => {
     const admin = await signedIn('admin12@example.com', 'ADMIN', 'Ada Admin');
 
     const response = await send('POST', `/${ABSENT_ID}/suspend`, undefined, admin);
+    expect(response.statusCode).toBe(404);
+    expect(response.json().code).toBe('NOT_FOUND');
+  });
+});
+
+describe('POST /users/:id/reinstate', () => {
+  /** Suspends `victimId` as `admin` and asserts the write landed. */
+  async function suspendVictim(admin: string, victimId: string): Promise<void> {
+    const response = await send('POST', `/${victimId}/suspend`, undefined, admin);
+    expect(response.statusCode).toBe(200);
+    expect(response.json().status).toBe('SUSPENDED');
+  }
+
+  it('flips a suspended account back to ACTIVE and lets its owner sign in again', async () => {
+    const admin = await signedIn('rein-admin1@example.com', 'ADMIN', 'Ada Admin');
+    await createAccount('rein-victim1@example.com', 'STUDENT', 'Victim One', 'student');
+    const victimToken = await login('rein-victim1@example.com');
+    const victimId = (
+      await prisma.user.findFirstOrThrow({ where: { email: 'rein-victim1@example.com' } })
+    ).id;
+
+    await suspendVictim(admin, victimId);
+    // Suspension is real first: the cookie is inert.
+    expect((await get('/me', victimToken)).statusCode).toBe(401);
+
+    const response = await send('POST', `/${victimId}/reinstate`, undefined, admin);
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ id: victimId, status: 'ACTIVE' });
+
+    // The point of the whole feature: the same credentials sign in again. `login`
+    // asserts its own 200 and hands back the session cookie it minted.
+    expect(await login('rein-victim1@example.com')).toBeTruthy();
+  });
+
+  it('writes exactly one REINSTATE audit row, derived by the extension with the admin against it', async () => {
+    const admin = await signedIn('rein-admin2@example.com', 'ADMIN', 'Ada Admin');
+    const adminId = (
+      await prisma.user.findFirstOrThrow({ where: { email: 'rein-admin2@example.com' } })
+    ).id;
+    const victimId = await createAccount('rein-victim2@example.com', 'STUDENT', 'Victim Two');
+
+    await suspendVictim(admin, victimId);
+    const response = await send('POST', `/${victimId}/reinstate`, undefined, admin);
+    expect(response.statusCode).toBe(200);
+
+    // Never written by hand: deriveUpdateAction computes REINSTATE from the
+    // SUSPENDED -> ACTIVE transition, the branch no request could reach before this
+    // route existed. Scoped to this fixture's id AND these two actions —
+    // resetDatabase() keeps AuditEvent, and the fixture's own creation already wrote
+    // a CREATE row beside them.
+    const rows = await prisma.auditEvent.findMany({
+      where: { entityType: 'User', entityId: victimId, action: { in: ['SUSPEND', 'REINSTATE'] } },
+    });
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.action).sort()).toEqual(['REINSTATE', 'SUSPEND']);
+    const reinstateRow = rows.find((row) => row.action === 'REINSTATE');
+    expect(reinstateRow?.actorId).toBe(adminId);
+  });
+
+  it('is idempotent: reinstating an ACTIVE account returns unchanged and audits nothing', async () => {
+    const admin = await signedIn('rein-admin3@example.com', 'ADMIN', 'Ada Admin');
+    const victimId = await createAccount('rein-victim3@example.com', 'STUDENT', 'Victim Three');
+
+    await suspendVictim(admin, victimId);
+    const first = await send('POST', `/${victimId}/reinstate`, undefined, admin);
+    const second = await send('POST', `/${victimId}/reinstate`, undefined, admin);
+    expect(first.statusCode).toBe(200);
+    expect(second.statusCode).toBe(200);
+    expect(second.json().status).toBe('ACTIVE');
+
+    const rows = await prisma.auditEvent.count({
+      where: { entityType: 'User', entityId: victimId, action: 'REINSTATE' },
+    });
+    expect(rows).toBe(1);
+  });
+
+  it('accepts an optional note without storing or failing on it', async () => {
+    const admin = await signedIn('rein-admin4@example.com', 'ADMIN', 'Ada Admin');
+    const victimId = await createAccount('rein-victim4@example.com', 'STUDENT', 'Victim Four');
+
+    await suspendVictim(admin, victimId);
+    const response = await send(
+      'POST',
+      `/${victimId}/reinstate`,
+      { note: 'Appeal upheld; behaviour plan agreed.' },
+      admin,
+    );
+    expect(response.statusCode).toBe(200);
+    expect(response.json().status).toBe('ACTIVE');
+  });
+
+  it('refuses a teacher, naming the rule', async () => {
+    const teacher = await signedIn('rein-teacher@example.com', 'TEACHER', 'Nosy', 'teacher');
+    const victimId = await createAccount('rein-victim5@example.com', 'STUDENT', 'Victim Five');
+    await suspendVictim(await signedIn('rein-admin5@example.com', 'ADMIN'), victimId);
+
+    const response = await send('POST', `/${victimId}/reinstate`, undefined, teacher);
+    expect(response.statusCode).toBe(403);
+    expect(response.json().detail).toContain('rule: TEACHER:deny');
+
+    const row = await prisma.user.findUniqueOrThrow({ where: { id: victimId } });
+    expect(row.status).toBe('SUSPENDED');
+  });
+
+  it('refuses an anonymous caller', async () => {
+    const victimId = await createAccount('rein-victim6@example.com', 'STUDENT', 'Victim Six');
+
+    const response = await send('POST', `/${victimId}/reinstate`, undefined);
+    expect(response.statusCode).toBe(401);
+  });
+
+  it('404s an unknown id for an admin', async () => {
+    const admin = await signedIn('rein-admin7@example.com', 'ADMIN', 'Ada Admin');
+
+    const response = await send('POST', `/${ABSENT_ID}/reinstate`, undefined, admin);
     expect(response.statusCode).toBe(404);
     expect(response.json().code).toBe('NOT_FOUND');
   });

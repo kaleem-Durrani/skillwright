@@ -14,15 +14,17 @@
  * unlike courses/enrollments, which needed a `{ courseId }` shape shared has no export
  * for (courses.schema.ts:49-55). Adding one here would be restating a rule that exists.
  *
- * `reinstateUserSchema` (user.ts:147) exists in shared and is NOT re-exported here:
- * there is no `user:reinstate` action in the Action union (policy.ts:27-84) and the SPA
- * does not call it. Naming it here would advertise a wire surface this module does not
- * serve. `createUserSchema` IS re-exported since Phase 4b wired `POST /users` behind
+ * `reinstateUserSchema` (user.ts:147) was re-exported here from the day `user:reinstate`
+ * shipped (Phase 5 of the UI roadmap): the action exists in the Action union, the route
+ * binds it `.nullish()` like suspend, and the SPA's admin console calls it. It lives in
+ * shared beside `suspendUserSchema` because the two are one decision written twice.
+ * `createUserSchema` IS re-exported since Phase 4b wired `POST /users` behind
  * the `user:create` action.
  */
 export {
   createUserSchema,
   listUsersQuerySchema,
+  reinstateUserSchema,
   suspendUserSchema,
   updateUserSchema,
   userDetailSchema,
@@ -33,6 +35,7 @@ export {
 export type {
   CreateUserInput,
   ListUsersQuery,
+  ReinstateUserInput,
   SuspendUserInput,
   UpdateUserInput,
   UserDetail,
