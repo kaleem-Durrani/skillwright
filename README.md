@@ -21,7 +21,7 @@ Each of these is falsifiable, and each links to the test that would fail if the 
 
 ### 1. Permissions are data, not conditionals
 
-`can(actor, action, subject)` is a pure function — no I/O, no database import. Every `(role, action, subject-state)` decision it can make is written down and checked: 45 actions, 180 cells in the role matrix, 225 more covering account status and session provenance, asserted as **600 passing test cases**. `docs/permissions.md` is generated from that same policy, never written by hand — a CI job regenerates it and fails the build if the checked-in file disagrees.
+`can(actor, action, subject)` is a pure function — no I/O, no database import. Every `(role, action, subject-state)` decision it can make is written down and checked: 49 actions, 196 cells in the role matrix, 245 more covering account status and session provenance, asserted as **656 passing test cases**. `docs/permissions.md` is generated from that same policy, never written by hand — a CI job regenerates it and fails the build if the checked-in file disagrees.
 
 > **Proof:** [`packages/shared/test/policy-matrix.test.ts`](packages/shared/test/policy-matrix.test.ts) (600 cases — run `pnpm --filter @skillwright/shared test`) · [`packages/shared/src/policy`](packages/shared/src/policy) · [`scripts/generate-permissions-doc.ts`](scripts/generate-permissions-doc.ts) · [`docs/permissions.md`](docs/permissions.md) · the `permissions-doc` job in [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 >

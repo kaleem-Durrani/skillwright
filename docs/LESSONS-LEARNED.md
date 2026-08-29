@@ -622,3 +622,58 @@ git add 'apps/web/src/routes/_app/announcements.$announcementId.tsx'
 **Root cause, common to all six.** Each lives in the seam between two things that are individually tested: the bundler and the package manager, the image and the app config, the plugin and the error translator, the cache policy and the file it applies to. Unit tests, typechecks and linters all operate _inside_ one of those things. Nothing in the repository ran the seam.
 
 **Rule.** A deployment artefact is verified by running it and asking it questions, not by reviewing it. The check is cheap and mechanical: build the image, start it against real dependencies, and assert **status, content-type AND cache-control** for a table of paths — the root, a client-router path, an API path, a real fingerprinted asset, a missing asset, a missing API route. Six of these six were caught by that one table. Put the build in CI the day the `Dockerfile` is written, so its first execution is not also its first deploy.
+
+---
+
+## 39. `manualChunks` classified a package by its peers, because pnpm writes peers into the path
+
+**Symptom.** The production build threw on every route — `Uncaught TypeError: Cannot read properties of undefined (reading 'createContext')` — and `#root` stayed empty. `vite build` exited 0. `tsc --noEmit` was clean. 178 unit tests passed. `vite dev` was completely fine. Nothing anywhere was red.
+
+**Cause.** `vite.config.ts` split vendor chunks with substring tests over the **absolute module id**:
+
+```js
+if (id.includes('react-dom') || id.includes('/react/')) return 'vendor-react';
+if (id.includes('@tanstack')) return 'vendor-tanstack';
+```
+
+pnpm encodes a package's peer dependencies in its store directory name, so the id for a `@tanstack/react-router` module is:
+
+```
+node_modules/.pnpm/@tanstack+react-router@1.130.2_react-dom@19.2.8_react@19.2.8/
+  node_modules/@tanstack/react-router/dist/esm/index.js
+```
+
+That path contains the literal text `react-dom`. The first test therefore matched, and `@tanstack/react-router` went to `vendor-react` — while `@tanstack/router-core`, which has no `react-dom` peer and so no such text, stayed in `vendor-tanstack`. One library, two chunks, importing each other. Rollup emitted an initialisation order in which the router's module body ran before React's, and `React.createContext` was `undefined`.
+
+The reason every gate stayed green is the same reason lesson 38's six faults were invisible: **`manualChunks` is a Rollup concern, so it exists only in a production build.** `vite dev` serves unbundled ES modules and never calls the function. `tsc` reads source. Vitest imports source into jsdom. The bundle was the one artefact nothing loaded.
+
+Note also that the same over-match is silently deciding a lot more than it looks: 23 `@radix-ui` packages land in the React chunk purely because their pnpm directory names carry an `@types+react-dom` fragment.
+
+**Fix.** Classify by package **name**, taken from after the last `node_modules/`, never by substring over the id:
+
+```js
+const marker = id.lastIndexOf('node_modules/');
+if (marker === -1) return undefined;
+const segments = id.slice(marker + 'node_modules/'.length).split('/');
+const pkg = segments[0]?.startsWith('@') ? `${segments[0]}/${segments[1]}` : segments[0];
+if (pkg === 'react' || pkg === 'react-dom' || pkg === 'scheduler') return 'vendor-react';
+```
+
+**Rule.** A `manualChunks` predicate must be a function of the package identity, not of the path a package manager happened to write. Substring tests over an absolute id are also sensitive to where the repository is checked out — a directory named `motion` anywhere above the project collapses the split. And the structural rule underneath: **a chunking strategy is only correct if the chunk graph is acyclic**, which is guaranteed for free when every bucket depends on one leaf bucket (React) that depends on none of them. The gate that makes this class of bug loud is not a better predicate — it is loading the built artefact in a browser and asserting the root is not empty (`apps/web/e2e/build-smoke.spec.ts`).
+
+---
+
+## 40. Measure before you fix, and let the measurement be allowed to cancel the work
+
+**Symptom.** A whole roadmap phase existed to fix dialogs that opened "at 5fps". Instrumented against the production preview build, opening the three heaviest dialogs cost **0 ms of total blocking time and 0 long tasks** — before a single fix. There was nothing to make faster. The jank was entirely dev-mode: `@axe-core/react` re-auditing the whole document on every commit, StrictMode double-mounting, unminified chunks.
+
+**What it cost to not know that.** Two of the four fixes drafted for the phase were built, and both made the product measurably worse against a baseline of zero:
+
+- Deferring the dialog body until the enter animation completed moved time-to-usable from ~110 ms to ~910 ms, and _raised_ dropped frames — to save blocking time that was already zero. On a small confirm dialog the fixed skeleton also opened the dialog at 404 px and collapsed it to 228 px.
+- Marking the footer `inert` for that window left `Cancel` and `Delete` inoperable for ~340 ms. `EASE.decelerate` is `cubic-bezier(0,0,0,1)`, so 89% of the travel is complete at 170 ms: the buttons sit visually settled and apparently clickable for most of the dead window, and `inert` removes them from keyboard navigation and the accessibility tree entirely.
+
+Both changes were carefully reasoned and thoroughly commented. Neither was measured against the thing it claimed to improve.
+
+**Adjacent trap, same phase.** The justification for tweening the sheet was "a bezier tween promotes cleanly to WAAPI and runs off the main thread." It does not. Motion accelerates a value only when its **name** is in `acceleratedValues` — `opacity`, `clipPath`, `filter`, `transform`, `backgroundColor` — and the card animates `y`, a transform sub-value Motion composes itself. The sibling scrim's `opacity` fade _is_ accelerated, from the same variants, which is what proves the gate is the value name and not the variant. A plausible mechanism, stated confidently in a comment, is indistinguishable from a measured one to every future reader.
+
+**Rule.** Write the measurement before the fix, and write down the number you would accept as "no problem here" _before_ you look. Measure the artefact users get — a production build, not `vite dev`, whose dev-only instrumentation is frequently the thing being measured. When the baseline comes back clean, the correct output of the phase is a recorded number and a deleted branch; a phase that cannot conclude "nothing to do here" is not an investigation, it is a plan with a preordained answer. And a performance change that is not paired with a before/after on the same machine is a preference.

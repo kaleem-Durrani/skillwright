@@ -31,7 +31,26 @@ pnpm typecheck && pnpm lint && pnpm format && pnpm test
 pnpm check:brand && pnpm check:mobile-first
 ```
 
-CI runs all of these plus integration tests, a build, and `generate-permissions-doc --check`. Nothing here is a suggestion — every one of them can fail a pull request.
+CI runs all of these plus integration tests, a build, a Docker image build, `generate-permissions-doc --check`, and the Playwright suite against the **built** SPA. Nothing here is a suggestion — every one of them can fail a pull request.
+
+If you changed anything in `apps/web`, run the browser suite too. It is the only gate that loads what Rollup actually produced, which is not a theoretical distinction: a chunking bug once made every page of the production build throw while every other check in this list stayed green (lesson 39).
+
+```bash
+pnpm --filter @skillwright/web build      # playwright.config.ts serves dist/ with `vite preview`
+pnpm --filter @skillwright/web test:e2e   # desktop, Pixel 7 and iPhone 14
+```
+
+One-off per machine: `pnpm --filter @skillwright/web exec playwright install chromium webkit`.
+
+## Working on accessibility
+
+`@axe-core/react` reports violations straight into the dev console, but it is **opt-in**, because a whole-document re-audit after every commit is the single largest source of dev-mode jank in this app — it lands mid-interaction no matter how long the debounce. Turn it on for the session when you want it:
+
+```js
+localStorage.setItem('sw.axe', 'on'); // then reload
+```
+
+The standing gate is `apps/web/e2e/dialogs.spec.ts`, which runs axe over every dialog surface in both themes on every push. Measure with `reducedMotion: 'reduce'` and after the page has settled, or you will be measuring a fade (lesson 21).
 
 ## Branches
 

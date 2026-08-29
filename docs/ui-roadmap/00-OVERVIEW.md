@@ -23,12 +23,18 @@ This is the plan of record for UI work the way `docs/roadmap/00-FEATURE-PLAN.md`
 ## How the phases are shaped
 
 ```
-Phase 1   Dialog performance        ← sharpest pain, smallest diff, measured first
+Phase 1   Dialog performance        ← LANDED 2026-08-30, mostly negative: see below
 Phase 2   Shell, header, spacing    ← the layout contract everything else needs
 Phase 3   DataTable                 ← fills the contract Phase 2 creates
 Phase 4   Motion systematized       ← after performance is proven, broaden deliberately
-Phase 5   Deferred features         ← independent; can run beside any phase
+Phase 5   Deferred features         ← LANDED 2026-08-23, all five
 ```
+
+**Phase 1's result changed what the plan knows.** It measured before it fixed, and the production build was already at **0 ms total blocking time and 0 long tasks** opening the three heaviest dialogs — so the "5fps" was dev-mode axe, StrictMode and unminified chunks, exactly as the first finding below guessed, and two of the four drafted fixes measured _worse_ than what they replaced and were dropped. The outcome table is in [01-DIALOG-PERFORMANCE.md](01-DIALOG-PERFORMANCE.md); the numbers are in [`docs/PROGRESS.md`](../PROGRESS.md).
+
+The phase's real find was not a slow dialog: `manualChunks` was splitting `@tanstack/react-router` across two mutually-importing vendor chunks, so **the production bundle threw on every page** while every gate in the repository stayed green. Nothing in CI had ever loaded the artefact. It does now. Read that before starting Phase 2 — it is the reason the "verify against production builds" rule below is not boilerplate.
+
+Phase 4 also inherits a small debt from Phase 1: five `MotionKit` members now have zero call sites (`variants.dialog`, `variants.sheetSide`, `variants.collapse`, `transitions.spring`, `transitions.normal`), and `Sheet` still has no backdrop blur where `Dialog` does — a real inconsistency, but a visual decision Phase 1 was barred from making.
 
 Phases 1 and 5 touch disjoint files from 2–4 and can run in parallel. Phase 3 depends on Phase 2's layout contract. Phase 4 depends on Phase 1's measurements so polish is added to a proven-fast base.
 

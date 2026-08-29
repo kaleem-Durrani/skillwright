@@ -23,6 +23,24 @@ _The sharpest pain, the smallest diff. Measure first, then remove causes cheapes
 6. **Drop `layout` from Toast rows** if traces show layout thrash on dismissal; a simple translate-out achieves the same look.
 7. Re-run the trace. Record before/after numbers in `docs/PROGRESS.md`. Re-run axe on every dialog in both themes; confirm `prefers-reduced-motion` still zeroes the animations (`lib/motion.ts:71-72`, `MotionConfig reducedMotion="user"`).
 
+## Outcome — landed 2026-08-30
+
+**The measurement cancelled most of the phase.** Against the production preview build, opening the three heaviest dialogs already cost **0 ms total blocking time and 0 long tasks**, before any fix. The "5fps dialog" was dev-mode axe, StrictMode and unminified chunks; production was never slow. Numbers, harness and the before/after table are in [`docs/PROGRESS.md`](../PROGRESS.md).
+
+| Task                         | Outcome                                                                                                                                                                                                                        |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1 — instrument               | **Done.** Playwright against `vite build && vite preview`, long-task observer plus rAF sampler, median of 5 per dialog. This is the phase's control.                                                                           |
+| 2 — attribute dev vs prod    | **Done, and it was the answer.** Preview is smooth; the cost is dev-only. `@axe-core/react` is now opt-in (`localStorage['sw.axe'] = 'on'`) and its standing gate moved into CI.                                               |
+| 3 — split the overlay        | **A/B'd, reverted.** The animated blur costs nothing measurable. The static blur layer popped in at full strength instead of fading with the scrim — a visible regression for no measured gain. Single animated overlay stays. |
+| 4 — tween the sheet          | **Kept, for a different reason than the task gave.** Neither curve promotes to WAAPI (the gate is the value NAME, not the variant), so the tween buys determinism and token alignment, not off-main-thread animation.          |
+| 5 — defer heavy bodies       | **Tried, measured worse, reverted.** Time-to-usable 110 ms → 910 ms, a 404→228 px collapse on light dialogs, and an `inert` footer that killed Cancel/Delete for ~340 ms. Pinned against return by `e2e/dialogs.spec.ts`.      |
+| 6 — drop `layout` from Toast | **Gated on a trace; the trace said no.** Dismissing from a three-deep stack: zero long tasks, zero frames over 20 ms. `layout` stays.                                                                                          |
+| 7 — re-run and record        | **Done.** Numbers in `docs/PROGRESS.md`; axe re-run over every dialog surface in both themes, now in CI; `prefers-reduced-motion` asserted to produce zero running animations and `transform: none`.                           |
+
+**What the phase actually found.** Not a slow dialog — a **broken production bundle**. `manualChunks` classified `@tanstack/react-router` by the pnpm peer text in its path, split the package across two mutually-importing chunks, and the built SPA threw `Cannot read properties of undefined (reading 'createContext')` on every page while typecheck, lint, unit tests, `vite build` and `vite dev` all stayed green. Nothing in CI had ever loaded the artefact. That gate now exists (`e2e/build-smoke.spec.ts`, and the `e2e` job in `.github/workflows/ci.yml`), and it is the phase's most valuable output by a distance.
+
+**Handed to Phase 4:** five `MotionKit` members now have zero call sites — `variants.dialog`, `variants.sheetSide`, `variants.collapse`, `transitions.spring`, `transitions.normal` (the last became dead when the inert `transition` prop was deleted). The dead-variant sweep is 04's task 1, not a Phase 1 edit. Also handed over: `Sheet` still has no backdrop blur where `Dialog` does — a real inconsistency, but a visual decision, and this phase is explicitly barred from those.
+
 ## Explicitly out of scope
 
 Page transitions, new animation sites, LazyMotion (Phase 4's call), any visual redesign of the dialogs.

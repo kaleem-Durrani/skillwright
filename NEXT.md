@@ -1,10 +1,16 @@
 # Next
 
-**Go to B5 — the ship gate. Nothing in it has been started, and it is the only work that turns this into a link you can send someone.** In order: make the `Dockerfile` actually build (it has never been run, and `apps/api` is `noEmit` + `tsx` while the `CMD` expects `node dist/main.js` — that contract has to be settled first); make CI actually run (`.github/workflows/ci.yml` was committed in September 2025 and has never executed); deploy; then README v1 with the live link above the fold, the screenshots script, favicon and OG image, and the backup rehearsal.
+**Go to B5 — the ship gate. It is the only work left that turns this into a link you can send someone, and it is one item shorter than this file has been claiming.** In order: **make CI actually run** (`.github/workflows/ci.yml` has never executed once, and it now carries the `e2e` job that would have caught the broken bundle); deploy; then README v1 with the live link above the fold, the screenshots script, favicon and OG image, and the backup rehearsal.
+
+_The image is done._ This file said for a week that "the `Dockerfile` has never been run" and that the `noEmit` / `node dist/main.js` contract "has to be settled first". Both were false: `cc85a6e` (2026-08-23) **built and ran it**, settling the contract with an esbuild bundle step (`apps/api/scripts/build.mjs`, wired as `apps/api`'s `build`), and the six faults that surfaced are written up as lesson 38 in `docs/LESSONS-LEARNED.md`. The `docker build` job in `ci.yml` has existed since then. Corrected 2026-08-30 — and the correction is itself the argument for the rule at the bottom of this section: update the file _before_ you stop.
 
 The plan calls B5 "the real finish line" and gates it 🚩. Everything before it is unverified in the one way that counts: no clean-clone reproduction on a second machine, no deployed URL, no CI run.
 
-Phase 5 of the UI roadmap (`docs/ui-roadmap/05-DEFERRED-FEATURES.md`) has landed its five deferred features — account reinstate, the three notification enum debts, the MFA enrolment screen, presigned-PUT immutability, upload progress. Admin CRUD for departments and courses, the last B4 item, shipped during the feature roadmap (`AdminDepartments.tsx`, `AdminCourses.tsx`, `CourseFormDialog`).
+**Read this before deploying anything.** Until 2026-08-30, `main` built a production bundle that threw on every page (`Cannot read properties of undefined (reading 'createContext')`, `#root` empty) — a `manualChunks` predicate matching pnpm's peer-suffix text split `@tanstack/react-router` across two mutually-importing vendor chunks. Typecheck, lint, 178 unit tests, `vite build` and `vite dev` were **all green over it**, because nothing in the repository had ever loaded the artefact. It is fixed, and `e2e/build-smoke.spec.ts` plus the new `e2e` job in `ci.yml` now ask that question on every push. The lesson generalises past this bug: **a green board on a build nobody has run is not evidence.** That is the same claim B5 exists to settle.
+
+Phase 1 of the UI roadmap (`docs/ui-roadmap/01-DIALOG-PERFORMANCE.md`) is **landed and mostly negative**: measured against the production preview build, the dialogs already opened with 0 ms of total blocking time and 0 long tasks, so the "5fps" was a dev-mode artefact and two of the phase's four drafted fixes measured worse than what they replaced and were dropped. The outcome table is in that file; the numbers are in `docs/PROGRESS.md`. Phase 5 (`docs/ui-roadmap/05-DEFERRED-FEATURES.md`) landed earlier — account reinstate, the three notification enum debts, the MFA enrolment screen, presigned-PUT immutability, upload progress. Admin CRUD for departments and courses, the last B4 item, shipped during the feature roadmap (`AdminDepartments.tsx`, `AdminCourses.tsx`, `CourseFormDialog`).
+
+Phases 2–4 of the UI roadmap (shell/header/spacing, `DataTable`, motion systematized) are **not started** and are not the next task: none of them is a prerequisite for shipping, and Phase 4 has inherited a small dead-code sweep from Phase 1 (five `MotionKit` members with zero call sites).
 
 ---
 
@@ -28,7 +34,9 @@ One sentence at the top of this file removes that cost. It is the first thing to
 
 **Green — observed passing on 2026-08-25, not assumed:** all five golden paths were driven end to end on 2026-08-23 (the app as a student, a teacher and an admin, light and dark, at 390px and 1280px; **axe: zero violations** across nine screens in both themes, one known Radix false positive when an overlay is open). Verified fresh today: **1319 tests** (656 policy + 485 API + 178 web), `typecheck` clean in all four workspaces, `lint` clean in shared + api + web/src, `build` clean for api + web, `check:brand`, `check:mobile-first`, `docs:permissions --check`, and a from-scratch `migrate deploy` through 0008. One environmental caveat: `turbo run typecheck/build` re-runs `prisma generate` first, and on this machine that step currently fails with EPERM renaming `query_engine-windows.dll.node` — a long-running process has the engine mapped. The checked-in generated client is current (everything downstream of it compiles and passes); run the package scripts directly until whatever holds the DLL exits.
 
-**Still never executed:** the `Dockerfile` and both CI workflows. Everything else in this repository has now run at least once.
+**Verified fresh on 2026-08-30 (web only — the API and policy suites were not re-run):** `typecheck`, `lint`, **178 web unit tests**, `build`, `check:brand`, `check:mobile-first` and `format:check` all clean, plus **78 Playwright tests green across all three viewport projects** (desktop Chromium, Pixel 7, iPhone 14 — the WebKit project had never been run on this machine before today; `pnpm exec playwright install webkit` is a one-off).
+
+**Still never executed:** both CI workflows — including the new `e2e` job, which is the one that would have caught the broken bundle. The `Dockerfile` is no longer on this list: it was built and run on 2026-08-23. Everything else in this repository has now run at least once.
 
 ## Starting a session
 
@@ -43,7 +51,7 @@ Tests run against a separate `skillwright_test` database, derived automatically 
 
 ## Known conflicts to resolve
 
-- **Docker `dist` contract.** `apps/api` is `noEmit` + `tsx` because `shared`/`db` publish TypeScript source, but the `Dockerfile` `CMD` expects `node dist/main.js`. The image has still never been built.
+- ~~**Docker `dist` contract.**~~ **Resolved 2026-08-23 (`cc85a6e`).** `apps/api` stays `noEmit` — `shared`/`db` publish TypeScript source and have no build step — and `apps/api/scripts/build.mjs` bundles `src/main.ts` to `dist/main.js` with those two compiled in and every real dependency external. `@prisma/client` is external and had to become a direct dependency of the API. Kept here because the resolution is the interesting part, not the conflict.
 - **`packages/db/.env.example` still says port 5432** while everything else says 5433. A fresh clone that copies it connects to the wrong Postgres.
 - **`apps/web/tsconfig.json` does not extend `tsconfig.base.json`.** It redeclares every option and sets `exactOptionalPropertyTypes: false`, omitting `noUncheckedIndexedAccess` — so the workspace with the most code is the one not held to the repo's strict standard. Closing it is a decision, not a defect; measure the fallout first.
 - **`role="none"` around the panel's empty/loading states does not do what it looks like.** Presentation/none re-parents its children to the menu, so the non-menuitem content is still owned by `role="menu"`. The correct fix is a Radix Popover for a panel whose content is not a list of verbs — deferred because it costs the roving focus.
