@@ -112,7 +112,32 @@ export function createMotionKit(reduced: boolean): MotionKit {
         visible: {
           opacity: 1,
           y: 0,
-          transition: reduced ? t(DURATION.fast) : { type: 'spring', stiffness: 380, damping: 36 },
+          /*
+           * A bezier tween, per Phase 1's task 4 — but NOT for the reason that
+           * task gave. It assumed a tween "promotes cleanly to WAAPI and runs off
+           * the main thread"; it does not, and neither did the spring it replaced.
+           * Motion accelerates a value only when its NAME is in motion-dom's
+           * `acceleratedValues` — opacity, clipPath, filter, transform,
+           * backgroundColor (`supportsBrowserAnimation`, motion-dom 12.43). This
+           * card animates `y`, a transform SUB-value that Motion composes into
+           * `transform` itself, so it stays on the rAF loop either way and
+           * `document.getAnimations()` never lists it. (The sibling scrim's
+           * `opacity` fade IS accelerated — same variants, different value name,
+           * which is what proves the gate is the name and not the variant.) Only
+           * a whole-`transform` string keyframe would move this off the main
+           * thread, and that is a Phase 4 experiment, not a Phase 1 claim.
+           *
+           * What the tween is actually worth, then: a deterministic DURATION.slow
+           * length instead of a spring's rest-detected tail, and timing that comes
+           * from the same tokens as everything else. Phase 1 measured the open at
+           * 0 ms total blocking time in the production build with EITHER curve
+           * (docs/PROGRESS.md), so this is a consistency change, not a fix.
+           * Callers that genuinely want spring physics still have
+           * `transitions.spring`.
+           */
+          transition: reduced
+            ? t(DURATION.fast)
+            : { duration: DURATION.slow, ease: EASE.decelerate },
         },
         exit: {
           opacity: reduced ? 0 : 1,
@@ -125,7 +150,10 @@ export function createMotionKit(reduced: boolean): MotionKit {
         visible: {
           opacity: 1,
           x: 0,
-          transition: reduced ? t(DURATION.fast) : { type: 'spring', stiffness: 380, damping: 36 },
+          // Same reasoning as sheetBottom. (No call site today — see Sheet.tsx.)
+          transition: reduced
+            ? t(DURATION.fast)
+            : { duration: DURATION.slow, ease: EASE.decelerate },
         },
         exit: {
           opacity: reduced ? 0 : 1,

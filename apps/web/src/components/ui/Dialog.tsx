@@ -95,7 +95,15 @@ export function DialogContent({
   ...props
 }: DialogContentProps) {
   const { open } = useContext(DialogContext);
-  const { variants, transitions } = useMotionKit();
+  /*
+   * `transitions` is deliberately not taken: every variant this component
+   * animates declares its own transition, and a resolved variant's transition
+   * shadows the `transition` prop entirely (it is only consulted as a default,
+   * and only merged under `inherit: true`). The prop that used to sit on the
+   * card advertised 220 ms while the variant ran 340 ms — inert, and misleading
+   * about the timing nine lines away in the kit.
+   */
+  const { variants } = useMotionKit();
 
   return (
     <AnimatePresence>
@@ -128,7 +136,6 @@ export function DialogContent({
               initial="hidden"
               animate="visible"
               exit="exit"
-              transition={transitions.normal}
               {...props}
             >
               {/* Drag affordance. Decorative — the sheet is dismissed by the

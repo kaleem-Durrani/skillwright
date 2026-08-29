@@ -30,22 +30,38 @@ const container = document.getElementById('root');
 if (!container) throw new Error('Root container missing from index.html');
 
 /**
- * Accessibility failures are reported in the browser console during development,
- * on every render, for every developer — not once a quarter in an audit.
+ * Accessibility failures are reported in the browser console during development —
+ * for developers who ask for it — not once a quarter in an audit. The import is
+ * dynamic and DEV-gated so axe never reaches a production bundle.
  *
- * The import is dynamic and DEV-gated so axe never reaches a production bundle.
+ * The auditor is opt-IN (`localStorage['sw.axe'] = 'on'`) because Phase 1 measured
+ * it as the single largest source of dev-mode jank: axe re-audits the whole
+ * document after every commit, so opening a dialog fires a full-page scan on the
+ * main thread the animation is using, and no debounce fixes that — a scan lands
+ * mid-interaction whenever the user pauses for its duration. The production build
+ * has no such cost at all (0 ms total blocking time opening the three heaviest
+ * dialogs; the numbers are in docs/PROGRESS.md), which is the whole reason the
+ * "5fps dialog" was a dev-only artefact.
+ *
+ * Turning it off by default trades a per-render dev signal for an on-demand one,
+ * so the standing gate moved into CI instead: e2e/dialog-perf.spec.ts runs axe
+ * over every dialog surface in both themes, and that suite now runs on every push
+ * (.github/workflows/ci.yml). Set the flag whenever you want the live console
+ * feedback back; the debounce below is deliberately long so a scan waits out
+ * animations and typing bursts rather than interrupting them.
  */
 async function mountAxe() {
   if (!import.meta.env.DEV) return;
   try {
+    // Reading storage can throw outright where site data is blocked, which is
+    // why this sits inside the same try/catch as the import rather than above it.
+    if (localStorage.getItem('sw.axe') !== 'on') return;
     const [{ default: axe }, React, ReactDOM] = await Promise.all([
       import('@axe-core/react'),
       import('react'),
       import('react-dom'),
     ]);
-    // 1000ms debounce: axe re-scans on every commit, and a tighter window makes
-    // typing in a form feel heavy.
-    await axe(React, ReactDOM, 1000);
+    await axe(React, ReactDOM, 5000);
   } catch (error) {
     logger.warn('axe-core failed to start', {
       message: error instanceof Error ? error.message : String(error),

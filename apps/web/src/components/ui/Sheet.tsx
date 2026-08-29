@@ -83,7 +83,15 @@ export function SheetContent({
   ...props
 }: SheetContentProps) {
   const { open } = useContext(SheetContext);
-  const { variants, transitions } = useMotionKit();
+  /*
+   * `transitions` is deliberately not taken: every variant this component
+   * animates declares its own transition, and a resolved variant's transition
+   * shadows the `transition` prop entirely (it is only consulted as a default,
+   * and only merged under `inherit: true`). The prop that used to sit on the
+   * card advertised 220 ms while the variant ran 340 ms — inert, and misleading
+   * about the timing nine lines away in the kit.
+   */
+  const { variants } = useMotionKit();
 
   return (
     <AnimatePresence>
@@ -112,13 +120,16 @@ export function SheetContent({
                   : 'md:start-0 md:end-auto md:border-e md:border-line-subtle',
                 className,
               )}
-              /* Different geometry, different motion: it slides up from the
-                 bottom on a phone and in from the edge on a desktop. */
+              /* One entrance at every breakpoint. The old comment here claimed
+                 an edge-slide on desktop, but the variant below has always been
+                 `sheetBottom` — the md+ panel is docked full-height, so a
+                 vertical entrance reads the same way it does on the phone.
+                 `variants.sheetSide` has no call site; Phase 4 owns the
+                 dead-variant sweep (docs/ui-roadmap/04-MOTION-SYSTEM.md). */
               variants={variants.sheetBottom}
               initial="hidden"
               animate="visible"
               exit="exit"
-              transition={transitions.normal}
               {...props}
             >
               <div
