@@ -176,9 +176,13 @@ function CredentialsStep({
             required
             error={form.formState.errors.password?.message}
             action={
+              /* ADR 0008 puts the touch-target floor at 44x44 CSS px, and a 12px
+                 label-row link is 18px tall. The padding buys the target; the
+                 equal negative margin gives the row its 18px back, so the tap
+                 area grows and the layout does not. */
               <Link
                 to="/forgot-password"
-                className="text-xs font-medium text-fg-link underline-offset-4 hover:underline"
+                className="-my-[13px] py-[13px] text-xs font-medium text-fg-link underline-offset-4 hover:underline"
               >
                 Forgot password?
               </Link>

@@ -24,6 +24,8 @@ test.describe('mobile-first shell', () => {
     await page.goto('/login');
 
     const controls = page.locator('button:visible, a:visible, input:visible');
+    // The route chunk can land after the load event; wait for the shell to exist.
+    await controls.first().waitFor({ state: 'visible' });
     const count = await controls.count();
     expect(count).toBeGreaterThan(0);
 
