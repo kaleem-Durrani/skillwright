@@ -84,13 +84,6 @@ export const isParticipant: Rule = rule(
   (actor, subject) => actor !== null && (subject.participantIds?.includes(actor.id) ?? false),
 );
 
-/** Actor sent the message. */
-export const isSender: Rule = rule(
-  'isSender',
-  (actor, subject) =>
-    actor !== null && subject.senderId !== undefined && subject.senderId === actor.id,
-);
-
 /** Subject is live. Actor-independent, so it is the only thing anonymous reads lean on. */
 export const isPublished: Rule = rule(
   'isPublished',

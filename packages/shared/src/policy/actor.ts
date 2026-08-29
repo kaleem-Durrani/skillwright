@@ -95,9 +95,6 @@ export interface Subject {
   /** Active participants of a Conversation (rows with `leftAt` null). */
   participantIds?: readonly string[];
 
-  /** `Message.senderId`. */
-  senderId?: string;
-
   /**
    * The subject COURSE's own requirement: the id of the course a student must
    * complete first, or null when the course names no prerequisite.

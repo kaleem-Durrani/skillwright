@@ -14,7 +14,6 @@ export {
   isPublic,
   isPublished,
   isSelf,
-  isSender,
   not,
   notDeleted,
   or,
