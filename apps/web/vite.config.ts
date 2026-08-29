@@ -57,13 +57,48 @@ export default defineConfig({
     cssCodeSplit: true,
     rollupOptions: {
       output: {
-        // Keep the router/query runtime out of every route chunk. Route code is
-        // split by the concrete dynamic imports in src/routes/**, not here.
+        /*
+         * Vendor chunks are chosen by PACKAGE NAME, never by substring over the
+         * raw module id — that distinction is not cosmetic. pnpm encodes peer
+         * dependencies in its store directory names, so the id for
+         * @tanstack/react-router contains the literal text `react-dom`:
+         *
+         *   node_modules/.pnpm/@tanstack+react-router@1.130.2_react-dom@19.2.8_react@19.2.8/
+         *     node_modules/@tanstack/react-router/dist/esm/index.js
+         *
+         * An `id.includes('react-dom')` test therefore classified that package
+         * by its PEERS. It pulled @tanstack/react-router into vendor-react while
+         * @tanstack/router-core (no react-dom peer, so no such text) stayed in
+         * vendor-tanstack — one package split across two chunks that then
+         * imported each other. Rollup initialised them in an order where
+         * @tanstack/react-router ran before React existed, and the built SPA
+         * threw "Cannot read properties of undefined (reading 'createContext')"
+         * on every page while dev, tests and `vite build` all stayed green.
+         * That shipped on main and was found by loading the preview build in a
+         * browser, which is now what e2e/build-smoke.spec.ts does in CI.
+         *
+         * Matching the package name also makes the split independent of where
+         * the repository is checked out: a path containing "motion" or
+         * "@tanstack" no longer collapses every vendor module into one chunk.
+         *
+         * Each bucket below depends only on vendor-react, and React depends on
+         * none of them, so the import graph between chunks cannot contain a
+         * cycle. Route code is split by the concrete dynamic imports in
+         * src/routes/**, not here.
+         */
         manualChunks(id) {
-          if (!id.includes('node_modules')) return undefined;
-          if (id.includes('react-dom') || id.includes('/react/')) return 'vendor-react';
-          if (id.includes('@tanstack')) return 'vendor-tanstack';
-          if (id.includes('motion')) return 'vendor-motion';
+          const marker = id.lastIndexOf('node_modules/');
+          if (marker === -1) return undefined;
+          const segments = id.slice(marker + 'node_modules/'.length).split('/');
+          const pkg = segments[0]?.startsWith('@') ? `${segments[0]}/${segments[1]}` : segments[0];
+          if (!pkg) return undefined;
+
+          if (pkg === 'react' || pkg === 'react-dom' || pkg === 'scheduler') return 'vendor-react';
+          if (pkg.startsWith('@tanstack/')) return 'vendor-tanstack';
+          if (pkg === 'motion' || pkg === 'framer-motion' || pkg.startsWith('motion-'))
+            return 'vendor-motion';
+          if (pkg.startsWith('@radix-ui/') || pkg.startsWith('@floating-ui/'))
+            return 'vendor-radix';
           return undefined;
         },
       },
