@@ -125,7 +125,7 @@ jobs:
       - run: pnpm check:mobile-first
 
   unit:
-    name: unit tests (incl. policy matrix)
+    name: unit tests (policy matrix + web components)
     needs: setup
     runs-on: ubuntu-latest
     steps:
@@ -145,6 +145,13 @@ jobs:
       # in seconds rather than after a container boot.
       - name: Policy matrix and shared unit tests
         run: pnpm --filter @skillwright/shared test -- --coverage
+
+      # apps/web's suite ran in NO job until 2026-08-30 — `unit` filtered to shared
+      # and `integration` to api, so 178 tests pinning role-gated rendering, form
+      # validation against the shared schemas and the toast/dialog contracts were
+      # gating nothing. jsdom, no I/O, no containers: it belongs in the fast job.
+      - name: Web component tests
+        run: pnpm --filter @skillwright/web test
 
       - name: Upload coverage
         if: always()
