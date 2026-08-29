@@ -15,7 +15,11 @@ permissions:
 
 env:
   NODE_VERSION: '22'
-  PNPM_VERSION: '9'
+  # No PNPM_VERSION here on purpose. pnpm/action-setup@v4 reads the version from
+  # the root package.json's `packageManager` field, and passing a `version` input
+  # as well is not a fallback — the action compares the two as raw strings and
+  # THROWS on any difference. '9' vs 'pnpm@9.15.4' differs, so every job in this
+  # file aborted at the setup step. One source of truth: package.json.
   TURBO_TELEMETRY_DISABLED: '1'
   DO_NOT_TRACK: '1'
 
@@ -28,8 +32,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -45,8 +47,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -62,8 +62,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -79,8 +77,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -98,8 +94,6 @@ jobs:
         with:
           fetch-depth: 0
       - uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -115,8 +109,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -131,8 +123,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -200,8 +190,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -264,8 +252,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -309,8 +295,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -345,8 +329,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -384,6 +366,7 @@ jobs:
     name: CI
     if: always()
     needs:
+      - setup
       - typecheck
       - lint
       - format
@@ -397,10 +380,29 @@ jobs:
       - permissions-doc
     runs-on: ubuntu-latest
     steps:
-      - name: Fail if any required job failed
+      # Enumerating the BAD states is how this gate came to certify a commit that
+      # never built. If `setup` fails, every job that needs it reports `skipped` —
+      # not `failure` — and `docker`, the one job with no `needs:`, still runs and
+      # passes on its own. The old grep for `failure|cancelled` matched neither, so
+      # the gate printed "All required jobs succeeded" over ten jobs that had not
+      # executed a single test. `setup` was also absent from the needs list, so its
+      # own failure never entered the join to be matched in the first place.
+      #
+      # Assert the one acceptable state instead of listing the unacceptable ones:
+      # every result must be exactly `success`. That closes `skipped` and whatever
+      # result value GitHub adds next, together.
+      - name: Every required job must have succeeded
         run: |
-          if echo '${{ join(needs.*.result, ',') }}' | grep -qE 'failure|cancelled'; then
-            echo "One or more required jobs did not succeed."
+          results='${{ join(needs.*.result, " ") }}'
+          echo "results: ${results}"
+          if [ -z "${results}" ]; then
+            echo "::error title=CI::No job results reached the gate."
             exit 1
           fi
+          for result in ${results}; do
+            if [ "${result}" != "success" ]; then
+              echo "::error title=CI::A required job reported '${result}'. A skipped job is a failure here."
+              exit 1
+            fi
+          done
           echo "All required jobs succeeded."

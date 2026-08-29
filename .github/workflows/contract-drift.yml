@@ -31,7 +31,11 @@ permissions:
 
 env:
   NODE_VERSION: '22'
-  PNPM_VERSION: '9'
+  # No PNPM_VERSION here on purpose. pnpm/action-setup@v4 reads the version from
+  # the root package.json's `packageManager` field, and passing a `version` input
+  # as well is not a fallback — the action compares the two as raw strings and
+  # THROWS on any difference. '9' vs 'pnpm@9.15.4' differs, so every job in this
+  # file aborted at the setup step. One source of truth: package.json.
   TURBO_TELEMETRY_DISABLED: '1'
   # The column that gets renamed. Chosen because it is read by the API, carried in
   # a DTO, and rendered by the SPA — so it exercises the whole chain.
@@ -46,8 +50,6 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
 
       - uses: actions/setup-node@v4
         with:
