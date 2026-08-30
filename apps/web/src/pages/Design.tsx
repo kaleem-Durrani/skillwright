@@ -14,7 +14,7 @@ import {
   CardTitle,
 } from '@/components/ui/Card';
 import { Checkbox } from '@/components/ui/Checkbox';
-import { DataList } from '@/components/ui/DataList';
+import { DataTable } from '@/components/ui/DataTable';
 import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/Dialog';
 import {
   DropdownMenu,
@@ -520,8 +520,8 @@ function Gallery() {
         </ScrollArea>
       </Section>
 
-      <Section title="DataList — cards below md, table from md">
-        <DataList
+      <Section title="DataTable — one rendering, chosen by viewport">
+        <DataTable
           items={DEMO_ROWS}
           caption="Demo enrolments"
           getKey={(row) => row.id}
@@ -545,7 +545,7 @@ function Gallery() {
             </Card>
           )}
         />
-        <DataList
+        <DataTable
           items={[] as DemoRow[]}
           caption="Empty demo"
           getKey={(row) => row.id}
@@ -553,7 +553,7 @@ function Gallery() {
           renderCard={(row) => <Card>{row.name}</Card>}
           empty={<EmptyState variant="no-results" compact onAction={() => undefined} />}
         />
-        <DataList
+        <DataTable
           items={[] as DemoRow[]}
           loading
           skeletonRows={2}

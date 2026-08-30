@@ -38,7 +38,7 @@ import { ResourceFormDialog } from '@/components/resources/ResourceFormDialog';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button, IconButton } from '@/components/ui/Button';
 import { Card, CardTitle } from '@/components/ui/Card';
-import { DataList } from '@/components/ui/DataList';
+import { DataTable } from '@/components/ui/DataTable';
 import { Dialog, DialogContent } from '@/components/ui/Dialog';
 import {
   DropdownMenu,
@@ -571,7 +571,7 @@ export function CourseDetailPage() {
           {resources.isPending ? (
             <SkeletonList rows={3} />
           ) : (
-            <DataList
+            <DataTable
               items={resources.data?.data ?? []}
               caption="Course resources"
               getKey={(resource) => resource.id}
@@ -604,12 +604,13 @@ export function CourseDetailPage() {
                 },
                 /*
                  * The affordance has to be in BOTH renderings, because they are not a
-                 * fallback and a primary: `DataList` puts the card list and the table in
-                 * the DOM together and switches them with `display` at `md`
-                 * (DataList.tsx:75-101). Wiring only `renderCard` would have shipped a
-                 * download button that no desktop viewport can ever show — the tab has
-                 * looked complete on a phone and had no way to fetch a file on a laptop
-                 * for as long as the dead button existed.
+                 * fallback and a primary: `DataTable` renders exactly one of the card
+                 * list or the table depending on viewport (DataTable.tsx's header
+                 * comment), chosen by `useIsDesktop()`, never both at once. Wiring only
+                 * `renderCard` would have shipped a download button that no desktop
+                 * viewport can ever show — the tab has looked complete on a phone and
+                 * had no way to fetch a file on a laptop for as long as the dead button
+                 * existed.
                  */
                 {
                   id: 'open',
@@ -624,20 +625,15 @@ export function CourseDetailPage() {
                       />
                     ) : null,
                 },
-                {
-                  id: 'actions',
-                  header: 'Actions',
-                  align: 'end',
-                  cell: (resource) => (
-                    <ResourceRowMenu
-                      resource={resource}
-                      course={data}
-                      onEdit={() => setResourceForm(resource)}
-                      onDelete={() => setDeletingResource(resource)}
-                    />
-                  ),
-                },
               ]}
+              actions={(resource) => (
+                <ResourceRowMenu
+                  resource={resource}
+                  course={data}
+                  onEdit={() => setResourceForm(resource)}
+                  onDelete={() => setDeletingResource(resource)}
+                />
+              )}
               renderCard={(resource) => {
                 const Icon = RESOURCE_ICON[resource.type];
                 return (
@@ -667,10 +663,13 @@ export function CourseDetailPage() {
                     </div>
                     {/*
                       Third column of the card, beside the title block rather than under
-                      it: `DataList` renders BOTH this and the table and switches them
-                      with `display` (DataList.tsx:75-101), so a menu wired into only the
-                      table would be missing on every phone. It renders `null` for a
-                      viewer who may do neither thing, which is why it is unguarded here.
+                      it: `DataTable`'s `actions` prop has no card-view counterpart — the
+                      card is the PRIMARY rendering below `md`, not a fallback, and
+                      `renderCard` is caller-owned markup with no slot `actions` could
+                      inject into (DataTable.tsx's header comment). Below `md` this menu
+                      would simply not exist without its own call here. It renders `null`
+                      for a viewer who may do neither thing, which is why it is unguarded
+                      here.
 
                       `self-start` for the same reason `ResourceAccess` above carries it:
                       `Card` is a flex row and a flex item defaults to `stretch`, so a
@@ -795,7 +794,7 @@ export function CourseDetailPage() {
               </div>
             ) : null}
 
-            <DataList
+            <DataTable
               items={enrollments.data?.data ?? []}
               loading={enrollments.isPending}
               caption="Enrolled students and requests"
@@ -837,26 +836,18 @@ export function CourseDetailPage() {
                   header: 'Status',
                   cell: (entry) => <StatusChip status={entry.status} />,
                 },
-                {
-                  id: 'actions',
-                  header: 'Decision',
-                  align: 'end',
-                  cell: (entry) =>
-                    entry.status === 'PENDING' ? (
-                      <DecisionButtons
-                        onApprove={() => decide.mutate({ id: entry.id, action: 'approve' })}
-                        onReject={() => setRejecting(entry)}
-                        disabled={
-                          decide.isPending || !policy.can('enrollment:approve', viewerSubject)
-                        }
-                      />
-                    ) : (
-                      <span className="text-xs text-fg-tertiary">
-                        {formatDate(entry.decidedAt)}
-                      </span>
-                    ),
-                },
               ]}
+              actions={(entry) =>
+                entry.status === 'PENDING' ? (
+                  <DecisionButtons
+                    onApprove={() => decide.mutate({ id: entry.id, action: 'approve' })}
+                    onReject={() => setRejecting(entry)}
+                    disabled={decide.isPending || !policy.can('enrollment:approve', viewerSubject)}
+                  />
+                ) : (
+                  <span className="text-xs text-fg-tertiary">{formatDate(entry.decidedAt)}</span>
+                )
+              }
               renderCard={(entry) => (
                 <Card className="flex flex-col gap-3">
                   <div className="flex items-start gap-3">
@@ -1102,9 +1093,10 @@ function ResourceAccess({
 
 /**
  * Edit and Delete for ONE resource row, rendered identically by the card list and by the
- * table for the same reason `ResourceAccess` is a component: `DataList` keeps both
- * renderings in the DOM and switches them with `display`, so an action wired into one of
- * them is missing at half the viewports.
+ * table for the same reason `ResourceAccess` is a component: `DataTable` renders exactly
+ * one of the two per viewport and its `actions` prop has no card-view counterpart, so the
+ * menu has to be called once from `actions` for the table and once from `renderCard` for
+ * the card, or it would be missing below `md`.
  *
  * THE SUBJECT IS THE ROW, NOT THE COURSE. `resource:update` and `resource:delete` are
  * `ownsCourse` for a TEACHER (policy.ts:229-240), which reads `courseTeacherId` — a field

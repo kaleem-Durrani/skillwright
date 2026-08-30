@@ -123,8 +123,7 @@ beforeEach(() => {
   apiGet.mockResolvedValue(
     paginated([
       row(ROW_A_ID),
-      // A distinct title: DataList renders every row in BOTH its mobile card and
-      // its md+ table, so identical titles would collide under getByRole.
+      // A distinct title, so the two rows' links never collide under getByRole.
       row(ROW_B_ID, { title: 'Workshop closed Monday', slug: 'workshop-closed-monday' }),
     ]),
   );
@@ -175,10 +174,11 @@ describe('AnnouncementsPage text filter', () => {
   it('renders rows from the API with links', async () => {
     renderPage();
 
-    // DataList keeps BOTH surfaces in the DOM (mobile cards, md+ table), so a
-    // row yields two anchors carrying the same href.
+    // `DataTable` renders exactly one branch per viewport (jsdom's stubbed
+    // matchMedia never matches `md`, per vitest.setup.ts, so this is the card
+    // branch) — one anchor per row, not two.
     const links = await screen.findAllByRole('link', { name: /ppe sign-off deadline/i });
-    expect(links).toHaveLength(2);
+    expect(links).toHaveLength(1);
     for (const link of links) {
       expect(link).toHaveAttribute('href', `/announcements/${ROW_A_ID}`);
     }

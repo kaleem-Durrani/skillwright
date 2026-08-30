@@ -187,8 +187,8 @@ describe('Courses catalogue — Phase 6 prerequisite badges', () => {
       data: [{ id: '01JGXDFAM0K2Z1GYCSNM5F5RDC', course: { id: RUNG_ID } }],
     });
 
-    // DataList renders every row in BOTH its mobile card and its md+ table, so
-    // the loaded state is observed on all matching links, not one.
+    // `findAllByRole` rather than `findByRole`: it is only the row's own link
+    // that matters here, not how many `DataTable` happens to render for it.
     await screen.findAllByRole('link', { name: 'Welding Fundamentals' });
     await waitFor(() => expect(screen.queryByText('Requires: SMAW-100 SMAW Level 1')).toBeNull());
   });

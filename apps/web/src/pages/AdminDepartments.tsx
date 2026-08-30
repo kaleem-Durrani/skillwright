@@ -8,10 +8,9 @@ import type { DepartmentSummary } from '@/lib/types';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/Button';
 import { Card, CardTitle } from '@/components/ui/Card';
-import { DataList } from '@/components/ui/DataList';
+import { DataTable } from '@/components/ui/DataTable';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
-import { Pagination } from '@/components/ui/Pagination';
 import { Gate } from '@/components/Gate';
 import { DepartmentFormDialog } from '@/components/departments/DepartmentFormDialog';
 import { DepartmentRowActions } from '@/components/departments/DepartmentRowActions';
@@ -57,7 +56,9 @@ export function AdminDepartmentsPage() {
   const isFiltered = Boolean(search.q);
 
   return (
-    <div className="flex flex-col">
+    // `min-h-0 flex-1` so the table below can claim the remaining height — the
+    // register is this screen's main content, same contract as AdminUsers.
+    <div className="flex min-h-0 flex-1 flex-col">
       <PageHeader
         title="Departments"
         description="The structure courses and members hang off."
@@ -99,7 +100,8 @@ export function AdminDepartmentsPage() {
         ) : null}
       </div>
 
-      <DataList
+      <DataTable
+        fillHeight
         items={departments.data?.data ?? []}
         loading={departments.isPending}
         caption="Departments"
@@ -126,18 +128,25 @@ export function AdminDepartmentsPage() {
             ),
             secondary: true,
           },
-          {
-            id: 'actions',
-            header: 'Actions',
-            align: 'end',
-            cell: (department) => (
-              <DepartmentRowActions
-                department={{ id: department.id, name: department.name }}
-                onEdit={() => setEditing(department)}
-              />
-            ),
-          },
         ]}
+        actions={(department) => (
+          <DepartmentRowActions
+            department={{ id: department.id, name: department.name }}
+            onEdit={() => setEditing(department)}
+          />
+        )}
+        pagination={
+          departments.data
+            ? {
+                page: departments.data.meta.page,
+                totalPages: departments.data.meta.totalPages,
+                total: departments.data.meta.total,
+                limit: departments.data.meta.limit,
+                onPageChange: (page) =>
+                  void navigate({ search: (previous) => ({ ...previous, page }) }),
+              }
+            : undefined
+        }
         renderCard={(department) => (
           <Card className="flex items-start justify-between gap-3">
             <div className="flex min-w-0 flex-col">
@@ -180,17 +189,6 @@ export function AdminDepartmentsPage() {
           )
         }
       />
-
-      {departments.data ? (
-        <Pagination
-          label="Departments pagination"
-          page={departments.data.meta.page}
-          totalPages={departments.data.meta.totalPages}
-          total={departments.data.meta.total}
-          limit={departments.data.meta.limit}
-          onPageChange={(page) => void navigate({ search: (previous) => ({ ...previous, page }) })}
-        />
-      ) : null}
 
       <DepartmentFormDialog open={creating} onOpenChange={setCreating} />
       {editing ? (

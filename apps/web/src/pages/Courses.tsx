@@ -57,10 +57,9 @@ function nextIntakeCell(course: CourseListItem): { label: string; seats: string 
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/Button';
 import { Card, CardTitle } from '@/components/ui/Card';
-import { DataList } from '@/components/ui/DataList';
+import { DataTable } from '@/components/ui/DataTable';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
-import { Pagination } from '@/components/ui/Pagination';
 import { StatusChip } from '@/components/ui/StatusChip';
 import { Gate } from '@/components/Gate';
 import { Route } from '@/routes/_app/courses';
@@ -138,7 +137,9 @@ export function CoursesPage() {
   const isFiltered = Boolean(search.q || search.departmentId || search.status);
 
   return (
-    <div className="flex flex-col">
+    // `min-h-0 flex-1` so the table below can claim the remaining height — the
+    // catalogue is this screen's main content, same contract as AdminUsers.
+    <div className="flex min-h-0 flex-1 flex-col">
       <PageHeader
         title="Courses"
         description="Everything you are entitled to see. Private courses are not listed."
@@ -179,7 +180,8 @@ export function CoursesPage() {
         ) : null}
       </div>
 
-      <DataList
+      <DataTable
+        fillHeight
         items={courses.data?.data ?? []}
         loading={courses.isPending}
         caption="Courses"
@@ -336,18 +338,19 @@ export function CoursesPage() {
             />
           )
         }
+        pagination={
+          courses.data
+            ? {
+                page: courses.data.meta.page,
+                totalPages: courses.data.meta.totalPages,
+                total: courses.data.meta.total,
+                limit: courses.data.meta.limit,
+                onPageChange: (page) =>
+                  void navigate({ search: (previous) => ({ ...previous, page }) }),
+              }
+            : undefined
+        }
       />
-
-      {courses.data ? (
-        <Pagination
-          label="Courses pagination"
-          page={courses.data.meta.page}
-          totalPages={courses.data.meta.totalPages}
-          total={courses.data.meta.total}
-          limit={courses.data.meta.limit}
-          onPageChange={(page) => void navigate({ search: (previous) => ({ ...previous, page }) })}
-        />
-      ) : null}
     </div>
   );
 }

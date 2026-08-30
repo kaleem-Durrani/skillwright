@@ -5,8 +5,11 @@
  * its forensics.
  *
  * Harness as in CoursePublishButton.test.tsx: network stubbed at `@/lib/api`, viewer
- * planted under `qk.session`. DataList keeps BOTH renderings in the DOM (they are
- * switched by CSS at md), so row clicks address the table copy explicitly.
+ * planted under `qk.session`. `DataTable` renders exactly one of its two branches
+ * per viewport (`lib/media.ts`'s `useIsDesktop`), so the row-click test below stubs
+ * `matchMedia` to the desktop branch and addresses the table's `<tr>` explicitly —
+ * mirroring `DataTable.test.tsx`'s own `stubViewport` pattern rather than asserting
+ * on whichever branch jsdom's default happens to pick.
  */
 import type { SessionUser } from '@/lib/session';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -14,6 +17,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { qk } from '@/lib/query';
+import { MD_UP } from '@/lib/media';
 
 type ApiFetch = (path: string, options?: { query?: Record<string, unknown> }) => Promise<unknown>;
 
@@ -71,6 +75,20 @@ function viewer(overrides: Partial<SessionUser> = {}): SessionUser {
     totpEnabled: false,
     ...overrides,
   };
+}
+
+/** Forces `useIsDesktop()` true, so `DataTable` mounts its table branch. */
+function stubDesktop(): void {
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: query === MD_UP,
+    media: query,
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }));
 }
 
 function renderPage(session: SessionUser): void {
@@ -145,10 +163,11 @@ describe('AdminOverviewPage — a feed row opens its forensics', () => {
       return Promise.reject(new Error(`unexpected GET ${String(path)}`));
     });
 
+    // The table branch, specifically: its <tr> carries the onClick, and asserting
+    // against jsdom's default (card) branch would need a different locator.
+    stubDesktop();
     renderPage(viewer());
 
-    // A rendered feed row exists on BOTH DataList renderings; click the table copy
-    // explicitly (its <tr> carries the onClick).
     await screen.findByText('UPDATE');
     const cell = screen.getAllByText('Ada Admin')[0] as HTMLElement;
     fireEvent.click(cell.closest('tr') ?? cell);

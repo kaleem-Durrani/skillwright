@@ -17,9 +17,8 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { AuditDetailDialog } from '@/components/audit/AuditDetailDialog';
 import { Button } from '@/components/ui/Button';
 import { Card, CardTitle } from '@/components/ui/Card';
-import { DataList } from '@/components/ui/DataList';
+import { DataTable } from '@/components/ui/DataTable';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { Pagination } from '@/components/ui/Pagination';
 import { SkeletonStats } from '@/components/ui/Skeleton';
 
 interface AdminStats {
@@ -158,16 +157,17 @@ export function AdminOverviewPage() {
             </Button>
           </div>
 
-          <DataList
+          <DataTable
             items={audit.data?.data ?? []}
             loading={audit.isPending}
             skeletonRows={5}
             caption="Recent activity"
             getKey={(entry) => entry.id}
             /*
-             * A row opens its forensics. DataList wires BOTH renderings to this one
-             * callback — the card list wraps each card in a real button, so the tap
-             * target on a phone is the whole card (DataList.tsx:83-97).
+             * A row opens its forensics. `DataTable` wires whichever branch it mounts
+             * to this one callback — below `md` the card list wraps each card in a
+             * real button, so the tap target on a phone is the whole card
+             * (DataTable.tsx's card branch).
              */
             onRowClick={(entry) => setOpenAuditId(entry.id)}
             columns={[
@@ -213,18 +213,18 @@ export function AdminOverviewPage() {
                 description="Every create, update, delete and sign-in lands here automatically."
               />
             }
+            pagination={
+              audit.data
+                ? {
+                    page: audit.data.meta.page,
+                    totalPages: audit.data.meta.totalPages,
+                    total: audit.data.meta.total,
+                    limit: audit.data.meta.limit,
+                    onPageChange: setAuditPage,
+                  }
+                : undefined
+            }
           />
-
-          {audit.data ? (
-            <Pagination
-              label="Recent activity pagination"
-              page={audit.data.meta.page}
-              totalPages={audit.data.meta.totalPages}
-              total={audit.data.meta.total}
-              limit={audit.data.meta.limit}
-              onPageChange={setAuditPage}
-            />
-          ) : null}
         </section>
       ) : null}
 

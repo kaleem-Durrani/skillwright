@@ -24,10 +24,9 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { Badge, type BadgeProps } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardTitle } from '@/components/ui/Card';
-import { DataList } from '@/components/ui/DataList';
+import { DataTable } from '@/components/ui/DataTable';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
-import { Pagination } from '@/components/ui/Pagination';
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/Select';
 import { StatusChip } from '@/components/ui/StatusChip';
 import { Gate } from '@/components/Gate';
@@ -117,7 +116,9 @@ export function AnnouncementsPage() {
   const canCreate = policy.can('announcement:create');
 
   return (
-    <div className="flex flex-col">
+    // `min-h-0 flex-1` so the table below can claim the remaining height — the
+    // register is this screen's main content, same contract as AdminUsers.
+    <div className="flex min-h-0 flex-1 flex-col">
       <PageHeader
         title="Announcements"
         description="News, events and general announcements for everyone entitled to see them."
@@ -173,7 +174,8 @@ export function AnnouncementsPage() {
         ) : null}
       </div>
 
-      <DataList
+      <DataTable
+        fillHeight
         items={announcements.data?.data ?? []}
         loading={announcements.isPending}
         caption="Announcements"
@@ -259,18 +261,19 @@ export function AnnouncementsPage() {
             />
           )
         }
+        pagination={
+          announcements.data
+            ? {
+                page: announcements.data.meta.page,
+                totalPages: announcements.data.meta.totalPages,
+                total: announcements.data.meta.total,
+                limit: announcements.data.meta.limit,
+                onPageChange: (page) =>
+                  void navigate({ search: (previous) => ({ ...previous, page }) }),
+              }
+            : undefined
+        }
       />
-
-      {announcements.data ? (
-        <Pagination
-          label="Announcements pagination"
-          page={announcements.data.meta.page}
-          totalPages={announcements.data.meta.totalPages}
-          total={announcements.data.meta.total}
-          limit={announcements.data.meta.limit}
-          onPageChange={(page) => void navigate({ search: (previous) => ({ ...previous, page }) })}
-        />
-      ) : null}
 
       <AnnouncementFormDialog open={creating} onOpenChange={setCreating} />
     </div>

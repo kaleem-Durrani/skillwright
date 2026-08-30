@@ -165,9 +165,17 @@ describe('AdminUsersPage — the Reinstate affordance', () => {
     mockDirectory('SUSPENDED');
     renderAdminUsers(viewer({ role: 'ADMIN', name: 'Sam Admin' }));
 
-    // DataList renders the table and the card list as one responsive surface, so the
-    // row menu exists twice under the same label; either trigger opens its own menu.
+    /*
+     * EXACTLY ONE trigger, and asserting the count is the point.
+     *
+     * This used to read `findAllByRole(...)` and click `[0]`, because DataList
+     * mounted the table and the card list together and switched them with
+     * `display` — so every row menu existed twice under the same accessible name.
+     * DataTable renders one branch, so a second trigger appearing here means the
+     * dual-DOM pattern has come back.
+     */
     const triggers = await screen.findAllByRole('button', { name: /actions for walt/i });
+    expect(triggers).toHaveLength(1);
     await user.click(triggers[0]!);
 
     await user.click(await screen.findByRole('menuitem', { name: /reinstate account/i }));

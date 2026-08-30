@@ -63,7 +63,7 @@ export function SkeletonCard({ className }: { className?: string }) {
   );
 }
 
-/** Mirrors DataList's card baseline and its table enhancement from md up. */
+/** Mirrors DataTable's card baseline and its table enhancement from md up. */
 export function SkeletonList({ rows = 4, className }: { rows?: number; className?: string }) {
   return (
     <div className={cn('flex flex-col gap-3 md:gap-0', className)}>

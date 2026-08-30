@@ -14,7 +14,7 @@ import { Avatar } from '@/components/ui/Avatar';
 import { Badge } from '@/components/ui/Badge';
 import { Button, IconButton } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
-import { DataList } from '@/components/ui/DataList';
+import { DataTable } from '@/components/ui/DataTable';
 import { Dialog, DialogContent } from '@/components/ui/Dialog';
 import {
   DropdownMenu,
@@ -24,7 +24,6 @@ import {
 } from '@/components/ui/DropdownMenu';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
-import { Pagination } from '@/components/ui/Pagination';
 import { StatusChip } from '@/components/ui/StatusChip';
 import { toast } from '@/components/ui/Toast';
 import { ROLE_LABEL } from '@/components/layout/nav';
@@ -142,7 +141,9 @@ export function AdminUsersPage() {
   const isFiltered = Boolean(search.q || search.role || search.status);
 
   return (
-    <div className="flex flex-col">
+    // `min-h-0 flex-1` so the table below can claim the remaining height —
+    // AppShell bounds `main` from `md` up and this is the page half of that contract.
+    <div className="flex min-h-0 flex-1 flex-col">
       <PageHeader
         title="Users"
         description="One identity table. Role is a column, and suspension destroys sessions immediately."
@@ -190,7 +191,8 @@ export function AdminUsersPage() {
         ) : null}
       </div>
 
-      <DataList
+      <DataTable
+        fillHeight
         items={users.data?.data ?? []}
         loading={users.isPending}
         caption="User accounts"
@@ -227,19 +229,26 @@ export function AdminUsersPage() {
             header: 'Status',
             cell: (entry) => <StatusChip status={entry.status} />,
           },
-          {
-            id: 'actions',
-            header: 'Actions',
-            align: 'end',
-            cell: (entry) => (
-              <RowMenu
-                user={entry}
-                onSuspend={() => setSuspending(entry)}
-                onReinstate={() => reinstate.mutate(entry.id)}
-              />
-            ),
-          },
         ]}
+        actions={(entry) => (
+          <RowMenu
+            user={entry}
+            onSuspend={() => setSuspending(entry)}
+            onReinstate={() => reinstate.mutate(entry.id)}
+          />
+        )}
+        pagination={
+          users.data
+            ? {
+                page: users.data.meta.page,
+                totalPages: users.data.meta.totalPages,
+                total: users.data.meta.total,
+                limit: users.data.meta.limit,
+                onPageChange: (page) =>
+                  void navigate({ search: (previous) => ({ ...previous, page }) }),
+              }
+            : undefined
+        }
         renderCard={(entry) => {
           const department = departmentNameOf(entry);
           return (
@@ -288,17 +297,6 @@ export function AdminUsersPage() {
           )
         }
       />
-
-      {users.data ? (
-        <Pagination
-          label="Users pagination"
-          page={users.data.meta.page}
-          totalPages={users.data.meta.totalPages}
-          total={users.data.meta.total}
-          limit={users.data.meta.limit}
-          onPageChange={(page) => void navigate({ search: (previous) => ({ ...previous, page }) })}
-        />
-      ) : null}
 
       {/*
         Mounted once, toggled by the header button. The create mutation sweeps the

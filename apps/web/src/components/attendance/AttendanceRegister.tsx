@@ -104,8 +104,8 @@ function StatusPicker({
  * One seat: who, their loaded state for this date, the choice, the note.
  *
  * Stacked cards at EVERY width — the register is a vertical list by nature, and
- * `DataList` would mean rendering its two copies side by side in the DOM, which
- * would put two same-named radio groups per student on the page at once.
+ * `DataTable` would give it a table from `md` up, and a register whose control is
+ * a radio group per row reads worse as a grid than as a stack at any width.
  */
 function RegisterRow({
   row,

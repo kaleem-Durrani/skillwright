@@ -39,8 +39,22 @@ const TABS = [
 
 function AdminLayout() {
   return (
-    <div className="flex flex-col">
-      <nav aria-label="Admin sections">
+    /*
+     * A LAYOUT ROUTE HAS TO PASS THE HEIGHT ALONG, or the contract stops here.
+     *
+     * AppShell bounds `main` from `md` up and a page claims what is left with
+     * `flex-1 min-h-0`. Every route between the two has to do the same, and this one
+     * did not: with a plain `flex flex-col` the four admin screens had a bounded
+     * grandparent and an unbounded parent, so `AdminUsers`' table computed its height
+     * from its content, overflowed `main` visibly, and pushed the document to 2842px
+     * against a 900px viewport — pagination three screens below the fold, which is
+     * the exact symptom this phase exists to remove.
+     *
+     * The nav stays `shrink-0` so the tabs keep their size and the Outlet absorbs
+     * the remainder.
+     */
+    <div className="flex min-h-0 flex-1 flex-col">
+      <nav aria-label="Admin sections" className="shrink-0">
         <ul className="scroll-x -mx-[var(--shell-gutter)] flex min-w-full items-center gap-1 border-b border-line-subtle px-[var(--shell-gutter)] md:mx-0 md:min-w-0 md:px-0">
           {TABS.map((tab) => (
             <li key={tab.to}>
@@ -64,7 +78,7 @@ function AdminLayout() {
       </nav>
 
       {/* The tabs sit above the pages' own headers, which carry the eyebrow + title. */}
-      <div className="pt-5">
+      <div className="flex min-h-0 flex-1 flex-col pt-5">
         <Outlet />
       </div>
     </div>

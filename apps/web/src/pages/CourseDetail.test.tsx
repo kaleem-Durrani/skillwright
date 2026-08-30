@@ -484,8 +484,14 @@ describe('CourseDetail attendance — the owning teacher', () => {
     ).toBeChecked();
     expect(screen.getByRole('button', { name: /save register/i })).toBeEnabled();
 
-    // And the approval list the tab has always had is still underneath.
-    expect(await screen.findByText('Enrolled students and requests')).toBeInTheDocument();
+    // And the approval list the tab has always had is still underneath. Its
+    // accessible name comes from `DataTable`'s `caption` prop — `aria-label` on
+    // the card branch's <ul> (jsdom's stubbed matchMedia never matches `md`, per
+    // vitest.setup.ts, so this is the branch that mounts), not visible text, so
+    // the query is by role/name rather than `findByText`.
+    expect(
+      await screen.findByRole('list', { name: 'Enrolled students and requests' }),
+    ).toBeInTheDocument();
   });
 
   it('switches intakes with the selector and refetches THAT intake’s register', async () => {
@@ -712,8 +718,10 @@ describe('CourseDetail decisions — capacity refusals', () => {
 
     const user = userEvent.setup();
     await user.click(await screen.findByRole('tab', { name: /students/i }));
-    // DataList renders every roster row in BOTH its card list and its table, so
-    // there are two Approve buttons for the one request; either drives it.
+    // `DataTable` renders only the card branch here (jsdom's stubbed matchMedia
+    // never matches `md`, per vitest.setup.ts), so there is one Approve button —
+    // `findAllByRole` rather than `findByRole` only because a sibling row could
+    // add a second one in a future fixture change.
     const approveButtons = await screen.findAllByRole('button', { name: 'Approve' });
     await user.click(approveButtons[0] as HTMLElement);
 

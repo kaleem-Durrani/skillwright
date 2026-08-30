@@ -5,10 +5,10 @@ import { useCallback, useSyncExternalStore } from 'react';
  *
  * This exists so a component can render ONE of two things rather than both.
  * Tailwind can hide the loser with `display`, and for markup that is usually the
- * right trade — but not when both copies are real DOM: `DataList` renders every
- * row twice, once as cards and once as table rows, and pays for 40 subtrees where
- * 20 would do. Anything that would otherwise duplicate a subtree should ask here
- * instead.
+ * right trade — but not when both copies are real DOM. The list component this
+ * app replaced rendered every row twice, once as cards and once as table rows, and
+ * paid for 40 subtrees where 20 would do. Anything that would otherwise duplicate
+ * a subtree should ask here instead.
  *
  * `useSyncExternalStore` rather than `useState` + an effect: the effect version
  * renders once with the wrong answer and then corrects itself, which is a visible

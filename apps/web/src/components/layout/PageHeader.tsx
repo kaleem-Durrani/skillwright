@@ -32,8 +32,8 @@ export interface PageHeaderProps {
  * `md`. This is that decision, taken.
  *
  * ONE of the two renders, chosen by `useMediaQuery`, not both hidden by CSS. The
- * dual-DOM pattern next door in `DataList` — every row present twice, switched by
- * `display` — is the thing this codebase is trying to stop doing, and duplicating
+ * dual-DOM pattern this codebase removed from its list component — every row
+ * present twice, switched by `display` — is what it is trying to stop doing, and duplicating
  * a header's action buttons would duplicate their event handlers and their
  * `aria-controls` targets with them.
  *
