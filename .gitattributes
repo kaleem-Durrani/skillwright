@@ -1,0 +1,31 @@
+# Line endings are LF in the repository AND in the working tree, on every platform.
+#
+# Without this file, `core.autocrlf=true` — the Windows default, and what git for
+# Windows sets during install — converts to CRLF on checkout. The result: a fresh
+# clone on Windows fails `pnpm format:check` on 319 files before a single line has
+# been edited, and `pnpm format` then rewrites all of them. Nothing in the repo
+# explained why, because the machine this was built on had an LF working tree from
+# before the setting was applied.
+#
+# `eol=lf` overrides autocrlf for checkout, so the trap cannot come back.
+* text=auto eol=lf
+
+# Windows-only tooling that genuinely wants CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Never touch these — git's own binary detection is good, but the screenshots are
+# the README's shop window and a mangled PNG is a silent failure.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+
+# Generated and vendored. Marking them keeps `git diff` and language stats honest.
+pnpm-lock.yaml linguist-generated=true -diff
+docs/permissions.md linguist-generated=true
