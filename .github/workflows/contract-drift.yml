@@ -74,36 +74,67 @@ jobs:
       - name: Rename a column in the Prisma schema
         run: |
           SCHEMA=packages/db/prisma/schema.prisma
-          before=$(grep -c "\b${DRIFT_FIELD}\b" "$SCHEMA" || true)
-          if [ "$before" -eq 0 ]; then
-            echo "::error::'${DRIFT_FIELD}' no longer exists in $SCHEMA."
-            echo "Point DRIFT_FIELD at a column that is still read by the API and the SPA."
+          # Anchored to a FIELD DECLARATION, not to any occurrence. A bare word-boundary
+          # grep counts 4 matches in this schema and THREE of them are prose in the
+          # Phase 9 comment block. So after someone renamed the column the guard would
+          # still "find" it, rewrite three comments, watch the typecheck pass, and
+          # report contract drift that does not exist.
+          before=$(grep -cE "^[[:space:]]*${DRIFT_FIELD}[[:space:]]+" "$SCHEMA" || true)
+          if [ "$before" -ne 1 ]; then
+            echo "::error::expected exactly ONE '${DRIFT_FIELD}' field declaration in $SCHEMA, found ${before}."
+            echo "Point DRIFT_FIELD at a column that is still read by apps/api."
             exit 1
           fi
-          sed -i "s/\b${DRIFT_FIELD}\b/${DRIFT_REPLACEMENT}/g" "$SCHEMA"
-          echo "Renamed ${before} occurrence(s) of '${DRIFT_FIELD}' -> '${DRIFT_REPLACEMENT}'."
+          sed -i -E "s/^([[:space:]]*)${DRIFT_FIELD}([[:space:]]+)/\1${DRIFT_REPLACEMENT}\2/" "$SCHEMA"
+          echo "Renamed the '${DRIFT_FIELD}' declaration -> '${DRIFT_REPLACEMENT}'."
           git --no-pager diff --stat
           git commit -am "test: rename ${DRIFT_FIELD} to prove the type chain holds"
 
       - name: Regenerate the Prisma client from the mutated schema
         run: pnpm --filter @skillwright/db exec prisma generate
 
-      - name: Typecheck must now FAIL
+      # SCOPED TO apps/api, deliberately, and this is the whole subtlety of the job.
+      #
+      # `pnpm -r typecheck` stops at the first failing package, and packages/db fails
+      # FIRST — its own seed reads the column that was just renamed. So the inverted
+      # assertion was satisfied by packages/db/prisma/seed.ts alone: delete every
+      # reference to the column from apps/api and this job STILL reported "Contract
+      # holds". A guard whose evidence comes from the same package as the mutation is
+      # not evidence.
+      #
+      # apps/api is the package that genuinely tracks the Prisma type. Note what that
+      # means for the claim: what this proves is Postgres -> Prisma -> apps/api. It does
+      # NOT reach the SPA, because @skillwright/shared's Zod schemas hand-declare their
+      # fields rather than deriving them from Prisma — the same class of debt as the
+      # hand-declared CursorPage<T> recorded in NEXT.md. Do not widen this to apps/web
+      # without making that half derive first.
+      - name: apps/api typecheck must now FAIL
         run: |
           set +e
-          pnpm -r typecheck
+          pnpm --filter @skillwright/api typecheck
           status=$?
           set -e
-          echo "pnpm -r typecheck exited with ${status}"
+          echo "apps/api typecheck exited with ${status}"
           if [ "$status" -eq 0 ]; then
-            echo "::error title=Contract drift::Renaming '${DRIFT_FIELD}' in the database schema did NOT break the build."
+            echo "::error title=Contract drift::Renaming '${DRIFT_FIELD}' in the database schema did NOT break apps/api."
             echo ""
-            echo "The type chain Postgres -> Prisma -> @skillwright/shared -> apps/api -> apps/web"
-            echo "is broken. Something between the schema and the SPA is hand-written,"
-            echo "cast to any, or suppressed with @ts-expect-error. Find it."
+            echo "The type chain Postgres -> Prisma -> apps/api is broken. Something between"
+            echo "the schema and the API is hand-written, cast to any, or suppressed with"
+            echo "@ts-expect-error. Find it."
             exit 1
           fi
-          echo "Contract holds: a database rename breaks the build, as claimed."
+          echo "Contract holds: a database rename breaks apps/api, as claimed."
+
+      # Informational, never asserted. ADR 0006's atomic capacity gate lives in a RAW
+      # SQL statement (apps/api/src/modules/enrollments/enrollments.service.ts), and a
+      # string is invisible to tsc — rename the column, update every typed site, miss
+      # the raw one, and this job stays green while the seat guarantee throws at
+      # runtime. Printed every run so the gap is visible rather than remembered.
+      - name: What a rename would NOT have broken
+        if: always()
+        run: |
+          echo "Raw-SQL references to the column, which no typecheck can see:"
+          grep -rn "${DRIFT_FIELD}" apps/api/src --include=*.ts | grep -iE "raw|sql" || echo "  (none found)"
 
       - name: Discard the scratch branch
         if: always()
