@@ -120,7 +120,11 @@ COPY --from=build --chown=node:node /app/apps/web/dist ./public
 USER node
 EXPOSE 3000
 
-# /readyz checks Postgres, Redis and the object store. /healthz would only prove
+# /readyz checks Postgres and Redis — NOT the object store, which this comment used
+# to claim. routes/health.ts settles it: two checks, `database` and `redis`. The gap is
+# real and deliberate for now: an S3 blip would pull a container that can still serve
+# every page out of the load balancer, so uploads 500 while the container reports
+# ready. Widen the probe only with that trade in mind. /healthz would prove only that
 # the process is alive, which an orchestrator can already see.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=25s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
