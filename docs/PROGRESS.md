@@ -9,6 +9,32 @@ This file records **what changed and the state it left the repository in** — n
 
 ---
 
+## 2026-08-30 (third pass — the suites)
+
+**Four packages were carrying claims nothing tested.** _(verified — every suite below run to completion, and every new pin watched failing before it was trusted)_
+`packages/shared/src/schema` is the wire contract for both apps and had **no coverage measurement and no test**: the config's `include` was `src/policy/**`, so seventeen files reported nothing, which is not the same as reporting zero. Widened, it said 0%. `apps/api` computed coverage and enforced none of it. `packages/db` — 2,000 lines including the audit extension behind the append-only trail — declared neither a `lint` nor a `test` script, so `turbo run` skipped the package entirely; its first lint found two pieces of dead code in the seed that four green suites had missed. And `apps/web` sat at 56.04% of statements with **39 of 118 files loaded by no test at all**.
+
+**The suites now:** shared **852** at 100% of `src/**` · API **488** at 93.84 / 85.03 / 91.91 / 93.84 · web **385** across 43 files · db **10** · **84** browser tests across three viewport projects · **6** against the real stack. Every threshold is a ratchet set at what the suite measures, and where a number could not be defended it was set below the observation with the reason written down.
+
+**A browser suite that signs in.** _(verified — green on repeated back-to-back runs, and the stubbed suite still isolated at 84 tests with no API booted)_
+The three existing Playwright projects stub every `/api/v1` call and are always already an ADMIN — the right shape for "does the bundle run", and structurally blind to everything BETWEEN the SPA and the API. A `real-stack` project now runs the API against a real seeded database and signs in through the actual login form, walking three golden paths: a seat requested and approved with every screen agreeing; a teacher refused both the controls and the 201 on a colleague's course; and an admin suspending a signed-in user while the app stops trusting its cache — which reproduces the 2026-08-22 incident that had been verified once, by hand, and never again. Two faults in the harness were found by running it: the setup project inherited the STUB server's baseURL and banked its sessions in the wrong database entirely, and the API had no `DATABASE_URL` of its own, so specs that approve enrolments and suspend accounts would have run against the database `pnpm screenshots` photographs.
+
+**Then the new tests were mutation-tested, and eleven of them did not work.** _(verified — each mutation applied to real source, the suite run, the source restored byte-exact)_
+The three that mattered: `useMfaVerify`'s entire `onSuccess` could be replaced with `() => undefined` with all 380 tests green — that is the code making a just-verified TOTP session authenticated client-side; `requireRole`'s variadic multi-role path was never exercised, so `!roles.includes(...)` could become `roles[0]` untouched; and a ThemeToggle test titled "shows the resolved icon" asserted only an accessible name identical to the test above it. All eleven are closed, and each new pin was watched failing first.
+
+**The same defect twice, in tests written to prevent exactly it.** _(verified by mutation)_
+`expect(schema.parse('a'.repeat(MAX_PASSWORD_LENGTH)))` proves only that the code agrees with itself. Raising `MAX_PASSWORD_LENGTH` to 100000 — or `MAX_PAGE_SIZE` to 1000 — left all 852 shared tests green at 100% coverage while the denial of service and the unbounded `LIMIT` those tests name shipped. Both now assert the literal.
+
+**A coverage threshold that could go red on a tree nobody touched.** _(verified — three independent runs)_
+The API's branch threshold was set at its measurement, on a stated claim that the suite is deterministic. It is not: the branch **denominator** moves between identical runs (1510 ↔ 1511), because v8 only emits a branch map for code a run actually loaded, and three files drift independently. The worst arithmetic case is 84.97% — red, on an unchanged tree, in the one job that boots four containers. Floored at 84.5.
+
+**The notification panel's accessibility debt is measured now, and it is critical.** _(verified — axe, both themes)_
+`NEXT.md` recorded `role="none"` as "not doing what it looks like". A test now says how: `aria-required-children`, **critical**, _"Element has children which are not allowed: [role=status]"_ — `EmptyState`'s live region, invalid inside a `menu` at any depth. Moving the wrappers to `role="group"` (permitted, where `none` was a re-parenting trick) did **not** clear it, which is the useful half of the measurement. The spec now asserts that exact id and impact rather than demanding zero: a new violation fails the suite, and so does fixing this one — which is the only reliable way to make the component's comment and the `NEXT.md` bullet get deleted on the day they stop being true.
+
+**Also landed:** four runtime dependencies with zero import sites removed (`socket.io`, `@socket.io/redis-adapter`, `bullmq`, `socket.io-client`), and the README's architecture diagram corrected to stop drawing two subsystems that were never built; the production image no longer serves the SPA's source maps (61 files, 4.8 MB of a 6.6 MB payload, and the complete unminified source); `/index.html` no longer ships the shell with a one-year immutable cache; a login no longer writes a second, actorless audit row; `apps/web` extends `tsconfig.base.json`, which surfaced a reachable crash on a course whose last intake has been retired; and `CursorPage<T>` — hand-declared with the wrong shape — is a re-export of the schema that already defines it.
+
+---
+
 ## 2026-08-30 (later)
 
 **CI was dry-run before its first push, and it would not have worked.** _(verified — every `run:` line in both workflows executed locally where the platform allowed, plus a real `docker build` and a container probed for cache headers)_
