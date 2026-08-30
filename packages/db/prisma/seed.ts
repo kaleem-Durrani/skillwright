@@ -17,7 +17,6 @@
  */
 
 import { pathToFileURL } from 'node:url';
-import { createHash } from 'node:crypto';
 import { faker } from '@faker-js/faker';
 import argon2 from 'argon2';
 import { encodeTime, encodeRandom } from 'ulid';
@@ -723,7 +722,6 @@ async function seedEnrollments(
 
     for (const [offeringIndex, offering] of course.offerings.entries()) {
       const plan = plansByOffering[offeringIndex]!;
-      const rnd = prngFor(`enrollment:${course.code}:${offeringIndex}`);
       const cohort = shuffled(students, `cohort:${course.code}:${offeringIndex}`);
       let cursor = 0;
       let approved = 0;

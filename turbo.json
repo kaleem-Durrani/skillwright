@@ -26,6 +26,10 @@
       "dependsOn": ["^build", "^generate"],
       "outputs": ["coverage/**"]
     },
+    "@skillwright/db#test": {
+      "dependsOn": ["generate"],
+      "outputs": []
+    },
     "test:e2e": {
       "dependsOn": ["build"],
       "cache": false,
