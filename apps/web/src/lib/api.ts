@@ -130,21 +130,25 @@ export const api = {
     request<T>('DELETE', path, body, options),
 };
 
-export interface PaginationMeta {
-  page: number;
-  limit: number;
-  total: number;
-  totalPages: number;
-  hasNext: boolean;
-  hasPrev: boolean;
-}
-
-export interface Paginated<T> {
-  data: T[];
-  meta: PaginationMeta;
-}
-
-export interface CursorPage<T> {
-  data: T[];
-  nextCursor: string | null;
-}
+/*
+ * RE-EXPORTED, not re-declared.
+ *
+ * These three were hand-written copies of shapes @skillwright/shared already
+ * defines, which is the one thing CONTRIBUTING says will be sent back in review —
+ * and the copies had already drifted. `CursorPage<T>` claimed
+ * `{ data, nextCursor }`; the wire sends `{ data, meta: { nextCursor, hasMore } }`,
+ * which is `CursorPaginated<T>` in shared. Nothing imported it yet, so it was a trap
+ * rather than a live bug: the first consumer would have compiled cleanly and read
+ * `undefined` off every response.
+ *
+ * Re-exporting rather than deleting keeps the existing `import { type Paginated }
+ * from '@/lib/api'` call sites working, while making `packages/shared/src/schema`
+ * the only place these shapes are written down. contract-drift.yml cannot catch this
+ * class of duplicate — that is exactly why it must not exist.
+ */
+export type {
+  PaginationMeta,
+  Paginated,
+  CursorMeta,
+  CursorPaginated,
+} from '@skillwright/shared/schema';
