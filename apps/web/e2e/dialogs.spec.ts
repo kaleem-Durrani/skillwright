@@ -53,11 +53,41 @@ const SCENARIOS: DialogScenario[] = [
   { name: /add a user/i, path: '/admin/users', bodyProbe: /^name/i },
 ];
 
+/**
+ * Wait for an overlay's entrance to finish before auditing its colours.
+ *
+ * `waitFor()` resolves the instant an element is visible, which for anything that
+ * fades in is the instant it starts — at opacity 0. axe then samples a
+ * half-transparent surface and computes each colour BLENDED with whatever sits
+ * behind it, so a palette that is fine reads as a contrast failure.
+ *
+ * This is not hypothetical. The notification panel was audited on WebKit at
+ * opacity 0.583, which turned `--text-tertiary` (#505d70, 8.2:1 on white) into
+ * #88919e at 3.1:1 and failed `color-contrast`. Chromium finished the same fade
+ * before axe ran, so the identical suite was green on two projects and red on the
+ * third — the worst shape a gate can take, because the red one looks like a real
+ * regression in the palette and is not.
+ *
+ * Polling opacity rather than awaiting `getAnimations()`: motion drives springs on
+ * the main thread, and those never appear in the WAAPI animation list.
+ */
+async function settled(page: Page, selector: string): Promise<void> {
+  await page.waitForFunction((sel) => {
+    let node = document.querySelector(sel);
+    if (!node) return false;
+    for (; node; node = node.parentElement) {
+      if (getComputedStyle(node).opacity !== '1') return false;
+    }
+    return true;
+  }, selector);
+}
+
 async function openDialog(page: Page, scenario: DialogScenario): Promise<void> {
   await page.goto(scenario.path);
   await page.waitForLoadState('networkidle');
   await page.getByRole('button', { name: scenario.name }).first().click();
   await page.getByRole('dialog').waitFor();
+  await settled(page, 'body > [role="dialog"]');
 }
 
 interface AxeViolation {
@@ -239,6 +269,7 @@ test.describe('the notification panel, which is a menu holding non-menu content'
       await page.getByRole('button', { name: /^Notifications/ }).click();
       const panel = page.getByRole('menu', { name: 'Notifications' });
       await panel.waitFor();
+      await settled(page, '[role="menu"][aria-label="Notifications"]');
 
       // Scoped to the panel's own portal, so the shell behind it cannot be blamed
       // for — or absorb — anything the panel does.
