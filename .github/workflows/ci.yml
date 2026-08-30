@@ -147,6 +147,18 @@ jobs:
       - name: Web component tests
         run: pnpm --filter @skillwright/web test
 
+      # packages/db declared no test script at all until 2026-08-30, so `turbo run test`
+      # skipped ~2,000 lines including the audit extension — the append-only trail the
+      # whole authorization story rests on. These tests need no database (they drive the
+      # extension's pure parts, the logger's level table and the TOTP envelope) but they
+      # DO need a generated Prisma client, because src/audit.ts value-imports
+      # @prisma/client. turbo.json now carries that edge for local runs; this job calls
+      # the package script directly, so it states the dependency itself.
+      - name: Prisma client for the db package tests
+        run: pnpm --filter @skillwright/db exec prisma generate
+      - name: Database-package unit tests
+        run: pnpm --filter @skillwright/db test
+
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v4
@@ -366,6 +378,181 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  # The gate for the five golden paths — the other half of the `e2e` job above.
+  #
+  # That job drives the built bundle with every /api/v1 call answered by
+  # e2e/fixtures.ts, always already signed in as an ADMIN. It is fast, it needs no
+  # database, and it is exactly the right shape for what it asks: does the bundle
+  # run, is this dialog accessible. What it structurally cannot see is everything
+  # BETWEEN the SPA and the API — the login form, the session cookie, a policy
+  # refusal, a revoked session, a seat that changes hands — because it never
+  # authenticates and no assertion in it has ever reached Postgres. That is lesson
+  # 20's gap, still open: "ask what your test suite structurally cannot see; for a
+  # SPA and an API tested separately, the answer is always the thing that joins them".
+  #
+  # So this job runs the real thing. Migrations, the real seed, the API serving the
+  # BUILT SPA out of WEB_DIST_DIR on one origin — the Dockerfile's topology, not the
+  # dev proxy's — and Playwright signing in through the actual login form with the
+  # seed's demo credentials. Kept as a separate job rather than more specs in `e2e`
+  # because it costs containers and a seed, and `e2e` earns its place by being the
+  # cheap one that gates every push.
+  e2e-real-stack:
+    name: e2e (real stack, golden paths)
+    needs: setup
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: skillwright
+          POSTGRES_PASSWORD: skillwright
+          # NOT `skillwright_test`. That database belongs to the integration suite,
+          # whose fixtures delete every user between files (lesson 9's guard refuses
+          # any name not ending in `_test` for exactly that reason). This one is
+          # seeded and read as a whole, so it gets its own name and its own service.
+          POSTGRES_DB: skillwright_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U skillwright -d skillwright_e2e"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    # Job-wide, because three different things read it: `prisma migrate deploy`, the
+    # seed, and the API process Playwright starts (playwright.config.ts's webServer,
+    # which inherits this environment and overrides only PORT and WEB_DIST_DIR).
+    # There is no repo-root .env on a runner, so env.ts parses exactly what is here
+    # and every key it declares as required has to appear.
+    env:
+      DATABASE_URL: postgresql://skillwright:skillwright@localhost:5432/skillwright_e2e?schema=public
+      REDIS_URL: redis://localhost:6379
+      NODE_ENV: development
+      # `local`, not `ci`, and the reason is one line in session.service.ts:
+      # `cookieIsSecure = SESSION_COOKIE_NAME.startsWith('__Host-') || DEPLOY_ENV !== 'local'`.
+      # This suite drives plain HTTP on localhost, where a Secure cookie is a coin
+      # toss across browsers and a silently missing session cookie is the worst
+      # possible failure to debug. The developer .env makes the same two choices for
+      # the same reason.
+      DEPLOY_ENV: local
+      SESSION_COOKIE_NAME: sw_session
+      # The dev-only key from .env.example, verbatim. It must be the SAME value for
+      # the seed and the API: the seed encrypts the demo admin's TOTP secret with it
+      # and the API decrypts with it.
+      ENCRYPTION_KEY: ZGV2LW9ubHktMzItYnl0ZS1rZXktY2hhbmdlLW1lISE=
+      # Every request in this job is same-origin, so the CSRF hook passes on
+      # `Sec-Fetch-Site` and never consults this list. It is set because env.ts
+      # requires a non-empty one, and it names the origin the suite actually uses.
+      ALLOWED_ORIGINS: http://localhost:4010
+      S3_ENDPOINT: http://localhost:9000
+      S3_REGION: us-east-1
+      S3_BUCKET: skillwright-uploads
+      S3_ACCESS_KEY_ID: skillwright
+      S3_SECRET_ACCESS_KEY: skillwright-dev-secret
+      S3_FORCE_PATH_STYLE: 'true'
+      # No Mailpit here. `sendMail` catches its own failures and never rejects
+      # (mailer.ts), so a refused SMTP connection logs a line and changes no
+      # response — and nothing in these specs reads a message.
+      SMTP_HOST: localhost
+      SMTP_PORT: '1025'
+      MAIL_FROM: Skillwright <no-reply@skillwright.local>
+      # The one-click demo login is off: these specs sign in with a password on
+      # purpose (a DEMO-provenance session is refused `user:suspend` by DEMO_DENIED,
+      # which would break the suspension path), so the route has no business existing
+      # here. auth.setup.ts asserts the absence of the "Demo" badge to prove it.
+      DEMO_MODE: 'false'
+      LOG_LEVEL: warn
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @skillwright/db exec prisma generate
+
+      # The object store, started the way the `integration` job starts it and for the
+      # same reason: `services:` cannot run this image, because the official
+      # minio/minio container needs `server /data` as its command and GitHub Actions
+      # can override a service's env, ports and health-check but never its command.
+      #
+      # Honest about what it is for: no spec in this job reads a byte from it today —
+      # presigning is an offline computation and nothing here downloads a file. It
+      # runs because the API in this job is configured to talk to a real store rather
+      # than a fiction, and because golden path 3 (upload, download, and the raw
+      # unsigned object URL answering 403) is the one path missing from this suite;
+      # whoever writes it should find a working bucket rather than this comment.
+      - name: Start MinIO
+        run: |
+          docker network create minio-net
+          docker run -d --name minio --network minio-net -p 9000:9000 \
+            -e MINIO_ROOT_USER=skillwright \
+            -e MINIO_ROOT_PASSWORD=skillwright-dev-secret \
+            minio/minio:latest server /data
+
+      - name: Wait for MinIO and create the uploads bucket
+        run: |
+          timeout 60 sh -c 'until curl -sf http://localhost:9000/minio/health/live; do sleep 2; done'
+          docker run --rm --network minio-net --entrypoint /bin/sh minio/mc:latest -c "
+            mc alias set local http://minio:9000 skillwright skillwright-dev-secret &&
+            mc mb --ignore-existing local/skillwright-uploads &&
+            mc anonymous set none local/skillwright-uploads
+          "
+
+      # Applied, never pushed — the same rule the integration job states. A committed
+      # migration that does not apply is discovered here rather than in production.
+      - name: Apply migrations
+        run: pnpm --filter @skillwright/db exec prisma migrate deploy
+
+      # The whole point: these specs assert against the seed a reader of the README
+      # is told to sign in to. The seed is deterministic and idempotent.
+      - name: Seed
+        run: pnpm --filter @skillwright/db run seed
+
+      # chromium only. The real-stack project runs one viewport (playwright.config.ts
+      # argues why), so installing webkit here would download a browser nothing opens.
+      - name: Install Playwright chromium
+        run: pnpm --filter @skillwright/web exec playwright install --with-deps chromium
+
+      # The API serves THIS directory as the SPA, so the build must precede it. Same
+      # artefact the `e2e` job drives, reached through the process that serves it in
+      # production instead of through `vite preview`.
+      - name: Build the SPA
+        run: pnpm --filter @skillwright/web build
+
+      # `--project` is what adds the real-stack projects and the API webServer to the
+      # config at all; without it this command runs the stubbed suite. E2E_REAL_STACK
+      # says the same thing through the environment, so the job still selects the
+      # right suite if an argument ever fails to survive `pnpm exec`.
+      - name: Golden paths against the real stack
+        env:
+          E2E_REAL_STACK: '1'
+        run: pnpm --filter @skillwright/web exec playwright test --project=real-stack
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-real-stack
+          path: |
+            apps/web/playwright-report/**
+            apps/web/test-results/**
+          if-no-files-found: ignore
+          retention-days: 14
+
   ci:
     name: CI
     if: always()
@@ -380,6 +567,7 @@ jobs:
       - integration
       - build
       - e2e
+      - e2e-real-stack
       - docker
       - permissions-doc
     runs-on: ubuntu-latest
