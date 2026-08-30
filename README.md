@@ -89,20 +89,19 @@ flowchart TB
 
     subgraph api["@skillwright/api — Fastify 5"]
         HTTP["/api/v1 routes"]
-        WS["Socket.IO<br/>seq ordering · gap backfill"]
-        JOBS["BullMQ workers<br/>email · upload GC · digests"]
         AUD["Prisma audit extension<br/>append-only"]
+        SWEEP["upload sweeper<br/>unref'd interval, not a queue"]
+        MAIL["mailer<br/>direct SMTP"]
     end
 
     subgraph data["Infrastructure"]
         PG[("Postgres 17<br/>citext · pg_trgm · CHECK constraints")]
-        RDS[("Redis 7<br/>sessions · rate limit · pub/sub · queues")]
+        RDS[("Redis 7<br/>sessions · rate limit")]
         S3[("S3 / MinIO<br/>private bucket, presigned only")]
         SMTP["SMTP"]
     end
 
     SPA -->|"same origin<br/>__Host-sw_session"| HTTP
-    SPA <-->|websocket| WS
 
     SPA -.->|"imports the same rules"| POL
     HTTP -->|"enforces"| POL
@@ -111,35 +110,36 @@ flowchart TB
     SPA -.-> BRD
 
     HTTP --> AUD
-    WS --> AUD
     AUD --> PG
     HTTP --> RDS
-    WS --> RDS
     HTTP --> S3
-    JOBS --> RDS
-    JOBS --> SMTP
-    JOBS --> PG
+    HTTP --> MAIL
+    MAIL --> SMTP
+    SWEEP --> S3
+    SWEEP --> PG
 
     classDef proof stroke-width:3px
     class POL proof
 ```
 
+This is what exists, not what was planned. Earlier versions of this diagram showed a Socket.IO layer and BullMQ workers; neither was ever built, and their packages have been removed from `dependencies` rather than left to ship dead weight in the production image. Realtime chat depth is deliberately parked — see [`NEXT.md`](NEXT.md). Background work today is one unref'd interval that sweeps abandoned uploads, which the feature plan argued for over a queue subsystem at this size.
+
 The dotted lines are the point. `packages/shared` has **no runtime dependency on Prisma or the database**, which is what lets the SPA import the exact function the API enforces with — the policy module is not a copy of the rules, it is the rules.
 
 In production there is one origin: the API process serves the built SPA, so `/api/v1/*` is the API and everything else falls through to `index.html`. No CORS, no `SameSite=None`, no cross-origin credential surface — see [ADR 0004](docs/adr/0004-same-origin-sessions-and-csrf.md).
 
-| Layer          | Choice                                          | Why this one                                                                                                                                                 |
-| -------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Language       | TypeScript 5.7, strict, ESM                     | `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes` on. `any` requires a comment justifying it.                                                      |
-| Monorepo       | pnpm 9 workspaces + Turborepo                   | Strict non-hoisted `node_modules` catches undeclared imports at install time.                                                                                |
-| API            | Fastify 5 + `fastify-type-provider-zod`         | One Zod schema validates, serialises and types a route.                                                                                                      |
-| Database       | Postgres 17 + Prisma 6                          | `citext` for case-insensitive email uniqueness, `pg_trgm` for search, `CHECK` constraints for invariants the app must not be trusted with.                   |
-| Cache / queues | Redis 7 + BullMQ                                | Rate-limit store, session cache, Socket.IO adapter, and job queues.                                                                                          |
-| Frontend       | React 19 + Vite 6                               | TanStack Router for typed routes and `beforeLoad` guards; TanStack Query for the server-state cache.                                                         |
-| Styling        | Tailwind v4 + shadcn/ui, mobile-first           | `@theme` tokens as the single source of colour and spacing; `pnpm check:mobile-first` fails the build on `max-width` queries, raw hex, or the stock palette. |
-| Auth           | Argon2id, opaque server sessions, optional TOTP | Revocation is a `DELETE`. See [ADR 0005](docs/adr/0005-hand-rolled-sessions-over-vendor-auth.md) and [ADR 0007](docs/adr/0007-optional-totp-design.md).      |
-| Uploads        | S3-compatible (MinIO locally, R2 in production) | Private bucket, presigned PUT, server-side verification before commit — see claim 3 above.                                                                   |
-| Testing        | Vitest + Supertest + Playwright                 | Policy matrix as a unit test; integration against real Postgres and Redis.                                                                                   |
+| Layer    | Choice                                          | Why this one                                                                                                                                                                                    |
+| -------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Language | TypeScript 5.7, strict, ESM                     | `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes` on. `any` requires a comment justifying it.                                                                                         |
+| Monorepo | pnpm 9 workspaces + Turborepo                   | Strict non-hoisted `node_modules` catches undeclared imports at install time.                                                                                                                   |
+| API      | Fastify 5 + `fastify-type-provider-zod`         | One Zod schema validates, serialises and types a route.                                                                                                                                         |
+| Database | Postgres 17 + Prisma 6                          | `citext` for case-insensitive email uniqueness, `pg_trgm` for search, `CHECK` constraints for invariants the app must not be trusted with.                                                      |
+| Cache    | Redis 7                                         | Rate-limit store and session cache. No queue subsystem: the one background job is an unref'd interval (`uploads.sweeper.ts`), and the plan argues that a queue is the wrong shape at this size. |
+| Frontend | React 19 + Vite 6                               | TanStack Router for typed routes and `beforeLoad` guards; TanStack Query for the server-state cache.                                                                                            |
+| Styling  | Tailwind v4 + shadcn/ui, mobile-first           | `@theme` tokens as the single source of colour and spacing; `pnpm check:mobile-first` fails the build on `max-width` queries, raw hex, or the stock palette.                                    |
+| Auth     | Argon2id, opaque server sessions, optional TOTP | Revocation is a `DELETE`. See [ADR 0005](docs/adr/0005-hand-rolled-sessions-over-vendor-auth.md) and [ADR 0007](docs/adr/0007-optional-totp-design.md).                                         |
+| Uploads  | S3-compatible (MinIO locally, R2 in production) | Private bucket, presigned PUT, server-side verification before commit — see claim 3 above.                                                                                                      |
+| Testing  | Vitest + Supertest + Playwright                 | Policy matrix as a unit test; integration against real Postgres and Redis.                                                                                                                      |
 
 ---
 
