@@ -11,12 +11,21 @@ export const DropdownMenuGroup = Menu.Group;
 export const DropdownMenuRadioGroup = Menu.RadioGroup;
 
 /**
- * Enter animation only.
+ * Enter animation only. Evaluated again in Phase 4 and deliberately left alone.
  *
- * WHY no exit: Radix owns this component's mount lifecycle and unmounts on close
- * before an AnimatePresence sibling could react. A 140ms fade-out on a menu the
- * user has already dismissed is invisible anyway — the click that closed it has
- * already moved their attention elsewhere.
+ * The reason given here used to be that Radix unmounts on close before an
+ * AnimatePresence sibling could react. That is true of THIS structure and not of
+ * Radix — `Dialog.tsx` animates its exit by wrapping Root so it can read `open`,
+ * then handing `forceMount` to Portal and Content and letting AnimatePresence own
+ * the unmount. The same wrapper would work here. So the honest statement is that
+ * it is possible and was not judged worth it.
+ *
+ * What holds is the second half: a 140 ms fade-out on a menu the user has already
+ * dismissed is invisible, because the click that closed it has already moved their
+ * attention to whatever it did. The roadmap lists this as polish "gated on a trace
+ * and a purpose" — there is no trace to run, because there is nothing to measure
+ * on an animation nobody looks at, and no purpose beyond symmetry with components
+ * whose exits the user IS looking at.
  */
 export const DropdownMenuContent = forwardRef<
   ElementRef<typeof Menu.Content>,

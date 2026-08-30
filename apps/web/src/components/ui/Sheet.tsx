@@ -120,12 +120,11 @@ export function SheetContent({
                   : 'md:start-0 md:end-auto md:border-e md:border-line-subtle',
                 className,
               )}
-              /* One entrance at every breakpoint. The old comment here claimed
-                 an edge-slide on desktop, but the variant below has always been
-                 `sheetBottom` — the md+ panel is docked full-height, so a
-                 vertical entrance reads the same way it does on the phone.
-                 `variants.sheetSide` has no call site; Phase 4 owns the
-                 dead-variant sweep (docs/ui-roadmap/04-MOTION-SYSTEM.md). */
+              /* One entrance at every breakpoint. A comment here once claimed an
+                 edge-slide on desktop, but the variant has always been
+                 `sheetBottom` — the md+ panel is docked full-height, so a vertical
+                 entrance reads the same way it does on a phone. The `sheetSide`
+                 variant that described the imaginary behaviour has been deleted. */
               variants={variants.sheetBottom}
               initial="hidden"
               animate="visible"
