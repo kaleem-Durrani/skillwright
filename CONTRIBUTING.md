@@ -27,9 +27,17 @@ No generated commit messages. A message that could have been written by reading 
 ## Before you push
 
 ```bash
+pnpm db:test:setup   # once per machine, and again after any new migration
 pnpm typecheck && pnpm lint && pnpm format && pnpm test
 pnpm check:brand && pnpm check:mobile-first
 ```
+
+`pnpm test` includes apps/api's integration suite, which runs against a separate
+`skillwright_test` database — separate because it deletes every row between test
+files. Nothing used to create it, so a contributor's first `pnpm test` died with
+`Database "skillwright_test" does not exist` and there was no documented way out.
+`pnpm db:test:setup` is that way out; it is idempotent, so run it again whenever a
+migration lands.
 
 CI runs all of these plus integration tests, a build, a Docker image build, `generate-permissions-doc --check`, and the Playwright suite against the **built** SPA. Nothing here is a suggestion — every one of them can fail a pull request.
 
@@ -59,7 +67,7 @@ Branch from `main`. Name it `<type>/<short-slug>` — `feat/totp-enrolment`, `fi
 ## Adding a permission
 
 1. Add the action to the policy in `packages/shared/src/policy/`. `ACTIONS` is derived from the policy object's keys, so this is the only place it is declared.
-2. Add its rows to `apps/api/test/policy-matrix.test.ts`, **including the denials**. A rule with only positive cases has not been tested.
+2. Add its rows to `packages/shared/test/policy-matrix.test.ts`, **including the denials**. A rule with only positive cases has not been tested.
 3. Run `pnpm docs:permissions` and commit the regenerated `docs/permissions.md`.
 
 Skipping step 3 fails CI, which is the intent.

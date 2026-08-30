@@ -28,6 +28,7 @@
     "db:reset": "pnpm --filter @skillwright/db run reset",
     "db:studio": "pnpm --filter @skillwright/db run studio",
     "db:generate": "pnpm --filter @skillwright/db run generate",
+    "db:test:setup": "tsx scripts/setup-test-db.ts",
     "docs:permissions": "tsx scripts/generate-permissions-doc.ts",
     "screenshots": "tsx scripts/screenshots.ts",
     "infra:up": "docker compose up -d minio-init && docker compose up -d --wait postgres redis minio mailpit",
