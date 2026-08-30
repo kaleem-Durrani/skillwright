@@ -158,10 +158,13 @@ export async function buildApp(): Promise<AppInstance> {
       // The SPA's asset URLs are absolute already; a prefix would double them.
       prefix: '/',
       /*
-       * `index: false` so this plugin NEVER serves index.html — not at `/`, not
-       * anywhere. Every HTML response then comes from the one handler below, which is
-       * what lets the caching rule be stated once instead of split between a plugin
-       * option and a fallback.
+       * `index: false` stops this plugin resolving a DIRECTORY to index.html — at
+       * `/` or anywhere else. It does NOT stop it serving the file when a request
+       * names it: `GET /index.html` still matches a real file on disk and went out
+       * with this registration's one-year immutable cache. Measured on the built
+       * image, that URL returned the shell, byte-identical to `/`, with
+       * `max-age=31536000, immutable`. Hence the explicit route below — a declared
+       * route matches before the plugin's wildcard.
        *
        * Vite fingerprints everything it emits under /assets, so those are safe to cache
        * for a year. The HTML must not be, or a deploy leaves browsers holding a document
@@ -210,6 +213,28 @@ export async function buildApp(): Promise<AppInstance> {
        * pointing at chunks that no longer exist, with no way to recover but a hard
        * refresh most people do not know about.
        */
+      reply
+        .type('text/html; charset=utf-8')
+        .header('cache-control', 'no-cache')
+        .sendFile('index.html', { cacheControl: false }),
+    );
+
+    /*
+     * `/index.html` needs the same route, and this is lesson 38's fault 6 arriving
+     * through the one door its fix never covered.
+     *
+     * That fix reasoned about the paths a PERSON types and the paths the router
+     * produces, and stated the caching rule for both. Nothing types `/index.html` —
+     * but crawlers request it, old bookmarks hold it, and a reverse proxy or CDN
+     * origin-pull will happily ask for it by name. Any of those got the shell with a
+     * one-year immutable cache, which is precisely the failure the split exists to
+     * prevent: a deploy leaves that client holding a document pointing at chunks
+     * that no longer exist, recoverable only by a hard refresh most people do not
+     * know about.
+     *
+     * Same handler, same `cacheControl: false`, for the same reason as `/`.
+     */
+    app.get('/index.html', (_request, reply) =>
       reply
         .type('text/html; charset=utf-8')
         .header('cache-control', 'no-cache')
