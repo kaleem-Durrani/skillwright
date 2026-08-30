@@ -117,6 +117,18 @@ WORKDIR /app
 COPY --from=build --chown=node:node /prod/api ./
 COPY --from=build --chown=node:node /app/apps/web/dist ./public
 
+# The SPA's source maps are built, kept, and NOT served.
+#
+# vite.config.ts sets `sourcemap: true` and that stays: the CI build job uploads
+# apps/web/dist as an artifact, so a production stack trace is still resolvable by
+# whoever needs it. What was wrong is that this image then served them — 61 files,
+# 4.8 MB of a 6.6 MB static payload, and the complete unminified source of the
+# application to anyone who appended `.map` to a chunk URL.
+#
+# This does not touch the API bundle in /prod/api, whose maps are what
+# NODE_OPTIONS=--enable-source-maps above actually consumes.
+RUN find ./public -name '*.map' -type f -delete
+
 USER node
 EXPOSE 3000
 
