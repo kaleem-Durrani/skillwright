@@ -271,10 +271,10 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # The Dockerfile has never been built anywhere — not in CI, not by hand. This job
-  # is the first place that happens: build only, no push, no registry credentials.
-  # A broken image build has to fail CI exactly like a broken test would, instead
-  # of being discovered the day someone tries to deploy.
+  # The image was built and run by hand once — cc85a6e, 2026-08-23 — and the six
+  # faults that surfaced in the first hour are written up as lesson 38. This job makes
+  # that repeatable: build only, no push, no registry credentials, so a broken image
+  # fails CI like a broken test rather than on deploy day.
   docker:
     name: docker build
     runs-on: ubuntu-latest

@@ -52,6 +52,16 @@ docs/*
 !docs/roadmap/
 # The UI-enhancement roadmap — same reasoning as docs/roadmap/ above.
 !docs/ui-roadmap/
+# The rebuild plan and the design direction. These two are CITED — 14 times and once,
+# from NEXT.md, docs/roadmap/ and docs/ui-roadmap/ — as the backlog and the scope
+# authority, and every one of those was a dangling reference on a fresh clone, pointing
+# at a file only this machine had. The other four under docs/rebuild/ are working notes
+# nothing links to (the audit findings alone are 384 KB); they stay local, which is what
+# the docs/* rule above is for.
+!docs/rebuild/
+docs/rebuild/*
+!docs/rebuild/00-REBUILD-PLAN.md
+!docs/rebuild/02-design-direction.md
 
 # editor & os
 .DS_Store

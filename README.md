@@ -6,7 +6,6 @@
 
 [![CI](https://img.shields.io/github/actions/workflow/status/kaleem-Durrani/skillwright/ci.yml?branch=main&label=CI&style=flat-square)](https://github.com/kaleem-Durrani/skillwright/actions/workflows/ci.yml)
 [![Permission matrix](https://img.shields.io/badge/permission%20matrix-generated%20%26%20verified-brightgreen?style=flat-square)](docs/permissions.md)
-[![Coverage](https://img.shields.io/codecov/c/github/kaleem-Durrani/skillwright?style=flat-square)](https://github.com/kaleem-Durrani/skillwright/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 
 ![Skillwright course detail: the Resources tab, owner's view, with a per-row "Enrolled only" access badge next to each handout](docs/screenshots/course-detail-resources.png)
@@ -21,9 +20,9 @@ Each of these is falsifiable, and each links to the test that would fail if the 
 
 ### 1. Permissions are data, not conditionals
 
-`can(actor, action, subject)` is a pure function — no I/O, no database import. Every `(role, action, subject-state)` decision it can make is written down and checked: 49 actions, 196 cells in the role matrix, 245 more covering account status and session provenance, asserted as **656 passing test cases**. `docs/permissions.md` is generated from that same policy, never written by hand — a CI job regenerates it and fails the build if the checked-in file disagrees.
+`can(actor, action, subject)` is a pure function — no I/O, no database import. Every `(role, action, subject-state)` decision it can make is written down and checked: 49 actions, 231 hand-written cells and 539 generated ones — **770 decisions proved** by 656 test cases, plus 12 more covering the wrapper the API actually calls. `docs/permissions.md` is generated from that same policy, never written by hand — a CI job regenerates it and fails the build if the checked-in file disagrees.
 
-> **Proof:** [`packages/shared/test/policy-matrix.test.ts`](packages/shared/test/policy-matrix.test.ts) (600 cases — run `pnpm --filter @skillwright/shared test`) · [`packages/shared/src/policy`](packages/shared/src/policy) · [`scripts/generate-permissions-doc.ts`](scripts/generate-permissions-doc.ts) · [`docs/permissions.md`](docs/permissions.md) · the `permissions-doc` job in [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
+> **Proof:** [`packages/shared/test/policy-matrix.test.ts`](packages/shared/test/policy-matrix.test.ts) (run `pnpm --filter @skillwright/shared test`; the suite prints its own counts, so this paragraph can be checked against it) · [`packages/shared/src/policy`](packages/shared/src/policy) · [`scripts/generate-permissions-doc.ts`](scripts/generate-permissions-doc.ts) · [`docs/permissions.md`](docs/permissions.md) · the `permissions-doc` job in [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 >
 > **How to falsify it:** change one rule in `packages/shared/src/policy/` without regenerating the docs. `pnpm docs:permissions -- --check` — and CI — go red.
 
@@ -58,7 +57,9 @@ cp .env.example .env && cp .env packages/db/.env && pnpm infra:up && pnpm db:mig
 pnpm dev
 ```
 
-[`.env.example`](.env.example) is the source of truth for every port and key — its own first line is the instruction above, and its defaults match `docker-compose.yml` exactly, so the copy needs no edits. (The second copy exists because the Prisma CLI resolves `.env` relative to its own working directory rather than the repo root; `packages/db/.env.example` ships a stale port of its own; copying the root file over it sidesteps both.) The SPA is on `http://localhost:5173`, the API on `http://localhost:4000`, Postgres on `:5433` (not `:5432` — a native Postgres install is a common squatter there), MinIO's console on `:9001`, and every outbound email lands in Mailpit at `http://localhost:8025`. There is no step four.
+On Windows, run these in **Git Bash, WSL, or PowerShell 7**. Windows PowerShell 5.1 rejects `&&` outright with a parser error — it is not a valid statement separator there.
+
+[`.env.example`](.env.example) is the source of truth for every port and key — its own first line is the instruction above, and its defaults match `docker-compose.yml` exactly, so the copy needs no edits. (The second copy exists because the Prisma CLI resolves `.env` relative to its own working directory rather than the repo root, so it never sees the file at the top.) The SPA is on `http://localhost:5173`, the API on `http://localhost:4000`, Postgres on `:5433` (not `:5432` — a native Postgres install is a common squatter there), MinIO's console on `:9001`, and every outbound email lands in Mailpit at `http://localhost:8025`. There is no step four.
 
 The seed is deterministic and creates one demo account per role, all with the password `demo-password-123`:
 
