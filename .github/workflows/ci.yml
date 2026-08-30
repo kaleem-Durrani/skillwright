@@ -54,6 +54,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @skillwright/db exec prisma generate
       - run: pnpm typecheck
+      # scripts/ belongs to no workspace, so `turbo run typecheck` never saw it.
+      # Two CI gates and the screenshot generator live there; one of them was
+      # already setting a field that no longer exists on `Subject`.
+      - run: pnpm typecheck:scripts
 
   lint:
     name: lint

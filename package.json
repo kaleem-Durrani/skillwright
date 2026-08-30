@@ -17,6 +17,7 @@
     "test:e2e": "turbo run test:e2e",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
+    "typecheck:scripts": "tsc -p tsconfig.scripts.json --noEmit",
     "format": "prettier --write \"**/*.{ts,tsx,js,json,md,css}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,json,md,css}\"",
     "check:brand": "tsx scripts/check-brand.ts",

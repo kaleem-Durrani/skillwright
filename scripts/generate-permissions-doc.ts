@@ -55,7 +55,16 @@ const PERMISSIVE_SUBJECT: Subject = {
   deletedAt: null,
   departmentId: 'dep_1',
   participantIds: [ACTOR_ID],
-  senderId: ACTOR_ID,
+  /*
+   * These two are what make the subject genuinely permissive for the prerequisite
+   * ladder, and they were missing. `hasCompletedPrerequisite` DENIES on an absent
+   * field by design (LESSONS-LEARNED #31: the safe direction), so every action gated
+   * on it rendered a ✗ in the generated state matrix — caused by this object, not
+   * by the rule the row names. An explicit null is "this course requires nothing";
+   * the completed list covers the case where it requires something.
+   */
+  prerequisiteCourseId: null,
+  completedCourseIds: ['crs_1'],
 };
 
 /** Terminal rules get a glyph; conditional rules speak for themselves. */

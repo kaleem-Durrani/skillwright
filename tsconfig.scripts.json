@@ -1,0 +1,23 @@
+{
+  // The `scripts/` directory is checked by nothing else.
+  //
+  // Every workspace typechecks its own `src`, and scripts/ belongs to no workspace —
+  // so `pnpm typecheck` was green while scripts/generate-permissions-doc.ts set a
+  // `senderId` key that no longer exists on `Subject`. tsx strips types rather than
+  // checking them, so the permissions-doc CI job ran the file happily and compared a
+  // document generated from a fixture that would not compile.
+  //
+  // These three files are load-bearing: two of them are CI gates and the third
+  // generates the screenshots the README ships.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    // scripts/screenshots.ts drives Playwright, and `addInitScript` callbacks are
+    // serialised and executed IN THE BROWSER — so `window` and `localStorage` are
+    // real there. Without DOM in lib, the only honest alternatives are an `any` or a
+    // `@ts-expect-error`, both of which this repo sends back in review.
+    "lib": ["ES2023", "DOM"]
+  },
+  "include": ["scripts/**/*.ts"]
+}
