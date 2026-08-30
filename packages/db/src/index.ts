@@ -23,6 +23,11 @@ export { avatarUrlFor } from './avatar.js';
 
 export { logger as dbLogger } from './logger.js';
 
+// The TOTP storage envelope. Exported so the seed and apps/api share ONE
+// implementation instead of two that silently disagreed — see totp.ts.
+export { encryptTotpSecret } from './totp.js';
+export type { EncryptTotpSecretOptions } from './totp.js';
+
 // Model types, enum objects, Prisma namespace and error classes. Consumers should never
 // need to depend on @prisma/client directly — that is what keeps the generated client an
 // implementation detail of this package.

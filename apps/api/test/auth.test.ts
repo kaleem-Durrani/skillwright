@@ -6,6 +6,9 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { AppInstance } from '../src/app.js';
 import * as OTPAuth from 'otpauth';
 import { BRAND } from '@skillwright/shared';
+// The SEED's encryption path, imported deliberately: this suite must exercise the
+// function that writes demo secrets, not only the API's own encryptSecret.
+import { encryptTotpSecret } from '@skillwright/db';
 import {
   buildApp,
   cookieHeader,
@@ -328,6 +331,58 @@ describe('csrf', () => {
 });
 
 describe('totp', () => {
+  /*
+   * The seeded MFA admin could not log in, and nothing noticed for months.
+   *
+   * apps/api writes `base64(version || iv || tag || ciphertext)` keyed on
+   * ENCRYPTION_KEY. packages/db/prisma/seed.ts had its own private copy that wrote
+   * `v1.<iv>.<tag>.<ct>` as dot-joined base64url, keyed on a TOTP_ENCRYPTION_KEY the
+   * API's env schema never declared. `decryptSecret` threw `Malformed encrypted
+   * payload`, `verifyTotpCode` caught the throw and returned `{ valid: false }`, and
+   * every correct 6-digit code the demo admin produced was reported as wrong. Only
+   * its recovery codes worked, because those are argon2-hashed down a different path.
+   *
+   * This suite could not catch it, because every other test here encrypts with the
+   * API's own function — the two implementations were never once compared. So this
+   * test drives the seed's function through a real login, which is the only shape
+   * that would have failed.
+   */
+  it('accepts a code for a secret written the way the SEED writes it', async () => {
+    const email = 'seeded-totp@example.com';
+    // The RFC 6238 test vector the seed uses (seed.ts, DEMO_TOTP_SECRET).
+    const seededSecret = 'JBSWY3DPEHPK3PXP';
+
+    await registerAndVerify(email);
+    await prisma.user.update({
+      where: { email },
+      data: {
+        // Exactly what the seed writes to this column, via the shared envelope.
+        totpSecret: encryptTotpSecret(seededSecret, { deterministicIv: true }),
+        totpEnabledAt: new Date(),
+      },
+    });
+
+    const staged = await post('/login', { email, password: PASSWORD });
+    expect(staged.statusCode).toBe(200);
+    expect(staged.json().status).toBe('MFA_REQUIRED');
+    const pending = sessionCookie(staged) as string;
+
+    const totp = new OTPAuth.TOTP({
+      issuer: BRAND.name,
+      label: email,
+      algorithm: 'SHA1',
+      digits: 6,
+      period: 30,
+      secret: OTPAuth.Secret.fromBase32(seededSecret),
+    });
+
+    const verified = await post('/mfa/verify', { code: totp.generate() }, pending);
+    // A 401 here means the seed and the API disagree about the storage envelope
+    // or the key variable again — not that the code was wrong.
+    expect(verified.statusCode).toBe(200);
+    expect((await me(sessionCookie(verified) as string)).json().actor.provenance).toBe('PASSWORD');
+  });
+
   it('enrols, activates, gates a login, and disables again', async () => {
     const email = 'totp@example.com';
     await registerAndVerify(email);

@@ -17,11 +17,12 @@
  */
 
 import { pathToFileURL } from 'node:url';
-import { createCipheriv, createHash } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { faker } from '@faker-js/faker';
 import argon2 from 'argon2';
 import { encodeTime, encodeRandom } from 'ulid';
 import { prisma } from '../src/index.js';
+import { encryptTotpSecret } from '../src/totp.js';
 import { withAuditContext } from '../src/audit.js';
 import { avatarUrlFor } from '../src/avatar.js';
 import { logger, writeBanner } from '../src/logger.js';
@@ -125,30 +126,16 @@ async function hashOnce(password: string): Promise<string> {
 }
 
 /**
- * Encrypts a TOTP shared secret the way the API is expected to.
+ * The TOTP secret is encrypted by `encryptTotpSecret` from @skillwright/db, which is
+ * the SAME function apps/api's `decryptSecret` is written against.
  *
- * Envelope: `v1.<iv>.<tag>.<ciphertext>`, each part base64url, AES-256-GCM, key from
- * TOTP_ENCRYPTION_KEY. The IV is derived rather than random so the seed stays
- * deterministic — acceptable for one fixed development account, never for real enrolment,
- * where a repeated IV under the same key is a break.
+ * There used to be a private copy here with a different envelope and a different key
+ * variable, so this admin's every correct authenticator code was rejected. One
+ * implementation now, and apps/api/test/auth.test.ts asserts the round trip.
+ *
+ * `deterministicIv` keeps re-seeding idempotent. It is safe for exactly this one
+ * fixed development account and would be a complete break of GCM anywhere else.
  */
-function encryptTotpSecret(plaintext: string): string {
-  const raw = process.env.TOTP_ENCRYPTION_KEY ?? '0'.repeat(64);
-  const key =
-    raw.length === 64 && /^[0-9a-f]+$/i.test(raw)
-      ? Buffer.from(raw, 'hex')
-      : Buffer.from(raw, 'base64');
-  const iv = createHash('sha256').update(`seed-totp-iv:${plaintext}`).digest().subarray(0, 12);
-  const cipher = createCipheriv('aes-256-gcm', key, iv);
-  const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
-  return [
-    'v1',
-    iv.toString('base64url'),
-    cipher.getAuthTag().toString('base64url'),
-    ciphertext.toString('base64url'),
-  ].join('.');
-}
-
 /** RFC 6238 test vector, so an authenticator app enrolled against it produces known codes. */
 const DEMO_TOTP_SECRET = 'JBSWY3DPEHPK3PXP';
 
@@ -468,7 +455,7 @@ async function seedUsers(departmentIds: string[]) {
       bio: spec.bio,
       phoneNumber: spec.phoneNumber,
       lastLoginAt: spec.lastLoginAt,
-      totpSecret: spec.totp ? encryptTotpSecret(spec.totp.secret) : null,
+      totpSecret: spec.totp ? encryptTotpSecret(spec.totp.secret, { deterministicIv: true }) : null,
       totpEnabledAt: spec.totp?.enabledAt ?? null,
     };
     return prisma.user.upsert({
