@@ -308,12 +308,18 @@ importers:
         specifier: ^2.3.0
         version: 2.4.0
     devDependencies:
+      '@eslint/js':
+        specifier: ^9.33.0
+        version: 9.39.5
       '@faker-js/faker':
         specifier: ^9.3.0
         version: 9.9.0
       '@types/node':
         specifier: ^22.10.5
         version: 22.20.1
+      eslint:
+        specifier: ^9.33.0
+        version: 9.39.5(jiti@2.7.0)
       prisma:
         specifier: ^6.3.0
         version: 6.19.3(magicast@0.3.5)(typescript@5.9.3)
@@ -323,6 +329,9 @@ importers:
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
+      typescript-eslint:
+        specifier: ^8.39.0
+        version: 8.67.0(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
 
   packages/shared:
     dependencies:
@@ -2745,6 +2754,7 @@ packages:
   eslint@9.39.5:
     resolution: {integrity: sha512-DgZS62aPLXKlnxILS/AYCoRvHaZeXceIzlXPkkGGzJWSow1aEk0lbTlxUSlyjC8jcaKxAdOnTDz+o1JFSBsyjw==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+    deprecated: This version is no longer supported. Please see https://eslint.org/version-support for other options.
     hasBin: true
     peerDependencies:
       jiti: '*'

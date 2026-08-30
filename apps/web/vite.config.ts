@@ -119,5 +119,46 @@ export default defineConfig({
     setupFiles: ['./vitest.setup.ts'],
     css: false,
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    /*
+     * Coverage is CONFIGURED here and switched on by the flag, never by default.
+     * `enabled` stays false so `pnpm test` — what the web unit job in CI runs —
+     * pays nothing for instrumentation and is not gated on a number; the
+     * thresholds below apply only to `vitest run --coverage`.
+     *
+     * `include` is the whole of src/ rather than "whatever a test imported",
+     * which is the setting that makes the measurement honest: a file no test
+     * loads is precisely the file worth counting, and the default include would
+     * score it 100% by never looking at it. 39 of 118 files were in that state
+     * when this block was written. `exclude` is deliberately left at the
+     * defaults, which already drop `*.d.ts` and the test files themselves —
+     * naming an exclude list here would REPLACE those defaults and quietly count
+     * the tests as covered source.
+     *
+     * The thresholds are a RATCHET: a floor to raise, not a target reached.
+     * Nothing here claims 65% of statements is enough — it says the next change
+     * may not go below it. Raise them when you add tests; lowering one to make a
+     * run pass is the failure mode this guards against, and a lowered number
+     * shows up in a diff where a missing test does not.
+     *
+     * They are set at the BOTTOM of what three consecutive runs on 2026-08-30
+     * measured — 65.63 / 83.08-83.11 / 70.58-70.69, up from 56.03 / 77.97 / 61.34
+     * on the same tree an hour earlier. The spread is real and it is not this
+     * suite's: every run differed only in `pages/AdminUsers.tsx` (88.44/80.95/56.25
+     * one run, 88.77/79.54/54.54 the next), so something in its existing test is
+     * timing-dependent. A floor pinned to the top of that range would fail on a
+     * coin flip, and a gate that goes red at random is a gate people learn to
+     * ignore. Pin the flake and these can move back up.
+     */
+    coverage: {
+      provider: 'v8',
+      include: ['src/**/*.{ts,tsx}'],
+      reporter: ['text', 'html'],
+      thresholds: {
+        statements: 65.6,
+        branches: 83,
+        functions: 70.5,
+        lines: 65.6,
+      },
+    },
   },
 });
