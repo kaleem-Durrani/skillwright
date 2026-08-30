@@ -136,6 +136,53 @@ function get(url: string, cookie?: string) {
 
 // --- tests -----------------------------------------------------------------
 
+describe('what a login writes', () => {
+  /*
+   * One row, not two.
+   *
+   * A login records a LOGIN event and then stamps `lastLoginAt` on the user
+   * (auth.service.ts). That second write goes through the audited client, so the
+   * extension used to emit an `UPDATE User` beside it — with a NULL actor, because no
+   * audit context is in scope at that point. In a table whose entire purpose is
+   * attribution, that doubled the volume of the log the admin screen reads and left a
+   * reader asking who performed an update that nobody performed.
+   *
+   * audit.ts drops an UPDATE whose whole diff is `lastLoginAt`, on the same argument
+   * it already applies to `updatedAt`: a value that moves as a mechanical consequence
+   * of another recorded fact is not a second fact.
+   */
+  it('records the LOGIN and nothing else', async () => {
+    const userId = await createAccount('login-noise@example.com', 'STUDENT');
+    await clearAudit();
+
+    await login('login-noise@example.com');
+
+    const rows = await prisma.auditEvent.findMany({
+      where: { entityType: 'User', entityId: userId },
+      select: { action: true, actorId: true },
+    });
+
+    expect(rows).toEqual([{ action: 'LOGIN', actorId: userId }]);
+  });
+
+  it('still records an UPDATE that changes anything besides the timestamp', async () => {
+    // The narrowness is the point: the rule must not become "User updates are boring".
+    const userId = await createAccount('login-real-edit@example.com', 'STUDENT');
+    await clearAudit();
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: { lastLoginAt: new Date(), name: 'Renamed Person' },
+    });
+
+    const rows = await prisma.auditEvent.findMany({
+      where: { entityType: 'User', entityId: userId },
+      select: { action: true },
+    });
+    expect(rows).toEqual([{ action: 'UPDATE' }]);
+  });
+});
+
 describe('GET /audit-events', () => {
   it('serves an admin the feed newest-first, in the shared envelope', async () => {
     const admin = await signedIn('admin@example.com', 'ADMIN', 'Ada Admin');

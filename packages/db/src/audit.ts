@@ -252,6 +252,31 @@ export function auditExtension(base: AuditBaseClient) {
       ? diff(beforeSnap, afterSnap)
       : { before: beforeSnap, after: afterSnap };
 
+    /*
+     * A login used to write TWO rows: the LOGIN event, and an `UPDATE User` with a
+     * NULL actor produced by the extension noticing the `lastLoginAt` write that
+     * follows it (auth.service.ts). The second one is noise of the worst kind in a
+     * table whose whole purpose is attribution — it doubles the volume of the log the
+     * audit screen reads, and an actorless UPDATE invites the reader to wonder who
+     * did it. Nobody did it; it is the timestamp side effect of the row above.
+     *
+     * Narrow on purpose. It fires only for a User UPDATE whose ENTIRE computed diff is
+     * `lastLoginAt` — an admin editing a profile changes other fields and is recorded
+     * in full, and a login that somehow also changed something else would still be
+     * recorded. Same argument as `updatedAt` in `diff()` above: a value that moves as
+     * a mechanical consequence of another recorded fact is not a second fact.
+     */
+    const changed = payload.after === null ? [] : Object.keys(payload.after);
+    if (
+      params.diffOnly &&
+      params.model === 'User' &&
+      params.action === 'UPDATE' &&
+      changed.length === 1 &&
+      changed[0] === 'lastLoginAt'
+    ) {
+      return;
+    }
+
     try {
       await base.auditEvent.create({
         data: {
