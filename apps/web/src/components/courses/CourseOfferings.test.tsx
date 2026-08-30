@@ -399,15 +399,17 @@ describe('CourseOfferings — managing intakes', () => {
     apiDel.mockResolvedValue(undefined);
     renderSection({ session: TEACHER });
 
-    await user.click(
-      (await screen.findAllByRole('button', { name: /^Retire the .* intake$/i }))[0],
-    );
+    const [firstRetire] = await screen.findAllByRole('button', {
+      name: /^Retire the .* intake$/i,
+    });
+    if (!firstRetire) throw new Error('expected at least one intake to offer a Retire button');
+    await user.click(firstRetire);
 
     const dialog = screen.getByRole('dialog');
     await user.click(within(dialog).getByRole('button', { name: /retire intake/i }));
 
     await waitFor(() => expect(apiDel).toHaveBeenCalledTimes(1));
-    expect(apiDel.mock.calls[0][0]).toBe(`/courses/${COURSE_ID}/offerings/${AUTUMN_ID}`);
+    expect(apiDel.mock.calls[0]?.[0]).toBe(`/courses/${COURSE_ID}/offerings/${AUTUMN_ID}`);
   });
 
   it('answers the 409-while-enrolled refusal with honest copy, not a toast', async () => {
@@ -423,9 +425,11 @@ describe('CourseOfferings — managing intakes', () => {
     );
     renderSection({ session: TEACHER });
 
-    await user.click(
-      (await screen.findAllByRole('button', { name: /^Retire the .* intake$/i }))[0],
-    );
+    const [firstRetire] = await screen.findAllByRole('button', {
+      name: /^Retire the .* intake$/i,
+    });
+    if (!firstRetire) throw new Error('expected at least one intake to offer a Retire button');
+    await user.click(firstRetire);
     const dialog = screen.getByRole('dialog');
     await user.click(within(dialog).getByRole('button', { name: /retire intake/i }));
 

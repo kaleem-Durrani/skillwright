@@ -329,7 +329,7 @@ describe('NotificationsPage', () => {
     // router would compute from the previous location.
     await userEvent.click(screen.getByRole('button', { name: /back to first page/i }));
     expect(navigateSpy).toHaveBeenCalledTimes(1);
-    const call = navigateSpy.mock.calls[0][0] as {
+    const call = navigateSpy.mock.calls[0]?.[0] as {
       search: (previous?: unknown) => unknown;
     };
     expect(call.search({ page: 9 })).toEqual({ page: 1 });

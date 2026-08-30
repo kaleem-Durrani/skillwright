@@ -1,31 +1,62 @@
 {
+  // Extends the repo standard instead of restating it.
+  //
+  // This file used to redeclare every option, which meant the workspace with the most
+  // code was the only one not held to `tsconfig.base.json` — and nobody could tell,
+  // because the two lists looked similar enough to skim. NEXT.md recorded closing the
+  // gap as "a decision, not a defect; measure the fallout first", so it was measured,
+  // flag by flag, against the tree on 2026-08-30:
+  //
+  //   --useUnknownInCatchVariables         0 errors   adopted
+  //   --forceConsistentCasingInFileNames   0 errors   adopted
+  //   --noUncheckedIndexedAccess          11 errors   adopted, all 11 fixed
+  //   --exactOptionalPropertyTypes        78 errors   NOT adopted, see below
+  //
+  // Three of the four were free or nearly so. The fourth is a real project and is
+  // turned off here explicitly rather than by omission, with the number attached so
+  // the next person inherits a measurement instead of a question.
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2023",
+    // --- overrides the base cannot make: this is a browser bundle, not a Node package
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "module": "ESNext",
+    // Vite resolves, not Node. `bundler` is what allows extensionless relative imports
+    // and the `@/*` paths below, neither of which NodeNext permits.
     "moduleResolution": "bundler",
-    "moduleDetection": "force",
     "jsx": "react-jsx",
     "useDefineForClassFields": true,
-
-    "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true,
-    "noImplicitOverride": true,
-    "exactOptionalPropertyTypes": false,
-    "verbatimModuleSyntax": true,
-    "isolatedModules": true,
     "allowImportingTsExtensions": true,
-    "resolveJsonModule": true,
-    "skipLibCheck": true,
-    "noEmit": true,
-
     "types": ["vite/client", "node"],
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
-    }
+    },
+
+    // --- the base emits declarations; this project emits nothing at all
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "incremental": false,
+    "noEmitOnError": false,
+
+    // --- kept from the old file, additive to the base
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+
+    /*
+     * The one deliberate divergence, quantified: 78 errors on 2026-08-30.
+     *
+     * Most are react-hook-form and Radix prop spreads where an optional prop is passed
+     * through as possibly-undefined, which `exactOptionalPropertyTypes` treats as
+     * distinct from absent. That is a genuine distinction and the base is right to
+     * demand it — closing it is a real piece of work, not a flag flip, and doing it
+     * badly means a sweep of `?? undefined` casts that silence the compiler without
+     * fixing anything. Re-measure with
+     *   pnpm --filter @skillwright/web exec tsc -p tsconfig.json --noEmit --exactOptionalPropertyTypes
+     * before starting; the number is the size of the job.
+     */
+    "exactOptionalPropertyTypes": false
   },
   "include": ["src", "e2e", "vite.config.ts", "vitest.setup.ts", "playwright.config.ts"]
 }

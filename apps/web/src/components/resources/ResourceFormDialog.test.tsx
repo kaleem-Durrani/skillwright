@@ -444,6 +444,7 @@ describe('ResourceFormDialog', () => {
 
     await waitFor(() => expect(postsTo(/resources/)).toHaveLength(1));
     const [body] = postsTo(/resources/);
+    if (!body) throw new Error('the LINK branch POSTed nothing');
 
     expect(body).toMatchObject({
       courseId: COURSE_ID,

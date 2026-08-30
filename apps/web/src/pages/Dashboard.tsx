@@ -446,8 +446,11 @@ function NextIntakeBar({ course }: { course: CourseListItem }) {
   const open = soonestOpenOffering(course.offerings);
 
   if (open === undefined) {
-    if (course.offerings.length === 0) return null;
-    const next = course.offerings[0];
+    // Destructure-and-guard rather than `length === 0` then index: the length check
+    // reads as equivalent to a human and tells the compiler nothing, which is exactly
+    // the gap `noUncheckedIndexedAccess` exists to close.
+    const [next] = course.offerings;
+    if (next === undefined) return null;
     return (
       <p className="pt-1 text-2xs text-fg-tertiary">
         {formatOfferingDates(next)} · <span className="font-semibold text-danger-fg">Full</span>

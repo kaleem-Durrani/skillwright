@@ -324,6 +324,17 @@ const ROSTER_PAGE = {
   meta: EMPTY_PAGE.meta,
 };
 
+/**
+ * The spring intake never held anyone but Ben.
+ *
+ * Selected by WHO is on the roster rather than by position: `ROSTER_PAGE.data[1]` meant
+ * the same thing right up until someone reordered the fixture, and it told the type
+ * checker `| undefined` while telling the reader nothing.
+ */
+function springRosterRows(): typeof ROSTER_PAGE.data {
+  return ROSTER_PAGE.data.filter((row) => row.student.id === OTHER_STUDENT_ID);
+}
+
 /** One PENDING request on the FULL-workshop intake, for the decision tests below. */
 const PENDING_PAGE = {
   data: [
@@ -386,7 +397,8 @@ function renderAttendance(
 ): void {
   apiGet.mockImplementation((path, options) => {
     const route = Object.keys(handlers).find((key) => path.startsWith(key));
-    if (route) return Promise.resolve(handlers[route](path, options));
+    const handler = route === undefined ? undefined : handlers[route];
+    if (handler) return Promise.resolve(handler(path, options));
 
     if (path === `/courses/${COURSE_ID}`) return Promise.resolve(served);
     return Promise.resolve(EMPTY_PAGE);
@@ -499,7 +511,7 @@ describe('CourseDetail attendance — the owning teacher', () => {
           // Two intakes, two rosters — the spring one only ever held Ben.
           return attendanceRegister(
             query.date ?? '1970-01-01',
-            query.offeringId === OTHER_OFFERING_ID ? [ROSTER_PAGE.data[1]] : ROSTER_PAGE.data,
+            query.offeringId === OTHER_OFFERING_ID ? springRosterRows() : ROSTER_PAGE.data,
           );
         },
       },

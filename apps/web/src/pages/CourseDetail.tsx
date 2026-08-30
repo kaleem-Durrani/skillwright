@@ -429,6 +429,13 @@ export function CourseDetailPage() {
    * intake they are teaching next. A student never sees this tab, so "the viewer's
    * own intake" has no one to mean here.
    */
+  /*
+   * UNDEFINED when the course has no live intake, which is reachable: `deleteOffering`
+   * (courses.service.ts) refuses to retire an intake that still holds pending or
+   * approved seats, but nothing stops retiring the LAST one when it holds none. A
+   * course created and then emptied lands here, and every consumer below dereferences
+   * this. `noUncheckedIndexedAccess` is what surfaced it.
+   */
   const selectedOffering =
     data.offerings.find((offering) => offering.id === registerOfferingId) ?? data.offerings[0];
 
@@ -734,31 +741,39 @@ export function CourseDetailPage() {
               the attendance export REQUIRES it, and an enrolment export mixing two
               intakes would not be a register.
             */}
-            <div className="flex flex-col gap-3 pb-4 md:flex-row md:items-end md:justify-end">
-              {data.offerings.length > 1 ? (
-                <FormField label="Intake" className="md:w-72">
-                  <Select
-                    value={selectedOffering.id}
-                    onValueChange={(next) => setRegisterOfferingId(next)}
-                  >
-                    <SelectTrigger aria-label="Intake" />
-                    <SelectContent>
-                      {data.offerings.map((offering) => (
-                        <SelectItem key={offering.id} value={offering.id}>
-                          {formatOfferingDates(offering)}
-                          {offering.isFull ? ' · full' : ''}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </FormField>
-              ) : null}
-              <RegisterExportButtons
-                courseId={courseId}
-                teacherId={data.teacher.id}
-                offeringId={selectedOffering.id}
-              />
-            </div>
+            {selectedOffering === undefined ? (
+              <p className="pb-4 text-sm text-fg-secondary">
+                This course has no live intake, so there is no register to keep and nothing to
+                export. Add one from the course header — the approvals below stay readable
+                meanwhile.
+              </p>
+            ) : (
+              <div className="flex flex-col gap-3 pb-4 md:flex-row md:items-end md:justify-end">
+                {data.offerings.length > 1 ? (
+                  <FormField label="Intake" className="md:w-72">
+                    <Select
+                      value={selectedOffering.id}
+                      onValueChange={(next) => setRegisterOfferingId(next)}
+                    >
+                      <SelectTrigger aria-label="Intake" />
+                      <SelectContent>
+                        {data.offerings.map((offering) => (
+                          <SelectItem key={offering.id} value={offering.id}>
+                            {formatOfferingDates(offering)}
+                            {offering.isFull ? ' · full' : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </FormField>
+                ) : null}
+                <RegisterExportButtons
+                  courseId={courseId}
+                  teacherId={data.teacher.id}
+                  offeringId={selectedOffering.id}
+                />
+              </div>
+            )}
 
             {/*
               The register, and deliberately ABOVE the roster list: it is this tab's
@@ -774,7 +789,7 @@ export function CourseDetailPage() {
               teacher who does not own the course fails `ownsCourse` exactly as they
               would server-side.
             */}
-            {policy.can('attendance:mark', viewerSubject) ? (
+            {selectedOffering !== undefined && policy.can('attendance:mark', viewerSubject) ? (
               <div className="pb-6">
                 <AttendanceRegister courseId={courseId} offeringId={selectedOffering.id} />
               </div>
