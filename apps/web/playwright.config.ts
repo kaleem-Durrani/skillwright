@@ -11,7 +11,11 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 2 : 0,
-  reporter: process.env.CI ? 'github' : 'list',
+  // Two reporters under CI, not one. 'github' writes the inline annotations; the
+  // HTML report is what the workflow uploads on failure, and a single 'github'
+  // reporter replaces the default list entirely — so playwright-report/ was never
+  // written and the artifact promised a trace viewer that did not exist.
+  reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
   use: {
     baseURL: 'http://localhost:4173',
     trace: 'on-first-retry',

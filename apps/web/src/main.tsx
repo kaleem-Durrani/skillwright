@@ -44,7 +44,7 @@ if (!container) throw new Error('Root container missing from index.html');
  * "5fps dialog" was a dev-only artefact.
  *
  * Turning it off by default trades a per-render dev signal for an on-demand one,
- * so the standing gate moved into CI instead: e2e/dialog-perf.spec.ts runs axe
+ * so the standing gate moved into CI instead: e2e/dialogs.spec.ts runs axe
  * over every dialog surface in both themes, and that suite now runs on every push
  * (.github/workflows/ci.yml). Set the flag whenever you want the live console
  * feedback back; the debounce below is deliberately long so a scan waits out

@@ -57,16 +57,27 @@ for (const route of ROUTES) {
     // the network to go quiet is what proves the chunk arrived and executed.
     await page.waitForLoadState('networkidle');
 
-    const rootSize = await page.evaluate(
-      () => document.getElementById('root')?.innerHTML.length ?? 0,
-    );
-
+    // Asserted FIRST, because when the bundle genuinely does not run the page error
+    // is the diagnosis and an empty #root is only the symptom.
     expect(failures, `uncaught errors on ${route.path}`).toEqual([]);
-    // A React tree that mounted at all is thousands of characters; the broken
-    // bundle rendered exactly 0. Any low number here means nothing painted.
-    expect(rootSize, `#root is empty on ${route.path} — the bundle did not run`).toBeGreaterThan(
-      500,
-    );
+
+    /*
+     * `networkidle` means the requests stopped, not that React committed. Reading
+     * #root immediately after it raced the first commit: on a loaded runner
+     * (WebKit-on-Linux especially) this saw 0 on a page whose own failure snapshot
+     * showed the whole screen rendered. Polling removes the race without weakening
+     * the assertion — a bundle that did not run never fills #root, so the only thing
+     * this now tolerates is a slow one.
+     *
+     * A React tree that mounted at all is thousands of characters; the broken bundle
+     * rendered exactly 0.
+     */
+    await expect
+      .poll(() => page.evaluate(() => document.getElementById('root')?.innerHTML.length ?? 0), {
+        timeout: 10_000,
+        message: `#root stayed empty on ${route.path} — the bundle did not run`,
+      })
+      .toBeGreaterThan(500);
   });
 }
 

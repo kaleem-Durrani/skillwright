@@ -107,6 +107,15 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
+    /*
+     * vitest's default is 5000 ms, and three CourseFormDialog tests already spend
+     * 3.6-4.0 s of it driving a Radix dialog through userEvent. On a loaded CI
+     * runner they cross the line and fail as "Test timed out in 5000ms" — a flake
+     * that looks like a product defect and passes on re-run. Matching apps/api's
+     * precedent: the timeout should bound a hang, not a slow-but-working test.
+     */
+    testTimeout: 20_000,
+    hookTimeout: 20_000,
     setupFiles: ['./vitest.setup.ts'],
     css: false,
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
