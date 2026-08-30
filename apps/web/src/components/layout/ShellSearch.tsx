@@ -62,15 +62,18 @@ export function ShellSearch() {
   return (
     <>
       {/*
-       * `flex-1` only exists from md up (the form is `hidden` below it), where it
-       * takes over the spacing duty from TopBar's mobile-only spacer — which is
-       * `md:hidden` for exactly that reason.
+       * A FIXED width at the end of the row, not an elastic one in the middle.
+       *
+       * This used to be `flex-1` and own the bar’s centre, which is why there was
+       * nowhere to put a page title: two elastic children in one row means neither
+       * can be the one that gives way, and a title would have shoved the bell and
+       * the avatar off the end. A query box has a natural size — it does not get
+       * more useful past a few words — so it takes a fixed one, and the title slot
+       * beside it takes the slack.
+       *
+       * Still `hidden` below md, where the icon button below is the entry point.
        */}
-      <form
-        role="search"
-        onSubmit={onSubmit}
-        className="hidden min-w-0 flex-1 justify-center px-2 md:flex"
-      >
+      <form role="search" onSubmit={onSubmit} className="hidden w-56 shrink-0 md:flex lg:w-72">
         <Input
           type="search"
           value={term}
@@ -79,7 +82,7 @@ export function ShellSearch() {
           aria-label="Search"
           leading={<Search aria-hidden="true" className="size-4" />}
           maxLength={MAX_QUERY_LENGTH}
-          className="w-full max-w-md"
+          className="w-full"
         />
       </form>
 

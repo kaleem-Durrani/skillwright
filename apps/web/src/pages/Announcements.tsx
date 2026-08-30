@@ -135,7 +135,7 @@ export function AnnouncementsPage() {
         }
       />
 
-      <div className="flex flex-col gap-3 pb-5 md:flex-row md:items-center">
+      <div className="flex flex-col gap-3 pb-(--space-block) md:flex-row md:items-center">
         <Input
           type="search"
           value={term}

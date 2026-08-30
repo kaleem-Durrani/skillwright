@@ -59,7 +59,6 @@ export function AdminDepartmentsPage() {
   return (
     <div className="flex flex-col">
       <PageHeader
-        eyebrow="Admin workspace"
         title="Departments"
         description="The structure courses and members hang off."
         actions={
@@ -76,7 +75,7 @@ export function AdminDepartmentsPage() {
         }
       />
 
-      <div className="flex flex-col gap-3 pb-5 md:flex-row md:items-center">
+      <div className="flex flex-col gap-3 pb-(--space-block) md:flex-row md:items-center">
         <Input
           type="search"
           value={term}

@@ -18,6 +18,7 @@ import { Separator } from '@/components/ui/Separator';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { toast } from '@/components/ui/Toast';
 import { OtpInput } from '@/components/auth/OtpInput';
+import { PageHeader } from '@/components/layout/PageHeader';
 import { Route } from '@/routes/_public/login';
 
 const credentialsSchema = z.object({
@@ -66,16 +67,18 @@ export function LoginPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-col gap-1.5">
-        <h1 className="font-display text-2xl font-semibold md:text-3xl">
-          {step === 'credentials' ? 'Sign in' : 'Two-factor authentication'}
-        </h1>
-        <p className="text-sm text-fg-secondary">
-          {step === 'credentials'
+      {/* pb-0: this column's own gap-5 already equals --space-block (both
+          1.25rem), so PageHeader's default bottom padding would double the
+          gap to the next child instead of matching it. */}
+      <PageHeader
+        className="pb-0"
+        title={step === 'credentials' ? 'Sign in' : 'Two-factor authentication'}
+        description={
+          step === 'credentials'
             ? `Use your ${BRAND.name} account, or take a demo account for a look around.`
-            : 'Your password was accepted. One more step.'}
-        </p>
-      </div>
+            : 'Your password was accepted. One more step.'
+        }
+      />
 
       {search.reason === 'suspended' ? (
         <EmptyState

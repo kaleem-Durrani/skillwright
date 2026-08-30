@@ -249,7 +249,7 @@ export function SearchResultsPage() {
     );
   } else if (data) {
     body = (
-      <div className="flex flex-col gap-8">
+      <div className="flex flex-col gap-(--space-section)">
         <p aria-live="polite" className="sr-only">
           {grandTotal} {grandTotal === 1 ? 'result' : 'results'}
         </p>
@@ -323,7 +323,7 @@ export function SearchResultsPage() {
         description="Ranked matches across courses, resources and announcements."
       />
 
-      <div className="pb-5">
+      <div className="pb-(--space-block)">
         <Input
           type="search"
           value={term}

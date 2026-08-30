@@ -185,7 +185,7 @@ export function AnnouncementDetailPage() {
         }
       />
 
-      <div className="flex flex-wrap items-center gap-3 pb-6 text-sm text-fg-secondary">
+      <div className="flex flex-wrap items-center gap-3 pb-(--space-block) text-sm text-fg-secondary">
         <Badge tone={TYPE_TONE[data.type]} size="sm">
           {TYPE_LABEL[data.type]}
         </Badge>
@@ -210,9 +210,11 @@ export function AnnouncementDetailPage() {
         preserves the author's paragraph breaks without a markdown renderer or a
         `dangerouslySetInnerHTML` this app has no sanitiser to back.
       */}
-      <p className="measure pb-8 text-sm whitespace-pre-wrap text-fg">{data.content}</p>
+      <p className="measure pb-(--space-section) text-sm whitespace-pre-wrap text-fg">
+        {data.content}
+      </p>
 
-      <div className="flex flex-col gap-3 border-t border-line-subtle pt-6">
+      <div className="flex flex-col gap-3 border-t border-line-subtle pt-(--space-block)">
         <h2 className="font-display text-lg font-semibold">Discussion</h2>
         <CommentThread announcementId={announcementId} />
       </div>

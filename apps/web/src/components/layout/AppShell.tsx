@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'motion/react';
@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/DropdownMenu';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { ShellSearch } from './ShellSearch.js';
+import { PageSlotProvider } from './page-slot.js';
 import { NAV_BY_ROLE, ROLE_LABEL, WORKSPACE_LABEL, primaryNav, type NavItem } from './nav.js';
 import { NotificationBell } from './NotificationBell.js';
 
@@ -60,42 +61,70 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const tabs = useMemo(() => primaryNav(items), [items]);
 
+  /*
+   * The top bar's page-title slot. Held here because this component renders both
+   * ends of it — the bar that owns the element, and the children that portal into
+   * it — and state rather than a ref so the first page paints into a bar that
+   * already exists instead of one render later. See page-slot.tsx.
+   */
+  const [pageSlot, setPageSlot] = useState<HTMLElement | null>(null);
+
   if (!user) return <>{children}</>;
 
   return (
-    <div className="flex min-h-dvh flex-col bg-canvas">
-      <a
-        href="#main-content"
-        className="skip-link ms-3 rounded-md bg-brand px-4 py-2 text-sm font-semibold text-fg-on-brand shadow-e3"
-      >
-        Skip to content
-      </a>
-
-      <TopBar />
-
-      <div className="flex-1 md:grid md:grid-cols-[var(--shell-sidebar-w)_minmax(0,1fr)]">
-        <Sidebar items={items} pathname={pathname} />
-
-        <main
-          id="main-content"
-          tabIndex={-1}
-          className={cn(
-            'gutter-safe pt-4 outline-none md:pt-6',
-            // Clear the fixed tab bar plus the home indicator. Without this the
-            // last row of every list is permanently unreachable on a phone.
-            'pb-[calc(var(--shell-tabbar-h)+var(--shell-safe-bottom)+1.5rem)] md:pb-12',
-          )}
+    <PageSlotProvider slot={pageSlot}>
+      <div className="flex min-h-dvh flex-col bg-canvas">
+        <a
+          href="#main-content"
+          className="skip-link ms-3 rounded-md bg-brand px-4 py-2 text-sm font-semibold text-fg-on-brand shadow-e3"
         >
-          <div className="wide">{children}</div>
-        </main>
-      </div>
+          Skip to content
+        </a>
 
-      <BottomTabs items={tabs} pathname={pathname} />
-    </div>
+        <TopBar onPageSlot={setPageSlot} />
+
+        <div className="flex-1 md:grid md:grid-cols-[var(--shell-sidebar-w)_minmax(0,1fr)]">
+          <Sidebar items={items} pathname={pathname} />
+
+          {/*
+           * THE LAYOUT CONTRACT.
+           *
+           * `main` is a flex column with a bounded height from `md` up:
+           * `min-h-0` lets it shrink below its content, and the height is the
+           * viewport minus the bar. A page may therefore render a child with
+           * `flex-1 min-h-0` and have it claim exactly the space that is left,
+           * scrolling INTERNALLY — which is what lets a table keep its header and
+           * its pagination on screen while its rows move.
+           *
+           * A page that does nothing is unaffected: without a `flex-1` child the
+           * column is its natural height and the document scrolls as before.
+           *
+           * Below `md` there is no bound. A phone viewport is short enough that a
+           * table filling it would show three rows, and the document scroll is the
+           * one interaction every phone user already has.
+           */}
+          <main
+            id="main-content"
+            tabIndex={-1}
+            className={cn(
+              'gutter-safe flex flex-col pt-4 outline-none md:pt-6',
+              'md:h-[calc(100dvh-var(--shell-topbar-h)-var(--shell-safe-top))] md:min-h-0',
+              // Clear the fixed tab bar plus the home indicator. Without this the
+              // last row of every list is permanently unreachable on a phone.
+              'pb-[calc(var(--shell-tabbar-h)+var(--shell-safe-bottom)+1.5rem)] md:pb-6',
+            )}
+          >
+            <div className="wide flex min-h-0 flex-1 flex-col">{children}</div>
+          </main>
+        </div>
+
+        <BottomTabs items={tabs} pathname={pathname} />
+      </div>
+    </PageSlotProvider>
   );
 }
 
-function TopBar() {
+function TopBar({ onPageSlot }: { onPageSlot: (element: HTMLElement | null) => void }) {
   const { user, isDemo } = useSession();
   const policy = usePolicy();
   const navigate = useNavigate();
@@ -161,15 +190,30 @@ function TopBar() {
         ) : null}
 
         {/*
-         * The search affordance: an inline field from md up, an icon button
-         * beside the bell below it (ShellSearch's header comment records why it
-         * is neither a primary-nav entry nor an account-menu item).
+         * The page's own title, description and actions land here from `md` up —
+         * see PageHeader.tsx. It takes the row's slack (`flex-1 min-w-0`), which
+         * is what makes a long course name truncate rather than push the controls
+         * at the far end off the bar.
+         *
+         * Empty below `md`, where PageHeader renders in the page instead. An
+         * empty flex child with no padding occupies nothing, so the narrow layout
+         * is exactly what it was.
+         */}
+        <div ref={onPageSlot} className="flex min-w-0 flex-1 items-center gap-3" />
+
+        {/*
+         * The search affordance: a fixed-width field at the END of the row from md
+         * up, an icon button beside the bell below it (ShellSearch's header
+         * comment records why it is neither a primary-nav entry nor an
+         * account-menu item).
+         *
+         * It used to own the centre with `flex-1`, which left no room for a title
+         * anywhere: two elastic children in one row means neither can be the one
+         * that gives way. Search is the element with a natural size — a query box
+         * does not get more useful past a few words — so it takes a fixed width
+         * and the title slot takes the slack.
          */}
         <ShellSearch />
-
-        {/* Desktop spacing is ShellSearch's form's job (`flex-1` from md up);
-            this spacer only serves the narrow layout. */}
-        <div className="flex-1 md:hidden" />
 
         {canReadNotifications ? <NotificationBell unreadCount={unreadCount} /> : null}
 

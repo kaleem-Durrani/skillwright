@@ -510,6 +510,15 @@
   --shell-safe-left: env(safe-area-inset-left, 0px);
   --shell-safe-right: env(safe-area-inset-right, 0px);
   --shell-gutter: 1rem;
+  /* Vertical rhythm. Two values, because a page only ever needs two answers:
+     how far a block sits from the one above it, and how far a SECTION sits from
+     the section above it. Everything between these was previously improvised per
+     screen — pb-5 on one header, pt-8 on a dashboard section, gap-8 on search
+     results — which is why the same two gaps measured four different sizes
+     depending on which page you were looking at. */
+  --space-block: 1.25rem;
+  --space-section: 2rem;
+
   --layout-measure: 42rem; /* prose measure */
   --layout-wide: 80rem; /* the widest a content column ever gets */
 

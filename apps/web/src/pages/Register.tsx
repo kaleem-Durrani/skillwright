@@ -17,6 +17,7 @@ import { Checkbox } from '@/components/ui/Checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/Select';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { toast } from '@/components/ui/Toast';
+import { PageHeader } from '@/components/layout/PageHeader';
 
 const schema = z
   .object({
@@ -109,12 +110,14 @@ export function RegisterPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-col gap-1.5">
-        <h1 className="font-display text-2xl font-semibold md:text-3xl">Create an account</h1>
-        <p className="text-sm text-fg-secondary">
-          Students register here. Teaching and admin accounts are provisioned by an administrator.
-        </p>
-      </div>
+      {/* pb-0: this column's own gap-5 already equals --space-block (both
+          1.25rem), so PageHeader's default bottom padding would double the
+          gap to the next child instead of matching it. */}
+      <PageHeader
+        className="pb-0"
+        title="Create an account"
+        description="Students register here. Teaching and admin accounts are provisioned by an administrator."
+      />
 
       <Card variant="raised">
         <form

@@ -100,7 +100,6 @@ export function AdminOverviewPage() {
   return (
     <div className="flex flex-col">
       <PageHeader
-        eyebrow="Admin workspace"
         title="Administration"
         description="Identity, structure, and the record of who changed what."
       />
@@ -138,7 +137,7 @@ export function AdminOverviewPage() {
       )}
 
       {policy.can('audit:read') ? (
-        <section className="pt-8" aria-labelledby="admin-audit">
+        <section className="pt-(--space-section)" aria-labelledby="admin-audit">
           <div className="flex flex-col gap-2 pb-3 sm:flex-row sm:items-center sm:justify-between">
             <h2 id="admin-audit" className="font-display text-lg font-semibold">
               Recent activity

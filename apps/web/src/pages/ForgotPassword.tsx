@@ -10,6 +10,7 @@ import { Card } from '@/components/ui/Card';
 import { FormField } from '@/components/ui/FormField';
 import { Input } from '@/components/ui/Input';
 import { toast } from '@/components/ui/Toast';
+import { PageHeader } from '@/components/layout/PageHeader';
 
 const schema = z.object({
   email: z.string().min(1, 'Enter your email address').email('That is not a valid email address'),
@@ -45,12 +46,15 @@ export function ForgotPasswordPage() {
         <span className="grid size-12 place-items-center rounded-full bg-brand-soft text-brand-on-soft">
           <KeyRound aria-hidden="true" className="size-6" />
         </span>
-        <div className="flex flex-col gap-1.5">
-          <h1 className="font-display text-2xl font-semibold md:text-3xl">Reset your password</h1>
-          <p className="text-sm text-fg-secondary">
-            Enter the address you registered with and we will send a 6-digit code.
-          </p>
-        </div>
+        {/* pb-0: the icon/header column's own gap-3 already spaces this from
+            the icon above it, and the outer gap-5 already equals
+            --space-block for the gap below it, so PageHeader's default
+            bottom padding would double the latter. */}
+        <PageHeader
+          className="pb-0"
+          title="Reset your password"
+          description="Enter the address you registered with and we will send a 6-digit code."
+        />
       </div>
 
       <Card variant="raised">

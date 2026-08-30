@@ -103,7 +103,7 @@ export function ResourceDetailPage() {
         actions={<StatusChip status={data.isPublic ? 'PUBLIC' : 'PRIVATE'} />}
       />
 
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 pb-6 text-sm text-fg-secondary">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 pb-(--space-block) text-sm text-fg-secondary">
         <span className="inline-flex items-center gap-1.5">
           <Icon aria-hidden="true" className="size-4 text-fg-tertiary" />
           {data.type}
@@ -129,7 +129,7 @@ export function ResourceDetailPage() {
         ) : null}
       </div>
 
-      <div className="flex pb-8">
+      <div className="flex pb-(--space-section)">
         <ResourceAccess
           resource={data}
           authenticated={session.isAuthenticated}

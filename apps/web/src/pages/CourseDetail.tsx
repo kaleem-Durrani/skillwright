@@ -504,7 +504,7 @@ export function CourseDetailPage() {
         }
       />
 
-      <dl className="grid grid-cols-2 gap-3 pb-6 lg:grid-cols-4">
+      <dl className="grid grid-cols-2 gap-3 pb-(--space-block) lg:grid-cols-4">
         <Fact label="Code" value={data.code} />
         <Fact label="Department" value={data.department.name} />
         <Fact label="Teacher" value={data.teacher.name} />
@@ -790,7 +790,7 @@ export function CourseDetailPage() {
               would server-side.
             */}
             {selectedOffering !== undefined && policy.can('attendance:mark', viewerSubject) ? (
-              <div className="pb-6">
+              <div className="pb-(--space-block)">
                 <AttendanceRegister courseId={courseId} offeringId={selectedOffering.id} />
               </div>
             ) : null}
@@ -997,7 +997,7 @@ function ViewerAttendanceSection({ course }: { course: CourseDetail }) {
   // answered yet reads better than a section that pops in late.
   if (rows.length === 0 && !mine.isSuccess) {
     return (
-      <div className="pt-8">
+      <div className="pt-(--space-section)">
         <SkeletonCard />
       </div>
     );
@@ -1005,7 +1005,7 @@ function ViewerAttendanceSection({ course }: { course: CourseDetail }) {
   if (rows.length === 0) return null;
 
   return (
-    <div className="pt-8 flex flex-col gap-3">
+    <div className="pt-(--space-section) flex flex-col gap-3">
       {/*
         One seat: exactly the old card, old heading. Several: each names its intake,
         because "Your attendance" twice says nothing about which register is which.

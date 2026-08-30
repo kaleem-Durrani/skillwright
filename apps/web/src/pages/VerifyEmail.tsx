@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { OtpInput } from '@/components/auth/OtpInput';
 import { toast } from '@/components/ui/Toast';
+import { PageHeader } from '@/components/layout/PageHeader';
 import { Route } from '@/routes/_public/verify-email';
 
 const RESEND_COOLDOWN_SECONDS = 60;
@@ -125,14 +126,21 @@ export function VerifyEmailPage() {
         <span className="grid size-12 place-items-center rounded-full bg-brand-soft text-brand-on-soft">
           <MailCheck aria-hidden="true" className="size-6" />
         </span>
-        <div className="flex flex-col gap-1.5">
-          <h1 className="font-display text-2xl font-semibold md:text-3xl">Verify your email</h1>
-          <p className="text-sm text-fg-secondary">
-            We sent a 6-digit code to{' '}
-            <span className="font-medium text-fg">{email ?? 'your inbox'}</span>. It expires in 15
-            minutes.
-          </p>
-        </div>
+        {/* pb-0: the icon/header column's own gap-3 already spaces this from
+            the icon above it, and the outer gap-5 already equals
+            --space-block for the gap below it, so PageHeader's default
+            bottom padding would double the latter. */}
+        <PageHeader
+          className="pb-0"
+          title="Verify your email"
+          description={
+            <>
+              We sent a 6-digit code to{' '}
+              <span className="font-medium text-fg">{email ?? 'your inbox'}</span>. It expires in 15
+              minutes.
+            </>
+          }
+        />
       </div>
 
       <Card variant="raised" className="flex flex-col gap-4">

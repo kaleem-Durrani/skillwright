@@ -218,7 +218,7 @@ export function DashboardPage() {
         </motion.ul>
       )}
 
-      <section className="pt-8" aria-labelledby="dashboard-courses">
+      <section className="pt-(--space-section)" aria-labelledby="dashboard-courses">
         <div className="flex items-center justify-between gap-3 pb-3">
           <h2 id="dashboard-courses" className="font-display text-lg font-semibold">
             Your courses
@@ -357,7 +357,7 @@ export function DashboardPage() {
       */}
       {isStudent && myEnrollments.isSuccess ? (
         (myEnrollments.data?.data.length ?? 0) > 0 ? (
-          <section className="pt-8" aria-labelledby="dashboard-attendance">
+          <section className="pt-(--space-section)" aria-labelledby="dashboard-attendance">
             <h2 id="dashboard-attendance" className="pb-3 font-display text-lg font-semibold">
               My attendance
             </h2>
@@ -386,7 +386,7 @@ export function DashboardPage() {
 
       {/* Same boolean as the query above, for the reasons argued there. */}
       {canReviewRequests ? (
-        <section className="pt-8" aria-labelledby="dashboard-requests">
+        <section className="pt-(--space-section)" aria-labelledby="dashboard-requests">
           <h2 id="dashboard-requests" className="pb-3 font-display text-lg font-semibold">
             Enrolment requests
           </h2>

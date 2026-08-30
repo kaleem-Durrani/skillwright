@@ -13,6 +13,7 @@ import { FormField } from '@/components/ui/FormField';
 import { Input } from '@/components/ui/Input';
 import { OtpInput } from '@/components/auth/OtpInput';
 import { toast } from '@/components/ui/Toast';
+import { PageHeader } from '@/components/layout/PageHeader';
 import { Route } from '@/routes/_public/reset-password';
 
 const schema = z
@@ -63,14 +64,18 @@ export function ResetPasswordPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-col gap-1.5">
-        <h1 className="font-display text-2xl font-semibold md:text-3xl">Choose a new password</h1>
-        <p className="text-sm text-fg-secondary">
-          {search.email
+      {/* pb-0: this column's own gap-5 already equals --space-block (both
+          1.25rem), so PageHeader's default bottom padding would double the
+          gap to the next child instead of matching it. */}
+      <PageHeader
+        className="pb-0"
+        title="Choose a new password"
+        description={
+          search.email
             ? `Enter the code sent to ${search.email}, then pick a new password.`
-            : 'Enter the code from your email, then pick a new password.'}
-        </p>
-      </div>
+            : 'Enter the code from your email, then pick a new password.'
+        }
+      />
 
       <Card variant="raised">
         <form
