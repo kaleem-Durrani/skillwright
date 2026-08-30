@@ -1,74 +1,129 @@
 # Next
 
-**Go to B5 — the ship gate. Push the branch and let CI run, then deploy, then README v1.** The remaining work is: **push and watch the first CI run** (it has still never executed, but every job in it has now been run by hand locally and the eleven faults that would have broken or falsified the first attempt are fixed — see `docs/PROGRESS.md`); deploy; then README v1 with the live link above the fold, favicon and OG image, and the backup rehearsal. The screenshots script already exists.
+**The next task is B5, the ship gate: run CI, deploy, and write README v1 around a live link.**
 
-_What to expect from that first run._ Two things it can still tell you that a local dry-run could not: whether `ubuntu-latest` disagrees with this machine about anything, and whether the `integration` job's service containers come up as configured. Everything else — every `run:` line, the Docker build, the Playwright suite on three browsers — has been executed here. If it goes red, read the failure before assuming the workflow is wrong; that is the whole point of having run it first.
+Everything else is built. What B5 settles is the one thing nothing else can — that this
+repository works somewhere other than the machine it was written on.
 
-_The image is done._ This file said for a week that "the `Dockerfile` has never been run" and that the `noEmit` / `node dist/main.js` contract "has to be settled first". Both were false: `cc85a6e` (2026-08-23) **built and ran it**, settling the contract with an esbuild bundle step (`apps/api/scripts/build.mjs`, wired as `apps/api`'s `build`), and the six faults that surfaced are written up as lesson 38 in `docs/LESSONS-LEARNED.md`. The `docker build` job in `ci.yml` has existed since then. Corrected 2026-08-30 — and the correction is itself the argument for the rule at the bottom of this section: update the file _before_ you stop.
+1. **Run CI.** `.github/workflows/ci.yml` has never executed. Every job in it has been run by
+   hand locally, so the first push should be close, but a runner is not a laptop: the two
+   things a local dry-run cannot answer are whether `ubuntu-latest` disagrees about anything
+   and whether the service containers come up as configured.
+2. **Deploy.** Needs a host and credentials. The image is built and runs; nothing has been
+   pointed at the internet.
+3. **README v1.** A live link above the fold, a favicon and an OG image, and one rehearsal of
+   restoring from backup.
 
-The plan calls B5 "the real finish line" and gates it 🚩. Everything before it is unverified in the one way that counts: no clean-clone reproduction on a second machine, no deployed URL, no CI run.
-
-**Read this before deploying anything.** Until 2026-08-30, `main` built a production bundle that threw on every page (`Cannot read properties of undefined (reading 'createContext')`, `#root` empty) — a `manualChunks` predicate matching pnpm's peer-suffix text split `@tanstack/react-router` across two mutually-importing vendor chunks. Typecheck, lint, 178 unit tests, `vite build` and `vite dev` were **all green over it**, because nothing in the repository had ever loaded the artefact. It is fixed, and `e2e/build-smoke.spec.ts` plus the new `e2e` job in `ci.yml` now ask that question on every push. The lesson generalises past this bug: **a green board on a build nobody has run is not evidence.** That is the same claim B5 exists to settle.
-
-Phase 1 of the UI roadmap (`docs/ui-roadmap/01-DIALOG-PERFORMANCE.md`) is **landed and mostly negative**: measured against the production preview build, the dialogs already opened with 0 ms of total blocking time and 0 long tasks, so the "5fps" was a dev-mode artefact and two of the phase's four drafted fixes measured worse than what they replaced and were dropped. The outcome table is in that file; the numbers are in `docs/PROGRESS.md`. Phase 5 (`docs/ui-roadmap/05-DEFERRED-FEATURES.md`) landed earlier — account reinstate, the three notification enum debts, the MFA enrolment screen, presigned-PUT immutability, upload progress. Admin CRUD for departments and courses, the last B4 item, shipped during the feature roadmap (`AdminDepartments.tsx`, `AdminCourses.tsx`, `CourseFormDialog`).
-
-Phases 2–4 of the UI roadmap (shell/header/spacing, `DataTable`, motion systematized) are **not started** and are not the next task: none of them is a prerequisite for shipping, and Phase 4 has inherited a small dead-code sweep from Phase 1 (five `MotionKit` members with zero call sites).
+This is where the plan puts the finish line, and it is honest about why: until a clean clone
+builds on a second machine and a URL answers, the rest is unverified in the way that counts.
 
 ---
 
-## Why this file exists
-
-This project is built in evenings. The gap between two sessions is sometimes a day and sometimes six weeks, and the expensive part of a six-week gap is never the code — it is the twenty minutes of re-reading your own repository to work out what you were in the middle of and what you had already decided.
-
-One sentence at the top of this file removes that cost. It is the first thing to read on returning and the last thing to update before stopping.
-
-**Rules:**
-
-- One task. Not a backlog — `docs/rebuild/00-REBUILD-PLAN.md` is the backlog.
-- Concrete enough to start without a decision: name the file, name the function, name the test that turns green.
-- Update it _before_ you stop, not when you next start. The version written while the context is still loaded is the useful one.
-
 ## Where things stand
 
-**Done and _running_:** the monorepo and the Compose stack; all eight migrations; the seed; `@skillwright/shared`; the API's plugin layer, auth with TOTP, and **thirteen modules** — departments, courses, enrollments, users, conversations, notifications, dashboard, admin, audit-events, resources, uploads, announcements and comments; the web design system, app shell and every screen. Resources are complete end to end, and announcements and threaded comments now have both an API and a UI. Admin CRUD covers users, departments and courses. Abandoned uploads are swept on a timer (`uploads.sweeper.ts` — a plain `setInterval`, not BullMQ), enrolment CSV exports ship (`exports.test.ts`), ranked search runs on the trgm indexes, and the audit screen has its forensics dialog. Suspended accounts can be reinstated (`POST /users/:id/reinstate`, `user:reinstate`); committed uploads are immutable (the presigned PUT writes to a `_pending/` staging key that `commit` verifies and server-side-copies onto the final key); the MFA enrolment screen shows its QR, confirms a code and reveals recovery codes once; file uploads report real byte progress through `xhr.upload.onprogress`; and withdrawal, course-publish and top-level-comment events all ring someone.
+**Built and running.** The monorepo and the Compose stack; eight migrations and the seed;
+`@skillwright/shared`; the API's plugin layer, password and TOTP auth, and thirteen modules —
+departments, courses, enrollments, users, conversations, notifications, dashboard, admin,
+audit events, resources, uploads, announcements and comments. The web design system, app
+shell and every screen. Resources are complete end to end; announcements and threaded
+comments have both an API and a UI; admin CRUD covers users, departments and courses.
+Abandoned uploads are swept on a timer, enrolment and attendance export as streamed CSV,
+search is ranked over trigram indexes, and the audit screen has its forensics view. Suspended
+accounts can be reinstated. Committed uploads are immutable. The MFA enrolment screen shows a
+QR code, confirms a code and reveals recovery codes once.
 
-**Not started:** realtime. It used to be described here as "wired as a dependency but no code uses it" — the dependencies are gone as of 2026-08-30. `socket.io`, `@socket.io/redis-adapter`, `bullmq` and `socket.io-client` had zero import sites across the whole repo and were shipping in the production image for nothing. Restoring them when B+1 is actually taken on is one command; carrying an unused realtime stack and an unused queue subsystem in a deployed artefact is not free, and the README's architecture diagram had been drawing both as though they existed.
+**Not built.** Realtime. There is no WebSocket layer and no queue subsystem, and the packages
+for both have been removed rather than left to ship unused. Restoring them is one command if
+the work is ever taken on.
 
-**Green — observed passing on 2026-08-25, not assumed:** all five golden paths were driven end to end on 2026-08-23 (the app as a student, a teacher and an admin, light and dark, at 390px and 1280px; **axe: zero violations** across nine screens in both themes, one known Radix false positive when an overlay is open). Verified fresh today: **1319 tests** (656 policy + 485 API + 178 web), `typecheck` clean in all four workspaces, `lint` clean in shared + api + web/src, `build` clean for api + web, `check:brand`, `check:mobile-first`, `docs:permissions --check`, and a from-scratch `migrate deploy` through 0008. One environmental caveat: `turbo run typecheck/build` re-runs `prisma generate` first, and on this machine that step currently fails with EPERM renaming `query_engine-windows.dll.node` — a long-running process has the engine mapped. The checked-in generated client is current (everything downstream of it compiles and passes); run the package scripts directly until whatever holds the DLL exits.
+**Verified on 2026-08-30.** Shared 852 tests at 100% of `src/**` · API 488 with coverage
+enforced at 93.84 / 84.5 / 91.91 / 93.84 · web 385 across 43 files · db 10 — **1,735 unit and
+integration tests**, plus **84 browser tests** across three viewport projects and **6** against
+a real stack with a real login. `typecheck` clean in all four workspaces and in `scripts/`,
+`lint` clean in all four, and `build`, `format:check`, `check:brand`, `check:mobile-first` and
+`docs:permissions --check` all pass. The production image builds and serves the SPA
+single-origin.
 
-**Verified fresh on 2026-08-30, every workspace:** shared **852** (100% of `src/**`) · API **488** (coverage enforced at 93.84 / 84.5 / 91.91 / 93.84) · web **385** across 43 files · db **10** — **1,735 unit and integration tests**, plus **84 browser tests** across three viewport projects and **6** against the real stack. `typecheck` clean in all four workspaces and in `scripts/`, `lint` clean in all four, plus `build`, `format:check`, `check:brand` (724 files), `check:mobile-first` (163 files) and `docs:permissions --check`. The WebKit project and the real-stack suite had both never run on this machine before today: `pnpm exec playwright install webkit` and `pnpm exec tsx apps/web/e2e/real/setup-db.ts` are one-offs.
+**Never executed.** Both CI workflows. The `Dockerfile` is not on this list — it was built and
+run on 2026-08-23, and the six faults that surfaced are lesson 38 in
+[`docs/LESSONS-LEARNED.md`](docs/LESSONS-LEARNED.md).
 
-**Still never executed:** both CI workflows — including the new `e2e` job, which is the one that would have caught the broken bundle. The `Dockerfile` is no longer on this list: it was built and run on 2026-08-23. Everything else in this repository has now run at least once.
+**UI roadmap.** Phase 1 (dialog performance) and Phase 5 (deferred features) have landed.
+Phase 1's result was mostly negative and worth knowing before repeating it: measured against a
+production build, the dialogs already opened with zero blocking time, so two of the four
+planned fixes were built, measured worse than what they replaced, and dropped. Phases 2–4 —
+shell and spacing, a unified `DataTable`, motion systematised — are not started, and none of
+them blocks shipping.
 
-## Starting a session
+---
+
+## Running it locally
 
 ```bash
 pnpm infra:up     # Postgres, Redis, MinIO, Mailpit — exits 0 when all four are healthy
 pnpm dev          # infra:up, then turbo dev across api + web
 ```
 
-Postgres publishes on **5433**. Redis is on **6381** and MinIO on **9002/9003** _on this machine only_ — other projects' containers own the defaults and auto-start with Docker Desktop. The overrides live in the gitignored `.env`; `docker-compose.yml` defaults to the standard ports for anyone else. Mailpit's inbox is at http://localhost:8025.
+Postgres publishes on **5433**, because a native install commonly owns 5432. Redis on **6381**
+and MinIO on **9002/9003** are overrides for the machine this was built on, where other
+projects hold the defaults; `docker-compose.yml` falls back to the standard ports for everyone
+else. Mailpit's inbox is at <http://localhost:8025>.
 
-Tests run against a separate `skillwright_test` database, derived automatically from `DATABASE_URL`. The fixture **refuses to start** against any database whose name does not end in `_test`, because it deletes every user and department between files.
+Tests use their own databases, created by `pnpm db:test:setup`. The fixture **refuses to
+start** against any database whose name does not end in `_test`, because it deletes every user
+and department between files.
 
-## Known conflicts to resolve
+Two test processes must never share one database. `apps/api/vitest.config.ts` serialises files
+within a single vitest process, which says nothing about two of them: concurrent runs leave
+rows behind, `resetDatabase()` then fails on a `StudentProfile` restrict constraint, and every
+later suite fails at sign-in. Give each worker its own — `TEST_DATABASE_URL` is read first.
+Those databases are not migrated automatically; after a new migration, run `prisma migrate
+deploy` against each one, or a suite fails with a column-not-found error that reads like a
+regression and is a stale schema.
 
-- ~~**Docker `dist` contract.**~~ **Resolved 2026-08-23 (`cc85a6e`).** `apps/api` stays `noEmit` — `shared`/`db` publish TypeScript source and have no build step — and `apps/api/scripts/build.mjs` bundles `src/main.ts` to `dist/main.js` with those two compiled in and every real dependency external. `@prisma/client` is external and had to become a direct dependency of the API. Kept here because the resolution is the interesting part, not the conflict.
-- ~~**`packages/db/.env.example` still says port 5432.**~~ **Fixed 2026-08-30.** It now says 5433 and carries the reason, so a fresh clone's `pnpm db:migrate` reaches the database `docker-compose.yml` actually publishes.
-- **`apps/web/tsconfig.json` does not extend `tsconfig.base.json`.** It redeclares every option and sets `exactOptionalPropertyTypes: false`, omitting `noUncheckedIndexedAccess` — so the workspace with the most code is the one not held to the repo's strict standard. Closing it is a decision, not a defect; measure the fallout first.
-- **The notification panel has a CRITICAL axe violation. Measured 2026-08-30, no longer an opinion.** The entry here used to reason about it; a test now asks. axe reports `aria-required-children` at critical impact against the open panel in both themes: _"Element has children which are not allowed: [role=status]"_ — `EmptyState`’s live region, invalid inside a `role="menu"` at any depth. The wrappers moved `none` → `group` (`group` is a permitted owned element; `none` was a re-parenting trick) and that did **not** clear it, which is the useful half of the measurement. Clearing it needs a Popover panel — correct shape, costs the roving arrow-key focus that is the reason this is a menu — or an `EmptyState` that can render without its status role. Until then `apps/web/e2e/dialogs.spec.ts` asserts this exact id and impact, so a new violation fails the suite **and so does fixing this one**; the day it is fixed, that test and this bullet both have to go.
-- **Parallel agents must not share `skillwright_test`.** `apps/api/vitest.config.ts` serialises files within ONE vitest process (`singleFork`), which says nothing about two processes: two runs at once leave rows behind, `resetDatabase()` then dies on a `StudentProfile` Restrict FK, and every later suite fails at `signIn`. Give each worker its own database — `test/setup.ts` reads `TEST_DATABASE_URL` first and refuses any name not ending in `_test`, so `skillwright_a_test` works and `skillwright_test_a` is rejected. `skillwright_a_test` and `skillwright_b_test` exist — but they are **not** kept in step automatically, and this line used to claim they were "migrated" full stop. On 2026-08-30 `skillwright_a_test` was still pre-Phase-9: every one of the 485 API tests failed with `The column Enrollment.offeringId does not exist in the current database`, which reads like a catastrophic regression and is actually a stale schema. Re-run `DATABASE_URL=…/skillwright_a_test pnpm --filter @skillwright/db exec prisma migrate deploy` after any new migration, for each worker database.
-- ~~**Every login writes two audit rows.**~~ **Fixed 2026-08-30.** The second was an `UPDATE User` with a null actor, emitted because the `lastLoginAt` stamp that follows a login goes through the audited client. `audit.ts` now drops a User UPDATE whose entire diff is `lastLoginAt`, on the same argument it already applied to `updatedAt` — a value that moves as a mechanical consequence of another recorded fact is not a second fact. Deliberately narrow, and pinned by two tests in `audit.test.ts`: one that a login writes only the LOGIN, one that an edit touching anything else is still recorded in full.
-- **`apps/web/src/lib/api.ts` hand-declares `PaginationMeta`, `Paginated<T>` and `CursorPage<T>`** while `packages/shared/src/schema/pagination.ts` defines them. `CursorPage<T>` is wrong — it says `{ data, nextCursor }`, the wire sends `{ data, meta: { nextCursor, hasMore } }`. Nothing imports it yet, so it is a trap rather than a live bug.
+---
 
-## Credentials
+## Known issues
 
-The legacy `.env` held live Neon, Gmail and Cloudinary secrets. It was never committed (verified across all 132 commits) and now lives at `C:\Users\Legion\millat-legacy-secrets.env.txt`, outside this repo. **Those three still need rotating.**
+- **The notification panel has a critical accessibility violation.** axe reports
+  `aria-required-children` against the open panel in both themes: _"Element has children which
+  are not allowed: [role=status]"_. That is `EmptyState`'s live region, which is invalid inside
+  a `role="menu"` at any depth. Wrapping it in `role="group"` — a role a menu is allowed to
+  own — does not clear it. Clearing it needs either a Popover panel, which is the correct shape
+  but costs the roving arrow-key focus that is the reason this is a menu, or an `EmptyState`
+  that can render without its status role. `apps/web/e2e/dialogs.spec.ts` asserts the exact
+  violation, so a new one fails the suite and fixing this one does too.
+- **`exactOptionalPropertyTypes` is off in `apps/web`.** Turning it on costs 78 errors, mostly
+  react-hook-form and Radix prop spreads where an optional prop passes through as
+  possibly-undefined. The other three strict flags from `tsconfig.base.json` are on. Re-measure
+  before starting — the number is the size of the job:
+  `pnpm --filter @skillwright/web exec tsc -p tsconfig.json --noEmit --exactOptionalPropertyTypes`.
+- **One web test is timing-dependent.** `AdminUsers.tsx` reports different coverage across
+  identical runs, which is why the web coverage thresholds are pinned to the bottom of the
+  observed range rather than the top.
+- **Three legacy credentials need rotating.** The old `.env` held live Neon, Gmail and
+  Cloudinary secrets. It was never committed — verified across all 132 commits — and now lives
+  outside the repository, but the credentials themselves are still valid.
 
-## Parked
+---
 
-Things deliberately not being done, recorded so they are not rediscovered as ideas:
+## Deliberately not being done
 
-- Assignments, grading, quizzes. Out of scope, permanently — see `docs/rebuild/00-REBUILD-PLAN.md` §7.
+Recorded so they are not rediscovered as ideas.
+
+- Assignments, grading, quizzes. Permanently out of scope — see
+  `docs/rebuild/00-REBUILD-PLAN.md` §7.
 - Payments, AI features, microservices. Same.
-- Deleting `backend/` and `frontend/`. They go when the rebuild replaces them, not before; `scripts/check-brand.ts` excludes them and reports the count until then.
+- Realtime chat depth — sequence numbers, backfill, presence. The highest-value remaining
+  feature and the most expensive; it stays parked until it is chosen deliberately.
+- Deleting `backend/` and `frontend/`. They go when the rebuild replaces them, not before;
+  `scripts/check-brand.ts` excludes them and reports the count until then.
+
+---
+
+## About this file
+
+One task at the top, concrete enough to start without a decision. It is not the backlog —
+`docs/rebuild/00-REBUILD-PLAN.md` is that. It is updated before stopping rather than on
+returning, because the version written while the context is still loaded is the useful one.
+[`docs/PROGRESS.md`](docs/PROGRESS.md) is the dated log of what actually happened.

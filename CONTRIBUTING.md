@@ -32,16 +32,15 @@ pnpm typecheck && pnpm lint && pnpm format && pnpm test
 pnpm check:brand && pnpm check:mobile-first
 ```
 
-`pnpm test` includes apps/api's integration suite, which runs against a separate
+`pnpm test` includes apps/api's integration suite, which runs against its own
 `skillwright_test` database — separate because it deletes every row between test
-files. Nothing used to create it, so a contributor's first `pnpm test` died with
-`Database "skillwright_test" does not exist` and there was no documented way out.
-`pnpm db:test:setup` is that way out; it is idempotent, so run it again whenever a
-migration lands.
+files, and you do not want that pointed at your development data.
+`pnpm db:test:setup` creates and migrates it, and is idempotent, so run it again
+after any new migration.
 
 CI runs all of these plus integration tests, a build, a Docker image build, `generate-permissions-doc --check`, and the Playwright suite against the **built** SPA. Nothing here is a suggestion — every one of them can fail a pull request.
 
-If you changed anything in `apps/web`, run the browser suite too. It is the only gate that loads what Rollup actually produced, which is not a theoretical distinction: a chunking bug once made every page of the production build throw while every other check in this list stayed green (lesson 39).
+If you changed anything in `apps/web`, run the browser suite too. It is the only gate that loads what Rollup actually produced. That distinction has bitten this project: a chunking bug once made every page of the production build throw while every other check in this list stayed green (lesson 39).
 
 ```bash
 pnpm --filter @skillwright/web build      # playwright.config.ts serves dist/ with `vite preview`

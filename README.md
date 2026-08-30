@@ -10,7 +10,7 @@
 
 ![Skillwright course detail: the Resources tab, owner's view, with a per-row "Enrolled only" access badge next to each handout](docs/screenshots/course-detail-resources.png)
 
-Skillwright is a vocational training institute's platform: departments, courses with seat-limited enrolment, teaching resources with threaded comments, and staff-to-student messaging. One declarative policy module decides every `(actor, action, subject)` rule once, and the HTTP layer, the realtime layer and the React UI all derive from that same function, so a button that would 403 never renders. The **Enrolled only** badge in the screenshot above is that policy talking — it is the same `resource:read` rule the API enforces on the byte stream, not a label a component remembered to add.
+Skillwright is a vocational training institute's platform: departments, courses with seat-limited enrolment, teaching resources with threaded comments, and staff-to-student messaging. One declarative policy module decides every `(actor, action, subject)` rule once, and the HTTP layer and the React UI both derive from that same function, so a button that would 403 never renders. The **Enrolled only** badge in the screenshot above is that policy talking — it is the same `resource:read` rule the API enforces on the byte stream, not a label a component remembered to add.
 
 ---
 
@@ -20,22 +20,22 @@ Each of these is falsifiable, and each links to the test that would fail if the 
 
 ### 1. Permissions are data, not conditionals
 
-`can(actor, action, subject)` is a pure function — no I/O, no database import. Every `(role, action, subject-state)` decision it can make is written down and checked: 49 actions, 231 hand-written cells and 539 generated ones — **770 decisions proved** by 656 test cases, plus 12 more covering the wrapper the API actually calls. `docs/permissions.md` is generated from that same policy, never written by hand — a CI job regenerates it and fails the build if the checked-in file disagrees.
+`can(actor, action, subject)` is a pure function — no I/O, no database import. Every `(role, action, subject-state)` decision it can make is written down and checked: 49 actions, 231 hand-written cells and 539 generated ones — **770 decisions proved**. `docs/permissions.md` is generated from that same policy, never written by hand — a CI job regenerates it and fails the build if the checked-in file disagrees.
 
-> **Proof:** [`packages/shared/test/policy-matrix.test.ts`](packages/shared/test/policy-matrix.test.ts) (run `pnpm --filter @skillwright/shared test`; the suite prints its own counts, so this paragraph can be checked against it) · [`packages/shared/src/policy`](packages/shared/src/policy) · [`scripts/generate-permissions-doc.ts`](scripts/generate-permissions-doc.ts) · [`docs/permissions.md`](docs/permissions.md) · the `permissions-doc` job in [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
+> **Proof:** [`packages/shared/test/policy-matrix.test.ts`](packages/shared/test/policy-matrix.test.ts) (run `pnpm --filter @skillwright/shared test` — the suite prints these counts) · [`packages/shared/src/policy`](packages/shared/src/policy) · [`scripts/generate-permissions-doc.ts`](scripts/generate-permissions-doc.ts) · [`docs/permissions.md`](docs/permissions.md) · the `permissions-doc` job in [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 >
 > **How to falsify it:** change one rule in `packages/shared/src/policy/` without regenerating the docs. `pnpm docs:permissions -- --check` — and CI — go red.
 
 ### 2. A 30-seat course cannot be oversold, even by 200 people at once
 
-Capacity is enforced by a conditional atomic `UPDATE` plus a Postgres `CHECK` constraint, not by a read-then-write in application code. Two hundred students hit "approve" on a thirty-seat course at once, concurrently, in the same test; exactly thirty are seated and the rest come back `409 CAPACITY_EXCEEDED`.
+Capacity is enforced by a conditional atomic `UPDATE` plus a Postgres `CHECK` constraint, not by a read-then-write in application code. Two hundred students hit "approve" on a thirty-seat intake at once, concurrently, in the same test; exactly thirty are seated and the rest come back `409 CAPACITY_EXCEEDED`.
 
 ```sql
-ALTER TABLE "Course" ADD CONSTRAINT course_capacity_sane
-  CHECK ("approvedCount" >= 0 AND "approvedCount" <= "capacity");
+ALTER TABLE "CourseOffering" ADD CONSTRAINT course_offering_capacity_sane
+  CHECK ("approvedCount" >= 0 AND "approvedCount" <= capacity);
 ```
 
-> **Proof:** [`apps/api/test/enrollments.test.ts`](apps/api/test/enrollments.test.ts) — `seats exactly the capacity under 200 concurrent approvals` · [ADR 0006](docs/adr/0006-atomic-increment-over-serializable.md) · [`packages/db/prisma/migrations/0002_constraints/migration.sql`](packages/db/prisma/migrations/0002_constraints/migration.sql)
+> **Proof:** [`apps/api/test/enrollments.test.ts`](apps/api/test/enrollments.test.ts) — `seats exactly the capacity under 200 concurrent approvals` · [ADR 0006](docs/adr/0006-atomic-increment-over-serializable.md) · [`packages/db/prisma/migrations/0007_cohorts/migration.sql`](packages/db/prisma/migrations/0007_cohorts/migration.sql)
 >
 > **How to falsify it:** replace the conditional `UPDATE` with `SELECT count → compare → INSERT`. The `CHECK` constraint turns the race into a failed transaction instead of an oversold course, and the test's count stops being 30.
 
@@ -122,7 +122,7 @@ flowchart TB
     class POL proof
 ```
 
-This is what exists, not what was planned. Earlier versions of this diagram showed a Socket.IO layer and BullMQ workers; neither was ever built, and their packages have been removed from `dependencies` rather than left to ship dead weight in the production image. Realtime chat depth is deliberately parked — see [`NEXT.md`](NEXT.md). Background work today is one unref'd interval that sweeps abandoned uploads, which the feature plan argued for over a queue subsystem at this size.
+Background work is deliberately small. One unref’d interval sweeps abandoned uploads and mail goes out over SMTP directly — there is no queue subsystem and no realtime layer, because at this size neither earns the operational surface it costs. [`NEXT.md`](NEXT.md) records what is built and what is not.
 
 The dotted lines are the point. `packages/shared` has **no runtime dependency on Prisma or the database**, which is what lets the SPA import the exact function the API enforces with — the policy module is not a copy of the rules, it is the rules.
 

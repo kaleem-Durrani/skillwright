@@ -15,8 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `scripts/check-brand.ts` — the product name may be spelled in one file; the previous product name in none.
 - `scripts/check-mobile-first.ts` — seven desktop-first patterns rejected in `apps/web/src` (ADR 0008).
 - `scripts/generate-permissions-doc.ts` — regenerates `docs/permissions.md` from the policy module; `--check` fails CI when the two disagree.
-- CI pipeline: typecheck, lint, format, brand check, mobile-first check, unit tests including the policy matrix, integration tests against real Postgres and Redis, build, and the permissions-doc check.
-- `contract-drift` workflow — renames a Prisma column on a scratch branch and asserts that `pnpm -r typecheck` **fails**. A passing typecheck fails the job.
+- CI pipeline: typecheck, lint, format, brand check, mobile-first check, unit tests including the policy matrix, integration tests against real Postgres and Redis, a build, a Docker image build, the permissions-doc check, and two browser suites — one against the built bundle at three viewports, one against a real stack with a real login.
+- `contract-drift` workflow — renames a Prisma column on a scratch branch and asserts that `apps/api`'s typecheck **fails**. A passing typecheck fails the job.
 - Multi-stage `Dockerfile`: non-root, production dependencies only, the built SPA served single-origin by the API, tini as PID 1, `HEALTHCHECK` on `/readyz`.
 - ADRs 0001–0008 in `docs/adr/`.
 - `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `NEXT.md`, MIT `LICENSE`.
@@ -42,8 +42,28 @@ Everything above is the scaffold. Everything below is the product built on it, i
 
 ### Fixed
 
-- **The production bundle did not run.** `manualChunks` matched `react-dom` as a substring of the absolute module id, and pnpm encodes peer dependencies in its store directory names — so `@tanstack/react-router` was classified by its peers and split across two mutually-importing vendor chunks. The built SPA threw `Cannot read properties of undefined (reading 'createContext')` on every page while typecheck, lint, unit tests, `vite build` and `vite dev` were all green. Chunks are now chosen by package name, and `e2e/build-smoke.spec.ts` loads the artefact in a browser on every push.
-- **`Forgot password?` was an 18 px touch target** on `/login`, under ADR 0008's 44×44 floor. The e2e rule that should have caught it exempts inline links by computed `display`, which blockifies for a flex child.
+- **The production build did not run.** A `manualChunks` predicate matched `react-dom` as a
+  substring of the absolute module id, and pnpm encodes peer dependencies in its store
+  directory names — so `@tanstack/react-router` was classified by its peers and split across
+  two mutually-importing vendor chunks. Every page of the built SPA threw
+  `Cannot read properties of undefined (reading 'createContext')` while typecheck, lint, unit
+  tests, `vite build` and `vite dev` were all green. Chunks are chosen by package name now,
+  and a smoke test loads the built bundle in a browser on every push.
+- **The seeded MFA account could not sign in.** The seed and the API used different encryption
+  envelopes and different key variables, so every correct authenticator code was rejected
+  silently — only recovery codes worked. One implementation now, pinned by a test.
+- **`/index.html` was served with a one-year immutable cache**, so a client that requested the
+  shell by name — a crawler, an old bookmark, a CDN origin-pull — could be left holding a
+  document referencing chunks a deploy had already removed.
+- **The production image served the SPA's complete source maps** — 61 files and 4.8 MB of a
+  6.6 MB payload, including the unminified application source. They are still built and kept
+  as a CI artifact; they are no longer shipped.
+- **Every sign-in wrote a second audit row** with no actor attached, produced by the
+  `lastLoginAt` timestamp write rather than by anything a person did.
+- **`Forgot password?` was an 18 px touch target** on `/login`, under ADR 0008's 44x44 floor.
+- **A course whose last intake had been retired crashed its own Students tab.**
+- **A fresh clone on Windows failed `format:check` on 319 files** before anything was edited,
+  and `packages/db/.env.example` pointed the first `pnpm db:migrate` at the wrong port.
 
 ### Changed
 
@@ -51,7 +71,10 @@ Everything above is the scaffold. Everything below is the product built on it, i
 
 ### Removed
 
-- Nothing yet. `backend/` and `frontend/` remain tracked until the rebuild replaces them.
+- `socket.io`, `@socket.io/redis-adapter`, `bullmq` and `socket.io-client`. All four were
+  declared as runtime dependencies and imported by nothing, so they shipped in the production
+  image for a realtime layer and a queue subsystem that were never built.
+- `backend/` and `frontend/` remain tracked until the rebuild replaces them.
 
 ---
 
