@@ -204,6 +204,74 @@ test.describe('accessibility of every dialog surface, in both themes', () => {
   }
 });
 
+test.describe('the notification panel, which is a menu holding non-menu content', () => {
+  /*
+   * NEXT.md carries this as an open a11y debt, and it is worth a measurement rather
+   * than another opinion.
+   *
+   * The panel is a Radix DropdownMenu — chosen for its roving arrow-key focus — and
+   * its empty, loading and error branches are not menuitems. They are wrapped in
+   * `role="none"`, which the component's own comment calls "the minimal fix". It is
+   * not a complete one: presentation/none strips the WRAPPER's semantics and then
+   * re-parents its children to the nearest ancestor with a role, which is still the
+   * `menu`. The correct fix is a Popover, and it costs the roving focus — which is
+   * why the trade was deferred rather than taken.
+   *
+   * So it was measured, and the measurement settled it: axe reports
+   * `aria-required-children` at CRITICAL impact, in both themes —
+   * "Element has children which are not allowed: [role=status]", pointing at
+   * EmptyState's live region. The debt is real and axe can see it.
+   *
+   * This test therefore asserts the violation EXACTLY rather than asserting none.
+   * A red test is not a gate, it is a thing people learn to ignore; an exact
+   * characterisation is a ratchet in both directions. A NEW violation fails it, and
+   * so does FIXING this one — which is the only reliable way to make the panel's
+   * comment and NEXT.md's entry get deleted on the day they stop being true.
+   */
+  for (const theme of ['light', 'dark'] as const) {
+    test(`has no serious or critical violations (${theme})`, async ({ page }, testInfo) => {
+      testInfo.setTimeout(30_000);
+      await page.addInitScript((t) => localStorage.setItem('sw.theme', t), theme);
+      await stubApi(page);
+      await page.goto('/dashboard');
+      await page.waitForLoadState('networkidle');
+
+      await page.getByRole('button', { name: /^Notifications/ }).click();
+      const panel = page.getByRole('menu', { name: 'Notifications' });
+      await panel.waitFor();
+
+      // Scoped to the panel's own portal, so the shell behind it cannot be blamed
+      // for — or absorb — anything the panel does.
+      await page.addScriptTag({ content: AXE_SOURCE });
+      const violations = await page.evaluate(async () => {
+        const axe = (
+          window as unknown as {
+            axe?: {
+              run: (
+                context?: unknown,
+                options?: unknown,
+              ) => Promise<{ violations: Array<{ impact: string | null; id: string }> }>;
+            };
+          }
+        ).axe;
+        const { violations } = await axe!.run(
+          { include: [['[role="menu"][aria-label="Notifications"]']] },
+          { resultTypes: ['violations'] },
+        );
+        return violations
+          .filter((v) => v.impact === 'serious' || v.impact === 'critical')
+          .map((v) => ({ impact: v.impact, id: v.id }));
+      });
+
+      /*
+       * Exactly this, and only this. Written as the whole array so an additional
+       * violation cannot hide behind a `toContainEqual`.
+       */
+      expect(violations).toEqual([{ id: 'aria-required-children', impact: 'critical' }]);
+    });
+  }
+});
+
 test('the toast stack still raises and dismisses', async ({ page }, testInfo) => {
   testInfo.setTimeout(20_000);
   await stubApi(page);

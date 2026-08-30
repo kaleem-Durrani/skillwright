@@ -218,7 +218,7 @@ export function NotificationBell({ unreadCount }: { unreadCount: number }) {
           <DropdownMenuSeparator />
 
           {/*
-           * Every branch that is NOT a row is wrapped in `role="none"`.
+           * Every branch that is NOT a row is wrapped in `role="group"`.
            *
            * ARIA lets a `menu` own only menuitem/menuitemcheckbox/menuitemradio/
            * group/separator. EmptyState renders `role="alert"`/`"status"` with an
@@ -227,18 +227,36 @@ export function NotificationBell({ unreadCount }: { unreadCount: number }) {
            * reader walking the panel in menu mode skipped straight past them. A
            * user whose notifications failed to load heard an empty menu.
            *
-           * `role="none"` on the wrapper is the minimal fix: it stops the branch
-           * presenting itself as a child with a competing role. Rewriting the
-           * panel onto Popover would satisfy ARIA more completely and cost the
-           * roving arrow-key focus, which is the reason this is a menu at all.
+           * This was `role="none"` and that did not work. `none`/`presentation`
+           * removes the WRAPPER's semantics and then re-parents its children to the
+           * nearest ancestor with a role — which is still the menu — so the invalid
+           * owned elements stayed invalid, one level up. Measured, once a test
+           * finally asked: axe reported `aria-required-children` at CRITICAL impact
+           * against this panel in both themes (apps/web/e2e/dialogs.spec.ts).
+           *
+           * `group` is at least the role the spec permits here: it IS in the menu's
+           * list of allowed owned elements, where `none` was a re-parenting trick.
+           * It does not clear the violation, and pretending otherwise would be the
+           * same mistake twice. Measured after the change: axe still reports
+           * `aria-required-children`, now naming the real culprit —
+           * "Element has children which are not allowed: [role=status]" — which is
+           * `EmptyState`'s live region, invalid inside a menu at any depth.
+           *
+           * Clearing it needs one of two things, both bigger than this comment: a
+           * Popover panel (correct shape, costs the roving arrow-key focus that is
+           * the reason this is a menu), or an EmptyState that can render without its
+           * status role. Until then the violation is CHARACTERISED rather than
+           * hidden — apps/web/e2e/dialogs.spec.ts asserts this exact id and impact,
+           * so a new violation fails the suite and FIXING this one fails it too,
+           * which is what forces this comment to be deleted rather than rot.
            */}
           {list.isPending ? (
-            <div role="none">
+            <div role="group">
               <NotificationRowsPending />
             </div>
           ) : list.isError ? (
             <>
-              <div role="none">
+              <div role="group">
                 <EmptyState
                   variant="error"
                   compact
@@ -272,7 +290,7 @@ export function NotificationBell({ unreadCount }: { unreadCount: number }) {
               </DropdownMenuItem>
             </>
           ) : isEmpty ? (
-            <div role="none">
+            <div role="group">
               <EmptyState
                 variant="empty"
                 compact

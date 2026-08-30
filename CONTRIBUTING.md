@@ -50,6 +50,25 @@ pnpm --filter @skillwright/web test:e2e   # desktop, Pixel 7 and iPhone 14
 
 One-off per machine: `pnpm --filter @skillwright/web exec playwright install chromium webkit`.
 
+There is a second browser suite, and it is the one that authenticates. The command above
+runs three viewport projects against the built bundle with every `/api/v1` call stubbed —
+fast, no database, and structurally unable to see anything BETWEEN the SPA and the API: the
+login form, the session cookie, a policy refusal, a seat changing hands. The `real-stack`
+project runs the API against a real seeded database and signs in through the actual login
+form, which is the only place the golden paths are exercised end to end.
+
+```bash
+pnpm exec tsx apps/web/e2e/real/setup-db.ts        # once, and after any new migration
+pnpm --filter @skillwright/web exec playwright test --project=real-stack
+```
+
+It uses its own `skillwright_e2e` database and never touches the dev one — these specs
+approve enrolments and suspend accounts, and `pnpm screenshots` photographs whatever the dev
+database holds (SCREENSHOTS.md). The project is opt-in by name because Playwright has one
+`webServer` list for the whole run, so an unconditional API entry would boot a
+Postgres-dependent process for the stubbed suite too — and CI's fast `e2e` job has no
+database at all.
+
 ## Working on accessibility
 
 `@axe-core/react` reports violations straight into the dev console, but it is **opt-in**, because a whole-document re-audit after every commit is the single largest source of dev-mode jank in this app — it lands mid-interaction no matter how long the debounce. Turn it on for the session when you want it:
