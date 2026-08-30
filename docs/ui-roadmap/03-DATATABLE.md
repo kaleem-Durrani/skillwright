@@ -24,6 +24,28 @@ _One table component, every screen, filling the space the page gives it._
 4. **Delete `DataList`** once no consumer remains — the phase is done when the old component is gone, not when the new one exists.
 5. **Verify per screen at 1440 px and 375 px:** table fills to the pagination row without page scroll; header sticks while scrolling internally; keyboard navigation through rows/actions intact; axe clean both themes; `check:mobile-first` green. Long-content cells (notes, user agents in the audit feed) wrap or truncate by column config — no horizontal page scroll.
 
+## Outcome — landed 2026-08-30
+
+`DataList` is deleted and every tabular screen renders `DataTable`. The phase ends when the old component is gone, and it is.
+
+| Task                  | Outcome                                                                                                                                                  |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1 — the component     | **Done.** Same props, plus `actions`, `pagination`, `fillHeight` — and `actionsWidth`, added when the migration lost AdminCourses' 12rem actions column. |
+| 2 — the mobile story  | **Cards below `md`, table from `md` up, ONE rendered.** `useMediaQuery` picks; the dual DOM is gone. That was ~40 row subtrees where 20 would do.        |
+| 3 — adopt everywhere  | **Done.** AdminUsers, AdminCourses, AdminDepartments, AdminOverview, Courses, Announcements, CourseDetail (roster + resources), and the design gallery.  |
+| 4 — delete `DataList` | **Done**, with its dangling `DataList.tsx:NN` citations swept out of seven other files.                                                                  |
+| 5 — verify per screen | **Measured, not eyeballed** — see below.                                                                                                                 |
+
+**`fillHeight` is inert unless every ancestor passes the height along, and that is the finding worth carrying forward.** It silently did nothing on the first migrated screen: `routes/_app/admin.tsx` was a plain `flex flex-col`, so the table had a bounded grandparent and an unbounded parent, sized to its content, overflowed `main` invisibly, and pushed the document to **2842px against a 900px viewport** with the pager three screens below the fold. Typecheck, lint and 394 unit tests were green over it. Nothing failed — it just did not work.
+
+So the contract is a browser test, `apps/web/e2e/fill-height.spec.ts`, asserting numbers across all five screens that use it: the document does not scroll, the overflowing element is the table's own wrapper, the pagination's bottom edge is inside the viewport. Verified it fails when the chain is broken again — the two admin screens go red while the two that do not route through that layout stay green.
+
+**`fillHeight` is deliberately off** on AdminOverview's audit feed and CourseDetail's two lists: they sit under stat tiles, a course header and tabs, and a list that fills the viewport under other primary content just hides it.
+
+**One accessibility fix fell out.** `DataList`'s `<tr onClick>` was never keyboard-reachable — only its card `<button>` was — so on desktop the row-click affordance existed for a mouse and nothing else. `DataTable`'s rows are operable by Enter and Space.
+
+**And one assertion got stronger.** AdminUsers' row-menu test used to find ALL triggers and click the first, because the dual DOM meant every menu existed twice under one accessible name. It now asserts exactly one, so the pattern returning is a failing test.
+
 ## Explicitly out of scope
 
 Virtualization, column sorting/reordering UI, TanStack Table adoption, CSV export changes (Phase 8's exports already stream server-side).

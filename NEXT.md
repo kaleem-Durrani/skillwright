@@ -37,8 +37,8 @@ for both have been removed rather than left to ship unused. Restoring them is on
 the work is ever taken on.
 
 **Verified on 2026-08-30.** Shared 852 tests at 100% of `src/**` · API 488 with coverage
-enforced at 93.84 / 84.5 / 91.91 / 93.84 · web 385 across 43 files · db 10 — **1,735 unit and
-integration tests**, plus **84 browser tests** across three viewport projects and **6** against
+enforced at 93.84 / 84.5 / 91.91 / 93.84 · web 394 across 44 files · db 10 — **1,744 unit and
+integration tests**, plus **129 browser tests** across three viewport projects and **6** against
 a real stack with a real login. `typecheck` clean in all four workspaces and in `scripts/`,
 `lint` clean in all four, and `build`, `format:check`, `check:brand`, `check:mobile-first` and
 `docs:permissions --check` all pass. The production image builds and serves the SPA
@@ -48,12 +48,17 @@ single-origin.
 run on 2026-08-23, and the six faults that surfaced are lesson 38 in
 [`docs/LESSONS-LEARNED.md`](docs/LESSONS-LEARNED.md).
 
-**UI roadmap.** Phase 1 (dialog performance) and Phase 5 (deferred features) have landed.
-Phase 1's result was mostly negative and worth knowing before repeating it: measured against a
-production build, the dialogs already opened with zero blocking time, so two of the four
-planned fixes were built, measured worse than what they replaced, and dropped. Phases 2–4 —
-shell and spacing, a unified `DataTable`, motion systematised — are not started, and none of
-them blocks shipping.
+**UI roadmap.** All five phases have landed. Every screen's title and actions now live in the
+shell's top bar, `main` is a bounded flex column from `md` up, and `DataTable` replaced
+`DataList` everywhere — so a long table scrolls inside itself with its pagination still on
+screen.
+
+Three of the four tasks the roadmap gated on a measurement ended in a revert, which is worth
+knowing before repeating them. The dialogs already opened with zero blocking time in a
+production build. Route transitions tripled the time-to-readable on every navigation. And
+`LazyMotion` — expected to save bundle — measured 154 bytes **larger** in the only variant
+this app can use, because the sliding indicators need `domMax`. The numbers are at each call
+site and in [`docs/PROGRESS.md`](docs/PROGRESS.md).
 
 ---
 

@@ -24,9 +24,9 @@ This is the plan of record for UI work the way `docs/roadmap/00-FEATURE-PLAN.md`
 
 ```
 Phase 1   Dialog performance        ← LANDED 2026-08-30, mostly negative: see below
-Phase 2   Shell, header, spacing    ← the layout contract everything else needs
-Phase 3   DataTable                 ← fills the contract Phase 2 creates
-Phase 4   Motion systematized       ← after performance is proven, broaden deliberately
+Phase 2   Shell, header, spacing    ← LANDED 2026-08-30
+Phase 3   DataTable                 ← LANDED 2026-08-30, DataList deleted
+Phase 4   Motion systematized       ← LANDED 2026-08-30, mostly measured noes
 Phase 5   Deferred features         ← LANDED 2026-08-23, all five
 ```
 
@@ -34,7 +34,9 @@ Phase 5   Deferred features         ← LANDED 2026-08-23, all five
 
 The phase's real find was not a slow dialog: `manualChunks` was splitting `@tanstack/react-router` across two mutually-importing vendor chunks, so **the production bundle threw on every page** while every gate in the repository stayed green. Nothing in CI had ever loaded the artefact. It does now. Read that before starting Phase 2 — it is the reason the "verify against production builds" rule below is not boilerplate.
 
-Phase 4 also inherits a small debt from Phase 1: five `MotionKit` members now have zero call sites (`variants.dialog`, `variants.sheetSide`, `variants.collapse`, `transitions.spring`, `transitions.normal`), and `Sheet` still has no backdrop blur where `Dialog` does — a real inconsistency, but a visual decision Phase 1 was barred from making.
+**All five phases have landed.** Three of the four measured tasks across Phases 1 and 4 ended in a revert: the dialog body deferral, the split overlay, and route transitions were each built and each measured worse than what they replaced. That is the plan working rather than failing — a phase gated on traces has to be able to say no, and these did.
+
+The dead-`MotionKit` debt Phase 1 handed over turned out to be six members rather than five, and is swept. `Sheet` still has no backdrop blur where `Dialog` does; that stayed a visual decision nobody has taken.
 
 Phases 1 and 5 touch disjoint files from 2–4 and can run in parallel. Phase 3 depends on Phase 2's layout contract. Phase 4 depends on Phase 1's measurements so polish is added to a proven-fast base.
 

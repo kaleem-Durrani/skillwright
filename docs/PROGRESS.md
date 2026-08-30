@@ -9,6 +9,48 @@ This file records **what changed and the state it left the repository in** — n
 
 ---
 
+## 2026-08-30 (fourth pass — the UI roadmap finishes)
+
+**Phases 2, 3 and 4 landed, and three of the four measured tasks across them ended in a revert.** _(verified — 1,744 unit and integration tests, 129 browser tests across three viewport projects, and every number below sampled in a browser against the production preview build)_
+That is the plan working rather than failing. A roadmap that gates its work on traces has to be able to say no, and Phase 1 said no twice before this. The pattern is the phase's most useful output: build it, measure it, keep it only if the number argues for it.
+
+**The title moved into the top bar, and pages gained a height to fill.** _(verified — whole-page axe on five screens in both themes, at all three viewports)_
+Fifteen screens opened with a title block as the first thing in the scrolling column, so nothing on a page had a height — which is why no table could fill the viewport. The title, its actions and the search field now share the shell's bar, and `main` is a bounded flex column from `md` up: a page hands a child `flex-1 min-h-0` and it claims the rest, scrolling internally. Below `md` the header stays in the page, because the bar at 375px already carries six controls.
+
+A portal rather than route metadata, because half these screens have no constant title — the course detail's is the course's name, the dashboard greets by first name, three render a breadcrumb with live links, and all of those exist only after the page's own data resolves. `ShellSearch` moved from `flex-1` in the centre to a fixed width at the end: two elastic children in one row means neither can give way, which was the actual reason there was nowhere to put a title.
+
+Two things the plan asked for that measuring rejected. The description was to sit under the title from `lg` up; at 1280px with one action button the bar rendered "One identity table. Role is a column, and suspension destroys sessio…", so it stays with the content. And the four admin screens set `eyebrow="Admin workspace"` two inches from the bar's own _Admin workspace_ badge.
+
+**One table component, and a contract that silently did nothing until it was measured.** _(verified — the failure reproduced at 2842px, fixed, and pinned by a spec watched failing)_
+`DataList` is deleted; every tabular screen renders `DataTable`, which builds ONE DOM copy per row instead of mounting a card list and a table together and switching them with `display` — roughly 40 row subtrees where 20 would do. The actions column exists once instead of five hand-rolled copies, and pagination lives inside the component, so reaching the last row of a register no longer scrolls the pager off the screen.
+
+`fillHeight` is the phase's promise and it is **inert unless every ancestor passes the height along**. On the first migrated screen it did nothing at all: `routes/_app/admin.tsx` was a plain `flex flex-col`, so the table had a bounded grandparent and an unbounded parent, sized to its content, overflowed `main` invisibly and pushed the document to **2842px against a 900px viewport** with the pager three screens down. Typecheck, lint and 394 unit tests were green over it. `e2e/fill-height.spec.ts` now asserts the numbers on all five screens that use it — the document does not scroll, the overflowing element is the table's own wrapper, the pagination's bottom edge is inside the viewport — and was watched going red when the chain is broken again.
+
+An accessibility fix fell out of the migration: `DataList`'s `<tr onClick>` was never keyboard-reachable, only its card `<button>` was, so on desktop the row-click affordance existed for a mouse and nothing else.
+
+**The motion library question, answered with a number that inverts the assumption.** _(verified — this app's exact imports bundled three ways, minified and gzipped)_
+
+| build                               | gzip         |
+| ----------------------------------- | ------------ |
+| `motion` (full, today)              | 42,793 B     |
+| `LazyMotion` + `m` + `domMax`       | **42,947 B** |
+| `LazyMotion` + `m` + `domAnimation` | 29,229 B     |
+
+The roadmap assumed a bundle win. The 13.5 kB is real and unavailable: `domAnimation` excludes layout animations, and the three sliding indicators are `layoutId`, which needs `domMax`. The only version this app could adopt is 154 bytes **larger** than doing nothing, on top of rewriting every `motion.*` to `m.*` across fourteen files.
+
+**Route transitions: built, sampled, reverted.** _(verified — frame-by-frame opacity sampling across a navigation)_
+The roadmap calls the hard cut between pages "the largest missing motion" and gates it on perceived speed. Content first painted ~98 ms after the click; opacity ramped 0 → 1 over ~207 ms across 14 frames; fully readable at ~305 ms. Three times the time-to-readable on every navigation, for an effect whose only purpose is looking smoother. The numbers live at the call site so the next person inherits a measurement instead of the same idea. `_public.tsx` keeps its entrance — a sign-in screen is entered once a session, these are navigated continuously.
+
+**Six dead vocabulary entries, not the five handed over** — `variants.dialog`, `sheetSide`, `collapse`, and `transitions.normal`, `slow`, `spring`. `sheetSide` described an edge-slide the sheet has never performed, with a comment pointing at it as a live alternative. `lib/motion.ts` now states the vocabulary itself: seven variants, one transition, four rules — including the one that had already caused a bug, that a resolved variant's transition shadows the `transition` prop entirely.
+
+**A gate the repository was missing.** _(verified — five screens × two themes × three viewport projects)_
+Moving every `<h1>` out of `<main>` and into the `banner` landmark is exactly the edit that produces a heading-order or landmark violation, and `dialogs.spec.ts` only ever scoped its run to an open overlay — so nothing in the suite had audited a whole page. `e2e/pages-a11y.spec.ts` does now.
+
+**And running all three viewport projects found a flake that had been latent the whole time.** _(verified — the blended colour computed by hand, then the opacity sampled at 0.583 mid-fade and 1 once settled)_
+The notification panel's audit failed on WebKit with a `color-contrast` violation and passed on both Chromium projects. It was not the palette: `waitFor()` resolves the instant an overlay is visible, which for anything that fades in is the instant it starts at opacity 0, so axe sampled a half-transparent panel and computed every colour blended with the page behind it. `--text-tertiary` is #505d70 at 8.2:1 on white; at opacity 0.583 it reads as #88919e at 3.1:1. Chromium finished the fade before axe ran and WebKit did not — the worst shape a gate can take, because the red project looks like a real regression in the palette and is not. Both audits now wait for the entrance to settle. Polling opacity rather than awaiting `getAnimations()`, because motion drives springs on the main thread and those never appear in the WAAPI list.
+
+---
+
 ## 2026-08-30 (third pass — the suites)
 
 **Four packages were carrying claims nothing tested.** _(verified — every suite below run to completion, and every new pin watched failing before it was trusted)_
