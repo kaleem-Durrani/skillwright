@@ -34,13 +34,13 @@
     "infra:nuke": "docker compose down -v"
   },
   "devDependencies": {
-    "@playwright/test": "^1.54.2",
+    "@playwright/test": "^1.63.0",
     "@skillwright/shared": "workspace:*",
-    "@types/node": "^22.10.5",
+    "@types/node": "^22.20.2",
     "esbuild": "^0.28.2",
     "prettier": "^3.4.2",
-    "tsx": "^4.19.2",
-    "turbo": "^2.3.3",
+    "tsx": "^4.23.13",
+    "turbo": "^2.10.12",
     "typescript": "^5.7.3"
   }
 }
