@@ -71,6 +71,12 @@ export function LoginPage() {
           1.25rem), so PageHeader's default bottom padding would double the
           gap to the next child instead of matching it. */}
       <PageHeader
+        /*
+         * Rendered inline, not behind the info control: this sentence is an
+         * instruction or a condition rather than an orientation line, and a
+         * person who followed a link here has not chosen this screen yet.
+         */
+        descriptionDisclosure="inline"
         className="pb-0"
         title={step === 'credentials' ? 'Sign in' : 'Two-factor authentication'}
         description={

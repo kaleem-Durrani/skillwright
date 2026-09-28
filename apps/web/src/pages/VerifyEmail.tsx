@@ -131,6 +131,12 @@ export function VerifyEmailPage() {
             --space-block for the gap below it, so PageHeader's default
             bottom padding would double the latter. */}
         <PageHeader
+          /*
+           * Rendered inline, not behind the info control: this sentence is an
+           * instruction or a condition rather than an orientation line, and a
+           * person who followed a link here has not chosen this screen yet.
+           */
+          descriptionDisclosure="inline"
           className="pb-0"
           title="Verify your email"
           description={
