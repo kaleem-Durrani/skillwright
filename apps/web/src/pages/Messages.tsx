@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { ArrowLeft, SendHorizonal } from 'lucide-react';
 import { ulid } from 'ulid';
 /*
@@ -14,7 +14,7 @@ import { ulid } from 'ulid';
  *
  * Type-only, so this specifier erases at build time and pulls no zod into the bundle.
  */
-import type { CursorPaginated, Paginated } from '@skillwright/shared/schema';
+import type { CursorPaginated, MarkReadInput, Paginated } from '@skillwright/shared/schema';
 import { api } from '@/lib/api';
 import { qk } from '@/lib/query';
 import { cn } from '@/lib/cn';
@@ -237,6 +237,68 @@ function counterparts(
   return others.length > 0 ? others : conversation.participants;
 }
 
+/**
+ * How long a read receipt waits before it is sent.
+ *
+ * Not a debounce in the "wait for the user to stop typing" sense — the input is a
+ * conversation, not a form. It exists for exactly two deliveries that mean the same
+ * thing: a send whose `onSuccess` invalidates `qk.messages` (below) and the 15s poll
+ * that then refetches the same window, so one arriving message can be observed
+ * twice within a few hundred milliseconds. One receipt, not two, is the difference
+ * between "the badge cleared" and "we asked the server the same question twice".
+ *
+ * Kept well under the shortest thing a reader can do deliberately next — opening
+ * another thread, above all — so a real navigation is never held back by it.
+ */
+const READ_RECEIPT_MS = 250;
+
+/**
+ * Writes ONE conversation row back into every cached `GET /conversations` page.
+ *
+ * `POST /conversations/:id/read` answers with the refreshed conversation
+ * (conversations.routes.ts, the `/:conversationId/read` route binds
+ * `conversationSchema` as its 200) precisely so the badge and the server agree in
+ * one round trip. `client.invalidateQueries({ queryKey: qk.conversations })` — what
+ * the `send` mutation below uses — would throw that away and re-fetch the list, so
+ * the reader watches a badge that was just cleared repopulate with the count they
+ * had already dismissed.
+ *
+ * WHY THE PREDICATE AND NOT THE BARE PREFIX. `qk.conversations` is `['conversations']`
+ * and `qk.messages(conversationId)` is `['conversations', id, 'messages']`, so
+ * TanStack's prefix matching reaches the message cache as well (the same reason
+ * `send`'s invalidation deliberately does — see the comment there). A conversation
+ * page and a cursor page of messages are both `{ data: [...] }`; only the former
+ * has `unreadCount` on its rows, and that is the discriminator. Without it, a receipt
+ * would rewrite the message cache's identity on every thread focus and re-render a
+ * pane that had not changed.
+ */
+function writeConversationRow(client: QueryClient, updated: ConversationDto): void {
+  client.setQueriesData<Paginated<ConversationDto> | undefined>(
+    {
+      predicate: (query) =>
+        query.queryKey[0] === qk.conversations[0] && isConversationPage(query.state.data),
+    },
+    (page) => {
+      if (!page) return page;
+      // A page that does not hold this row is returned BY REFERENCE, not rebuilt:
+      // another conversation's page, or a page of a different filter, must not be
+      // republished as a new object because an unrelated thread was read.
+      if (!page.data.some((row) => row.id === updated.id)) return page;
+      return { ...page, data: page.data.map((row) => (row.id === updated.id ? updated : row)) };
+    },
+  );
+}
+
+/** The list discriminator `writeConversationRow` relies on, kept beside its only user. */
+function isConversationPage(data: unknown): data is Paginated<ConversationDto> {
+  if (typeof data !== 'object' || data === null) return false;
+  const rows = (data as { data?: unknown }).data;
+  return (
+    Array.isArray(rows) &&
+    rows.every((row) => typeof row === 'object' && row !== null && 'unreadCount' in row)
+  );
+}
+
 function Thread({ conversationId, onBack }: { conversationId: string; onBack: () => void }) {
   const { user } = useSession();
   const client = useQueryClient();
@@ -341,6 +403,103 @@ function Thread({ conversationId, onBack }: { conversationId: string; onBack: ()
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: 'end' });
   }, [newestId]);
+
+  /*
+   * THE READ RECEIPT, and the two decisions this block exists to make explicit.
+   *
+   * WHY HERE AND NOT ON THE PAGE. `POST /conversations/:id/read` moves ONE
+   * participant's high-water mark (conversations.service.ts, `markRead`). The screen
+   * above lists every thread the viewer is seated in and none of them has been
+   * opened; marking the list read would claim the reader has seen messages they
+   * never saw, on a phone as much as on a laptop. `Thread` mounts when — and only
+   * when — `conversationId` is set, which is the same condition that puts the thread
+   * pane on screen above `md` and REPLACES the list below it. So this is the moment
+   * the conversation is the open one, on both layouts, from one place.
+   *
+   * WHY THERE IS NO `onError`. The reader asked for nothing and can do nothing about
+   * a receipt. `toast.fromError` — correct everywhere else in this file, and the only
+   * sanctioned way to surface a failure — would put an error toast on screen for a
+   * background bookkeeping write the user never initiated: alarming, unactionable,
+   * and gone before it could be read. The worst outcome of a failed receipt is a
+   * badge that is one conversation stale, and the list polls every 30s, so the next
+   * poll reports the server's truth and the badge recovers on its own. The client-wide
+   * MutationCache handler in lib/query.ts still runs, so a 401 or a suspension
+   * (lesson 27) is still noticed — silence here is about THIS error, not about the
+   * session.
+   *
+   * WHY THE SENT SEQ IS RECORDED BEFORE THE ANSWER. The guard is written down the
+   * instant the receipt is issued, not in `onSuccess`. A receipt that failed and
+   * stayed unrecorded would be re-sent by the very next poll — every 15 seconds, for
+   * as long as the thread stays open, which is a request storm produced by the
+   * recovery mechanism. A stale badge for 30s is the cheaper failure.
+   */
+  const markRead = useMutation({
+    mutationFn: (input: MarkReadInput) =>
+      api.post<ConversationDto>(`/conversations/${conversationId}/read`, input),
+    onSuccess: (updated) => writeConversationRow(client, updated),
+  });
+
+  /*
+   * `markRead.mutate` hoisted to a name of its own, for the dependency array.
+   *
+   * `useMutation` returns a NEW object literal on every render, so listing
+   * `markRead` as a dependency would re-run the effect below on every render — and
+   * re-running it CLEARS the pending timer and starts a fresh one. A reader who
+   * types a reply for longer than the delay would keep resetting the receipt
+   * without ever sending it, and a receipt is not something a reply should be able
+   * to starve. `mutate` itself is a `useCallback` bound to one observer
+   * (`useMutation.js` in the react-query build), so this alias is stable across
+   * renders and the effect runs when its inputs actually change.
+   */
+  const markThreadRead = markRead.mutate;
+
+  /*
+   * Per conversation, not per Thread: `Thread` is not remounted when `conversationId`
+   * changes, so a single "last seq I sent" would be overwritten by the next thread
+   * and A -> B -> A would send A's receipt a second time for a thread whose newest
+   * message had not moved. The map makes the guard a statement about the CONVERSATION
+   * ("has this watermark already been offered at this seq?"), which is what the
+   * server is actually being told.
+   *
+   * `BigInt`, not `Number` — `seq` is a Postgres bigint delivered as a string
+   * (message.ts:22), for the reason spelled out in the `thread` comparator above.
+   */
+  const markedSeqs = useRef(new Map<string, string>());
+  /**
+   * ONE pending receipt for the whole pane, deliberately not one per conversation.
+   * Flipping through five threads faster than the delay is a reader triaging, and
+   * triaging is the case where a request storm is most likely and least useful: the
+   * thread that is still open at the deadline is the one worth a receipt. So a new
+   * schedule REPLACES the pending one rather than adding to it.
+   *
+   * There is no cleanup that cancels it. A reader who backs out of a thread inside
+   * the delay still read it, and the request client outlives this component, so the
+   * receipt is still worth sending; cancelling on unmount would trade a badge for a
+   * lifecycle rule nobody asked for.
+   */
+  const readTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // The newest seq in the LOADED window — the same `thread` the reader is looking
+  // at, so the receipt can never claim more than what is on screen. `loadOlder`
+  // prepends to `thread` without touching its last element, and this is keyed on
+  // that last element, so scrolling back through history sends nothing.
+  const newestSeq = thread[thread.length - 1]?.seq;
+  useEffect(() => {
+    if (newestSeq === undefined) return;
+    const offered = markedSeqs.current.get(conversationId);
+    if (offered !== undefined && BigInt(offered) >= BigInt(newestSeq)) return;
+
+    if (readTimer.current !== null) clearTimeout(readTimer.current);
+    readTimer.current = setTimeout(() => {
+      readTimer.current = null;
+      // Re-read under the timer: renders between scheduling and firing can have
+      // offered a HIGHER seq already, and a slower one must not be sent.
+      const latest = markedSeqs.current.get(conversationId);
+      if (latest !== undefined && BigInt(latest) >= BigInt(newestSeq)) return;
+      markedSeqs.current.set(conversationId, newestSeq);
+      markThreadRead({ seq: newestSeq });
+    }, READ_RECEIPT_MS);
+  }, [conversationId, newestSeq, markThreadRead]);
 
   const send = useMutation({
     // `SendMessageInput` is the server's own body type (message.ts:31-38), so a missing or
