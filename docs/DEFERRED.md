@@ -4,8 +4,8 @@ Open questions that are **blocked, undecidable, or deliberately not now** — ea
 is, why it is not being done, and what would unblock it.
 
 This file exists because the alternative was letting these live in a commit message or a
-conversation. `docs/PROGRESS.md` records what *happened*; this records what was deliberately
-*not* finished and left a note explaining why, so nobody rediscovers the cost by accident.
+conversation. `docs/PROGRESS.md` records what _happened_; this records what was deliberately
+_not_ finished and left a note explaining why, so nobody rediscovers the cost by accident.
 
 An entry leaves this file when it is done, or when it stops being true. An entry that has
 been here for two release cycles without movement is a decision nobody made.
@@ -19,15 +19,15 @@ been here for two release cycles without movement is a decision nobody made.
 `minio/minio` and `minio/mc` have been **deleted from Docker Hub**, and MinIO's own binary
 distribution now returns `410 Gone`. Verified, not inferred:
 
-| Thing | Result |
-| ----- | ------ |
-| `hub.docker.com/v2/repositories/minio/minio/` | `{"message":"object not found"}` |
-| `hub.docker.com/v2/repositories/minio/mc/` | not found |
-| `bitnami/minio` | repository exists, **0 tags** |
-| `bitnami/mc`, `garagehq/garage`, `seaweedfs/seaweedfs` | not found |
-| `quay.io/minio/minio` | unauthorized |
-| `dl.min.io/server/minio/release/linux-amd64/minio` | **HTTP 410** |
-| `rustfs/rustfs` | exists, 12.2M pulls — **pulled and run successfully** |
+| Thing                                                  | Result                                                |
+| ------------------------------------------------------ | ----------------------------------------------------- |
+| `hub.docker.com/v2/repositories/minio/minio/`          | `{"message":"object not found"}`                      |
+| `hub.docker.com/v2/repositories/minio/mc/`             | not found                                             |
+| `bitnami/minio`                                        | repository exists, **0 tags**                         |
+| `bitnami/mc`, `garagehq/garage`, `seaweedfs/seaweedfs` | not found                                             |
+| `quay.io/minio/minio`                                  | unauthorized                                          |
+| `dl.min.io/server/minio/release/linux-amd64/minio`     | **HTTP 410**                                          |
+| `rustfs/rustfs`                                        | exists, 12.2M pulls — **pulled and run successfully** |
 
 **What it blocks.** The `integration tests` job in CI (`ci.yml`, the "Start MinIO" step) fails
 with `pull access denied … repository does not exist` and exit 125. It also blocks
@@ -38,7 +38,7 @@ configuration.
 
 **Why it is deferred rather than fixed.** Swapping the object store is an architectural
 change, not a config edit, and this repository makes security claims about the store
-*itself*:
+_itself_:
 
 - Golden path 3 asserts the raw unsigned object URL answers **403** — "the only assertion in
   this repository that proves the bucket refuses an unauthorised read rather than the policy
@@ -74,13 +74,13 @@ one fix applied (see below). The richer workflow that came out of the 38-commit 
 
 **What is established:**
 
-| Test | Result |
-| ---- | ------ |
-| Old `ci.yml` on `main` | 12 jobs, runs |
-| New `ci.yml`, e2e jobs present | 0 jobs, `failure` |
-| New `ci.yml`, e2e jobs removed | 0 jobs, `failure` |
-| Both files vs. GitHub's published workflow JSON Schema | **both VALID** |
-| Duplicate keys, duplicate job ids, `needs` resolution, tabs, BOM, CRLF, size | all clean |
+| Test                                                                         | Result            |
+| ---------------------------------------------------------------------------- | ----------------- |
+| Old `ci.yml` on `main`                                                       | 12 jobs, runs     |
+| New `ci.yml`, e2e jobs present                                               | 0 jobs, `failure` |
+| New `ci.yml`, e2e jobs removed                                               | 0 jobs, `failure` |
+| Both files vs. GitHub's published workflow JSON Schema                       | **both VALID**    |
+| Duplicate keys, duplicate job ids, `needs` resolution, tabs, BOM, CRLF, size | all clean         |
 
 So it is not a YAML syntax error, not a schema violation, and not the two `e2e` jobs. The
 remaining delta is: the added `pnpm typecheck:scripts` step, the added web/db steps in the
@@ -104,10 +104,10 @@ an artefact nobody has run is a guess. Guessing between three candidates by push
 
 **Status:** open, cosmetic · **Raised:** 2026-09-28
 
-Every job emits: *"Node.js 20 is deprecated. The following actions target Node.js 20 but are
+Every job emits: _"Node.js 20 is deprecated. The following actions target Node.js 20 but are
 being forced to run on Node.js 24: `actions/checkout@v4`, `actions/setup-node@v4`,
 `actions/upload-artifact@v4`, `pnpm/action-setup@v4`, `docker/build-push-action@v6`,
-`docker/setup-buildx-action@v3`."*
+`docker/setup-buildx-action@v3`."_
 
 **Why it is deferred.** These are warnings, not failures — all jobs pass. They are also
 exactly what Dependabot's existing `actions` group is configured to propose, so the fix is
