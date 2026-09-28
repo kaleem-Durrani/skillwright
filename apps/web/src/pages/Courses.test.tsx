@@ -13,14 +13,17 @@ import type { ReactNode } from 'react';
 import type { SessionUser } from '@/lib/session';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { qk } from '@/lib/query';
 import type { CourseListItem } from '@/lib/types';
 
 type ApiFetch = (path: string, options?: unknown) => Promise<unknown>;
+type ApiPost = (path: string, payload?: unknown) => Promise<unknown>;
 
-const { apiGet, searchMock, navigateSpy } = vi.hoisted(() => ({
+const { apiGet, apiPost, searchMock, navigateSpy } = vi.hoisted(() => ({
   apiGet: vi.fn<ApiFetch>(),
+  apiPost: vi.fn<ApiPost>(),
   searchMock: vi.fn<() => Record<string, unknown>>(),
   navigateSpy: vi.fn(),
 }));
@@ -29,7 +32,7 @@ vi.mock('@/lib/api', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,
-    api: { get: apiGet, post: vi.fn(), patch: vi.fn(), put: vi.fn(), del: vi.fn() },
+    api: { get: apiGet, post: apiPost, patch: vi.fn(), put: vi.fn(), del: vi.fn() },
   };
 });
 
@@ -151,13 +154,7 @@ beforeEach(() => {
  * Loose on purpose — it reaches the stubbed client verbatim, and only
  * `lib/policy.ts`'s mapping (`row.course.id`) ever reads it.
  */
-function renderCatalogue(user: SessionUser, enrolled: { data: unknown[] }): void {
-  apiGet.mockImplementation((path) => {
-    if (String(path).startsWith('/courses')) return Promise.resolve(page([GATED_ROW, UNGATED_ROW]));
-    if (String(path).startsWith('/enrollments')) return Promise.resolve(enrolled);
-    return Promise.reject(new Error(`unexpected GET ${String(path)}`));
-  });
-
+function mountCatalogue(user: SessionUser): void {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -167,6 +164,43 @@ function renderCatalogue(user: SessionUser, enrolled: { data: unknown[] }): void
       <CoursesPage />
     </QueryClientProvider>,
   );
+}
+
+function renderCatalogue(user: SessionUser, enrolled: { data: unknown[] }): void {
+  apiGet.mockImplementation((path) => {
+    if (String(path).startsWith('/courses')) return Promise.resolve(page([GATED_ROW, UNGATED_ROW]));
+    if (String(path).startsWith('/enrollments')) return Promise.resolve(enrolled);
+    return Promise.reject(new Error(`unexpected GET ${String(path)}`));
+  });
+
+  mountCatalogue(user);
+}
+
+/**
+ * The catalogue with the extra endpoints `CourseFormDialog` asks for the moment it
+ * opens: the department list, and — for an admin only — the teacher list it offers
+ * as the course's `teacherId`. Both run behind `enabled: open`, so they exist in
+ * this mock for the affordance tests below and never fire in the badge tests.
+ */
+function renderAffordance(user: SessionUser, rows: CourseListItem[]): void {
+  apiGet.mockImplementation((path) => {
+    if (String(path).startsWith('/courses')) return Promise.resolve(page(rows));
+    if (String(path).startsWith('/departments')) {
+      return Promise.resolve({
+        data: [{ id: DEPARTMENT_ID, name: 'Welding', slug: 'welding' }],
+        meta: {},
+      });
+    }
+    if (String(path).startsWith('/users')) {
+      return Promise.resolve({
+        data: [{ id: TEACHER_ID, name: 'Dana Okafor', role: 'TEACHER', avatarUrl: null }],
+        meta: {},
+      });
+    }
+    return Promise.reject(new Error(`unexpected GET ${String(path)}`));
+  });
+
+  mountCatalogue(user);
 }
 
 // ---------------------------------------------------------------------------
@@ -203,5 +237,80 @@ describe('Courses catalogue — Phase 6 prerequisite badges', () => {
       String(path).startsWith('/enrollments'),
     );
     expect(enrollmentCalls).toHaveLength(0);
+  });
+});
+
+/**
+ * The create affordance on the CATALOGUE — the screen every role's sidebar
+ * "Courses" link points at (components/layout/nav.ts:63-68), and therefore the one
+ * an admin lands on from home. The admin register at /admin/courses has always been
+ * correctly wired; this one was not. Both buttons here shipped with no handler
+ * (`onClick` absent on the header one, `onAction: () => undefined` on the empty
+ * state one), so each was a fully-styled control that did nothing when pressed.
+ *
+ * The dialog's insides belong to CourseFormDialog's own coverage; what is pinned
+ * is that the button opens the ONE shared form — the same component the admin
+ * register uses — rather than a second one grown here.
+ */
+describe('Courses catalogue — the New course affordance', () => {
+  it('lets an admin open the shared course form from the header button', async () => {
+    const user = userEvent.setup();
+    renderAffordance(viewerAs('ADMIN'), [GATED_ROW, UNGATED_ROW]);
+
+    // Rows present, so the empty state contributes no second trigger under this name.
+    await screen.findAllByRole('link', { name: 'Welding Fundamentals' });
+    await user.click(screen.getByRole('button', { name: /new course/i }));
+
+    // `Add a course` is the dialog's own title on the create path (DialogContent),
+    // which is what tells this apart from any other dialog the page could open.
+    expect(await screen.findByRole('heading', { name: /add a course/i })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole('dialog').querySelector('form')).not.toBeNull();
+    });
+  });
+
+  it('lets an admin open the same form from the empty-catalogue action', async () => {
+    const user = userEvent.setup();
+    renderAffordance(viewerAs('ADMIN'), []);
+
+    // The empty state only exists once the list query has answered, so wait for IT
+    // rather than for the buttons: the header trigger is on screen from the first
+    // render and a `findAllByRole` on the name alone would resolve on that one.
+    expect(await screen.findByText(/no courses yet/i)).toBeInTheDocument();
+
+    // Two buttons now share the name — the header one and the empty state's — so the
+    // count is itself the assertion, and the LAST one is the empty state's.
+    const triggers = await screen.findAllByRole('button', { name: /new course/i });
+    expect(triggers).toHaveLength(2);
+    await user.click(triggers[1]!);
+
+    expect(await screen.findByRole('heading', { name: /add a course/i })).toBeInTheDocument();
+  });
+
+  it('closes the form again without creating anything', async () => {
+    const user = userEvent.setup();
+    renderAffordance(viewerAs('ADMIN'), [GATED_ROW, UNGATED_ROW]);
+
+    await user.click(await screen.findByRole('button', { name: /new course/i }));
+    expect(await screen.findByRole('heading', { name: /add a course/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /^cancel$/i }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+    // Cancelling is not a save: the page never posted a course.
+    expect(apiPost).not.toHaveBeenCalled();
+  });
+
+  it('offers a student no create affordance at all', async () => {
+    renderAffordance(VIEWER, []);
+
+    // The page has rendered its empty state before the absence means anything.
+    expect(await screen.findByText(/no courses yet/i)).toBeInTheDocument();
+    // `course:create` denies STUDENT, so neither the header Gate nor the
+    // `policy.can` guard on the empty state's action can produce a trigger — which
+    // is Gate.tsx's own argument: a disabled button would still advertise a
+    // capability the API refuses.
+    expect(screen.queryByRole('button', { name: /new course/i })).toBeNull();
   });
 });

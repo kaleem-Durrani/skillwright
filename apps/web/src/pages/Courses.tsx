@@ -61,6 +61,7 @@ import { DataTable } from '@/components/ui/DataTable';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
 import { StatusChip } from '@/components/ui/StatusChip';
+import { CourseFormDialog } from '@/components/courses/CourseFormDialog';
 import { Gate } from '@/components/Gate';
 import { Route } from '@/routes/_app/courses';
 
@@ -98,6 +99,17 @@ export function CoursesPage() {
     }
     return `Requires: ${course.prerequisite.code} ${course.prerequisite.name}`;
   };
+
+  /**
+   * The create dialog, opened from the header button and from the empty catalogue's
+   * own action. BOTH of those shipped with no handler — the header Button carried
+   * no `onClick` at all and the EmptyState was given `onAction: () => undefined` —
+   * so on the one screen every role's sidebar links to (components/layout/nav.ts)
+   * both rendered as fully-styled enabled controls that did nothing when pressed.
+   * They now share ONE boolean and the ONE `CourseFormDialog` the admin register
+   * and the dashboard already use, rather than a second form grown here.
+   */
+  const [creating, setCreating] = useState(false);
 
   // Local mirror of the URL query so typing does not push a history entry per
   // keystroke; the URL is updated on a debounce below.
@@ -148,6 +160,7 @@ export function CoursesPage() {
             <Button
               block
               className="sm:w-auto"
+              onClick={() => setCreating(true)}
               leadingIcon={<Plus aria-hidden="true" className="size-4" />}
             >
               New course
@@ -333,7 +346,7 @@ export function CoursesPage() {
                   : 'Nothing has been published for your department yet.'
               }
               {...(policy.can('course:create')
-                ? { actionLabel: 'New course', onAction: () => undefined }
+                ? { actionLabel: 'New course', onAction: () => setCreating(true) }
                 : {})}
             />
           )
@@ -351,6 +364,8 @@ export function CoursesPage() {
             : undefined
         }
       />
+
+      <CourseFormDialog open={creating} onOpenChange={setCreating} />
     </div>
   );
 }
