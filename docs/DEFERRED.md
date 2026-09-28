@@ -135,19 +135,15 @@ GitHub evaluates the workflow.
 
 ---
 
-## D5 — `format:check` does not cover YAML
+## D5 — RESOLVED 2026-09-28: `format:check` now covers YAML
 
-**Status:** open, low severity · **Raised:** 2026-09-28
+The glob was `**/*.{ts,tsx,js,json,md,css}` — no `yml` — so `.github/workflows/*.yml`,
+`docker-compose.yml`, `.github/dependabot.yml` and `pnpm-workspace.yaml` had never been
+format-checked by a gate that looks like it covers the repository. `yml` and `yaml` are in
+both scripts now, and four files that were already non-canonical have been rewritten.
 
-```
-"format:check": "prettier --check \"**/*.{ts,tsx,js,json,md,css}\""
-```
-
-No `.yml`. So `.github/workflows/*.yml`, `docker-compose.yml` and `.github/dependabot.yml` are
-never format-checked. Verified not to be the cause of D2 — the new `ci.yml` is prettier-clean
-when checked explicitly — but it means a malformed workflow is invisible to a gate that looks
-like it covers the repository.
-
-**What would unblock it.** One line: add `yml` to the glob. Worth doing, not worth doing in
-the same commit as D2's bisect, because it would change what `format:check` says about files
-the bisect is touching.
+Kept as a one-line entry rather than deleted, because the reason it was not done first
+is the reason it is worth remembering: it was deliberately not bundled with D2's bisect,
+since changing what `format:check` says about a file the bisect is editing makes the
+bisect harder to read. Sequencing a one-line fix away from a diagnostic is sometimes the
+right call and sometimes cowardice; this one was cheap enough to do immediately after.
