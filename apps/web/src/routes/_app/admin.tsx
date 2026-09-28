@@ -52,6 +52,12 @@ function AdminLayout() {
      *
      * The nav stays `shrink-0` so the tabs keep their size and the Outlet absorbs
      * the remainder.
+     *
+     * `main` is the shell's scroll container from `md` up, so the document no
+     * longer scrolls to absorb a broken chain — a missing link now shows up as the
+     * screen scrolling with the pager at the bottom of it, not as a 2842px page.
+     * Same failure, much closer to the cause, and still red in
+     * `e2e/fill-height.spec.ts`.
      */
     <div className="flex min-h-0 flex-1 flex-col">
       <nav aria-label="Admin sections" className="shrink-0">
@@ -77,8 +83,20 @@ function AdminLayout() {
         </ul>
       </nav>
 
-      {/* The tabs sit above the pages' own headers, which carry the eyebrow + title. */}
-      <div className="flex min-h-0 flex-1 flex-col pt-5">
+      {/*
+       * The tabs sit above the pages' own headers, which carry the eyebrow + title.
+       *
+       * `pt-4 md:pt-0`, not a flat `pt-5`. `main` already applies the shell's top
+       * inset (`pt-6` at `md`, `pt-4` below it), so the `pt-5` that used to sit
+       * here was a second, larger inset on the four admin screens and on nothing
+       * else — they started 20px lower than every other page for no structural
+       * reason. From `md` the title is in the top bar and this tab rail is the
+       * last thing above the content, so the bar's own bottom border is the
+       * divider and any inset here reads as slack. Below `md` the title is back in
+       * the page, the rail and the header genuinely stack, and a 16px gap is what
+       * keeps them from reading as one block.
+       */}
+      <div className="flex min-h-0 flex-1 flex-col pt-4 md:pt-0">
         <Outlet />
       </div>
     </div>

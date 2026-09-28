@@ -83,25 +83,41 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         <TopBar onPageSlot={setPageSlot} />
 
-        <div className="flex-1 md:grid md:grid-cols-[var(--shell-sidebar-w)_minmax(0,1fr)]">
+        {/*
+         * The row is the shell's height budget, and `min-h-0` is what makes it
+         * one: without it a grid item that ever measured taller than the viewport
+         * would grow this row and grow the document with it, and the whole
+         * arrangement below depends on the document never being the scroller.
+         */}
+        <div className="flex-1 md:min-h-0 md:grid md:grid-cols-[var(--shell-sidebar-w)_minmax(0,1fr)]">
           <Sidebar items={items} pathname={pathname} />
 
           {/*
            * THE LAYOUT CONTRACT.
            *
-           * `main` is a flex column with a bounded height from `md` up:
-           * `min-h-0` lets it shrink below its content, and the height is the
-           * viewport minus the bar. A page may therefore render a child with
-           * `flex-1 min-h-0` and have it claim exactly the space that is left,
-           * scrolling INTERNALLY — which is what lets a table keep its header and
-           * its pagination on screen while its rows move.
+           * TWO scrolling contexts and no document scroll, from `md` up.
            *
-           * A page that does nothing is unaffected: without a `flex-1` child the
-           * column is its natural height and the document scrolls as before.
+           * `main` is a scroll container, so a page taller than the viewport
+           * scrolls INSIDE the shell and the sidebar column stays where it is.
+           * It was not: the column had a bounded height and no `overflow-*` at
+           * all, so everything below the fold overflowed into an element that
+           * could not be scrolled and the bottom of a long screen was simply
+           * unreachable. The document could not take over either — see the row
+           * above.
            *
-           * Below `md` there is no bound. A phone viewport is short enough that a
-           * table filling it would show three rows, and the document scroll is the
-           * one interaction every phone user already has.
+           * `main` is also a flex column, and the height bound is what lets a
+           * page hand a child `flex-1 min-h-0` and have it claim exactly the
+           * space that is left, scrolling INTERNALLY — which is what keeps a
+           * table's header and its pagination on screen while its rows move.
+           * The two are not in conflict: a child that passes the height along
+           * never exceeds the box, so `main` has nothing to scroll and the
+           * table's own wrapper stays the element that overflows. A page that
+           * does NOT pass it along overflows into `main` instead, which is
+           * exactly the break `e2e/fill-height.spec.ts` fails on.
+           *
+           * Below `md` there is no bound and no scroller. A phone viewport is
+           * short enough that a table filling it would show three rows, and the
+           * document scroll is the one interaction every phone user already has.
            */}
           <main
             id="main-content"
@@ -109,6 +125,20 @@ export function AppShell({ children }: { children: ReactNode }) {
             className={cn(
               'gutter-safe flex flex-col pt-4 outline-none md:pt-6',
               'md:h-[calc(100dvh-var(--shell-topbar-h)-var(--shell-safe-top))] md:min-h-0',
+              // The screen scrolls HERE, not on the document: the sidebar keeps its
+              // own scroll and never moves, and the two cannot chain into each
+              // other. Plain `overflow-y-*` rather than the repo's `scroll-y`
+              // utility, which is `@utility`-defined and every other use of it in
+              // the app is unprefixed — a stock utility cannot fail to be emitted,
+              // and a missing class here is a scroller that silently does not
+              // scroll, which is the failure this whole arrangement is fixing.
+              //
+              // The x axis is pinned explicitly because a lone `overflow-y` makes
+              // `overflow-x: visible` compute to `auto`, which would hand the
+              // column a sideways scrollbar of its own. A `scroll-x` table or the
+              // admin tab rail scrolls itself and is clipped here, which is what
+              // already happened at `md` with no overflow on this element at all.
+              'md:overflow-y-auto md:overflow-x-hidden',
               // Clear the fixed tab bar plus the home indicator. Without this the
               // last row of every list is permanently unreachable on a phone.
               'pb-[calc(var(--shell-tabbar-h)+var(--shell-safe-bottom)+1.5rem)] md:pb-6',
@@ -272,6 +302,14 @@ function Sidebar({ items, pathname }: { items: NavItem[]; pathname: string }) {
       aria-label="Primary"
       className={cn(
         'hidden md:block',
+        // The block-size is the shell's height, so the column cannot be dragged
+        // out of the viewport by the column beside it, and `scroll-y` means a menu
+        // that ever outgrows it scrolls HERE instead of pushing the screen — the
+        // only scroll the sidebar should ever own. The `sticky` is now redundant
+        // (`main` is the scroller from `md` up, so the document has nothing to
+        // scroll and nothing to hold on to) and stays as the cheap guard for the
+        // case the requirement exists for: if the document ever does scroll again,
+        // the column stays.
         'sticky top-[calc(var(--shell-topbar-h)+var(--shell-safe-top))]',
         '[block-size:calc(100dvh-var(--shell-topbar-h)-var(--shell-safe-top))]',
         'scroll-y border-e border-line-subtle bg-surface px-3 py-4',
