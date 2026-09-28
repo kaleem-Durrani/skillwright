@@ -21,7 +21,7 @@ import { subject, useCompletedCourseIds, usePolicy, type PolicySubject } from '@
 import { courseViewerStatus, formatOfferingDates } from '@/lib/offerings';
 import { ApiError } from '@/lib/problem';
 import { useSession } from '@/lib/session';
-import { formatBytes, formatDate, formatDuration, formatRelative } from '@/lib/format';
+import { formatBytes, formatDuration, formatRelative } from '@/lib/format';
 import type {
   CourseDetail,
   DownloadUrlResponse,
@@ -33,7 +33,13 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { AttendanceRegister } from '@/components/attendance/AttendanceRegister';
 import { EnrollmentAttendance } from '@/components/attendance/EnrollmentAttendance';
 import { CourseOfferings } from '@/components/courses/CourseOfferings';
+import {
+  CompletionStamp,
+  EnrollmentCompletionActions,
+} from '@/components/courses/EnrollmentCompletionActions';
+import { MessageTeacherButton } from '@/components/courses/MessageTeacherButton';
 import { RegisterExportButtons } from '@/components/courses/RegisterExportButtons';
+import { ViewerSeatActions } from '@/components/courses/ViewerSeatActions';
 import { ResourceFormDialog } from '@/components/resources/ResourceFormDialog';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button, IconButton } from '@/components/ui/Button';
@@ -160,22 +166,32 @@ function resourceSubject(resource: ResourceDto, course: CourseDetail): PolicySub
 }
 
 /**
- * Approve carries an optional note, reject carries a MANDATORY reason — two different
- * bodies for two different endpoints (enrollment.ts:39-49), which is why this is a union
- * and not one optional string. The old single `decisionNote` field matched neither
- * schema, so every decision this screen sent was answered 422 before the policy gate ran.
+ * Every decision this screen sends to `POST /enrollments/:id/<verb>`, as one
+ * union rather than four mutations.
+ *
+ * Four shapes, because the wire does: `reject` carries a MANDATORY reason, the two
+ * completion verbs carry an optional note or nothing, and `withdraw` carries a
+ * reason that is OPTIONAL on the wire (enrollment.ts:67-70) and is collected by
+ * `ViewerSeatActions`' own dialog rather than here. The old single `decisionNote`
+ * field matched neither the rejection nor the approval schema, so every decision
+ * this screen sent was answered 422 before the policy gate ran.
  */
 type Decision =
   | { id: string; action: 'approve'; note?: string }
-  | { id: string; action: 'reject'; reason: string };
+  | { id: string; action: 'reject'; reason: string }
+  | { id: string; action: 'complete'; note?: string }
+  | { id: string; action: 'uncomplete' };
 
 /**
  * Never bodyless, even when there is nothing to say: Fastify hands a POST with no body
- * to the validator as `null`, which an all-optional object schema rejects — the failure
- * `courses.routes.ts:159-165` records from the server side.
+ * to the validator as `null`, which an all-optional object schema rejects — the
+ * failure `courses.routes.ts:159-165` records from the server side. `uncomplete` is
+ * bodyless BY CONTRACT and is bound `.nullish()` for the same reason, so it sends
+ * the empty object rather than nothing.
  */
 function decisionBody(decision: Decision): Record<string, string> {
   if (decision.action === 'reject') return { reason: decision.reason };
+  if (decision.action === 'uncomplete') return {};
   return decision.note === undefined ? {} : { note: decision.note };
 }
 
@@ -286,6 +302,18 @@ export function CourseDetailPage() {
       await Promise.all([
         client.invalidateQueries({ queryKey: qk.courseEnrollments(courseId) }),
         client.invalidateQueries({ queryKey: qk.course(courseId) }),
+        /*
+         * The `['enrollments']` PREFIX, and this is the third key for a reason that
+         * is not uniformity. The self-scoped list is read by three screens from three
+         * keys — `ViewerSeatActions` and the viewer's own attendance below, plus the
+         * completed-rungs lookup behind every enrol button in the intakes section —
+         * and a completion is the one decision that CHANGES what that lookup answers:
+         * a course recorded COMPLETED stops being an APPROVED seat, so a stale
+         * `completedCourseIds` would keep a met prerequisite looking unmet and a
+         * student off a course they have finished. See `useCompletedCourseIds`,
+         * which reads the same endpoint.
+         */
+        client.invalidateQueries({ queryKey: ['enrollments'] }),
       ]);
     },
     onError: (error, decision) => {
@@ -468,6 +496,16 @@ export function CourseDetailPage() {
         description={data.description ?? undefined}
         actions={
           <>
+            {/*
+              Phase 5, gap 2. `/messages`' empty state says "Start one from a course
+              page, or wait for a teacher to reach out" — and until this button no
+              course page had the affordance, so the copy was a lie. The POST is
+              find-or-create server-side, so this is one request and no client-side
+              lookup to lose a race with; `MessageTeacherButton` carries the
+              reasoning, and it renders nothing for the teacher themself.
+            */}
+            <MessageTeacherButton teacher={data.teacher} />
+
             {/*
               The enrol affordance lives in the Intakes section below, one per open
               intake — since Phase 9 a request NAMES an intake, so a header button
@@ -841,7 +879,20 @@ export function CourseDetailPage() {
                 {
                   id: 'status',
                   header: 'Status',
-                  cell: (entry) => <StatusChip status={entry.status} />,
+                  /*
+                   * The chip alone said "Completed" and nothing else, and a
+                   * qualification is a claim about WHEN and BY WHOM. `CompletionStamp`
+                   * carries the two fields the Phase 1 backend added to the DTO, and
+                   * renders nothing for a row that is not COMPLETED — including a
+                   * COMPLETED row whose `completedAt` is somehow null, which is a data
+                   * problem and not one to paper over with a date.
+                   */
+                  cell: (entry) => (
+                    <div className="flex flex-col items-start gap-0.5">
+                      <StatusChip status={entry.status} />
+                      <CompletionStamp enrollment={entry} />
+                    </div>
+                  ),
                 },
               ]}
               actions={(entry) =>
@@ -852,7 +903,13 @@ export function CourseDetailPage() {
                     disabled={decide.isPending || !policy.can('enrollment:approve', viewerSubject)}
                   />
                 ) : (
-                  <span className="text-xs text-fg-tertiary">{formatDate(entry.decidedAt)}</span>
+                  <EnrollmentCompletionActions
+                    entry={entry}
+                    course={data}
+                    pending={decide.isPending}
+                    onComplete={(id) => decide.mutate({ id, action: 'complete' })}
+                    onUncomplete={(id) => decide.mutate({ id, action: 'uncomplete' })}
+                  />
                 )
               }
               renderCard={(entry) => (
@@ -866,7 +923,15 @@ export function CourseDetailPage() {
                         {formatRelative(entry.requestedAt)}
                       </span>
                     </div>
-                    <StatusChip status={entry.status} />
+                    {/*
+                      The chip and its stamp stack rather than sit on one line: at
+                      375px the card's third column is the chip, and a date beside it
+                      would be the first thing to wrap.
+                    */}
+                    <div className="flex shrink-0 flex-col items-end gap-0.5">
+                      <StatusChip status={entry.status} />
+                      <CompletionStamp enrollment={entry} />
+                    </div>
                   </div>
                   {entry.decisionNote ? (
                     <p className="text-xs text-fg-secondary">{entry.decisionNote}</p>
@@ -878,7 +943,16 @@ export function CourseDetailPage() {
                       onReject={() => setRejecting(entry)}
                       disabled={decide.isPending}
                     />
-                  ) : null}
+                  ) : entry.status === 'PENDING' ? null : (
+                    <EnrollmentCompletionActions
+                      block
+                      entry={entry}
+                      course={data}
+                      pending={decide.isPending}
+                      onComplete={(id) => decide.mutate({ id, action: 'complete' })}
+                      onUncomplete={(id) => decide.mutate({ id, action: 'uncomplete' })}
+                    />
+                  )}
                 </Card>
               )}
               empty={
@@ -892,6 +966,18 @@ export function CourseDetailPage() {
           </TabsContent>
         ) : null}
       </Tabs>
+
+      {/*
+        The viewer's OWN seat, and the withdrawal that goes with it. Above the
+        attendance section because a seat someone might not want any more comes
+        before the register that seat carries — and above the tabs for the same
+        reason it is here at all: `enrollment:read` gates the Students tab on the
+        COURSE subject, whose shape deliberately omits `studentId` so a student is
+        not shown a roster containing their own request. Putting the viewer's own
+        row inside that tab would mean widening a gate to make a UI appear, which
+        is LESSONS-LEARNED #15's exact mistake.
+      */}
+      <ViewerSeatActions course={data} />
 
       {/*
         The viewer's OWN attendance, for a student with an APPROVED seat — the second

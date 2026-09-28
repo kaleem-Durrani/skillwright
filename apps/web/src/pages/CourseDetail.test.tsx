@@ -44,6 +44,8 @@ const { COURSE_ID } = vi.hoisted(() => ({
   COURSE_ID: '01JGXDFAM0K2Z1GYCSNM5F5RCX',
 }));
 
+const { navigate } = vi.hoisted(() => ({ navigate: vi.fn() }));
+
 vi.mock('@/lib/api', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {
@@ -65,6 +67,14 @@ vi.mock('@tanstack/react-router', async (importOriginal) => {
     ...actual,
     // Same degradation as Announcements.test.tsx: href interpolated, no router context.
     Link: ({ to, children }: { to: string; children?: ReactNode }) => <a href={to}>{children}</a>,
+    /*
+     * The real hook does NOT throw without a `RouterProvider` — it console.warns and
+     * returns `undefined` (useRouter.tsx:15-22) — so a page that only navigates
+     * after a click would pass every render-only test and then throw a TypeError
+     * inside a mutation callback. Stubbing it here is what makes "the button
+     * navigates to the thread it just created" an assertion rather than an accident.
+     */
+    useNavigate: () => navigate,
   };
 });
 
@@ -291,6 +301,13 @@ const OWN_ENROLLMENT = {
   decidedAt: '2026-08-02T09:00:00.000Z',
   decidedBy: null,
   decisionNote: null,
+  // Phase 1 added these two to the DTO, and every fixture below inherits them
+  // through the spread — so they are spelled out ONCE here rather than in each row
+  // that is not the completed one. A fixture that simply omits them is not a shape
+  // the wire can produce: `enrollmentSchema` requires both keys (enrollment.ts:37-38)
+  // and the route's response schema validates every row before it is served.
+  completedAt: null,
+  completedBy: null,
   student: { id: STUDENT_ID, name: 'Ada Okafor', role: 'STUDENT', avatarUrl: null },
   course: {
     id: COURSE_ID,
@@ -726,5 +743,286 @@ describe('CourseDetail decisions — capacity refusals', () => {
     await user.click(approveButtons[0] as HTMLElement);
 
     expect(await screen.findByText('The workshop for this intake is full')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Completion — Phase 1: the terminal state, and the correction path
+// ---------------------------------------------------------------------------
+
+const COMPLETED_AT = '2026-09-20T09:00:00.000Z';
+
+/**
+ * A COMPLETED row, carrying the two fields the Phase 1 backend added to the DTO.
+ *
+ * `completedBy` is the ACTOR who recorded the qualification, not the student — the
+ * migration's `onDelete: SetNull` on the FK exists so the record of who signed it
+ * outlives their account, and a fixture that put the student's own name there would
+ * make the two indistinguishable in the very assertion this exists to support.
+ */
+const COMPLETED_PAGE = {
+  data: [
+    {
+      ...OWN_ENROLLMENT,
+      status: 'COMPLETED',
+      completedAt: COMPLETED_AT,
+      completedBy: { id: TEACHER_ID, name: 'Dana Okafor', role: 'TEACHER', avatarUrl: null },
+    },
+  ],
+  meta: EMPTY_PAGE.meta,
+};
+
+/** Open the Students tab, which is where every roster action lives. */
+async function openStudentsTab(): Promise<void> {
+  await screen.findByRole('heading', { level: 1, name: 'Welding Fundamentals' });
+  await userEvent.click(await screen.findByRole('tab', { name: /students/i }));
+}
+
+describe('CourseDetail completion — the owning teacher', () => {
+  it('records a completion on an APPROVED row through the same decide mutation', async () => {
+    const user = userEvent.setup();
+    apiPost.mockResolvedValue({});
+    renderAttendance(course(), TEACHER_USER, {
+      [`/courses/${COURSE_ID}/enrollments`]: () => ROSTER_PAGE,
+      [`/courses/${COURSE_ID}/attendance`]: (_path, options) => {
+        const query = (options as { query?: { date?: string } }).query ?? {};
+        return attendanceRegister(query.date ?? '1970-01-01');
+      },
+    });
+
+    await openStudentsTab();
+    // `ROSTER_PAGE` holds two approved seats, and `findAllByRole` rather than
+    // `findByRole` for the same reason the capacity test above uses it.
+    const completeButtons = await screen.findAllByRole('button', { name: 'Complete' });
+    await user.click(completeButtons[0] as HTMLElement);
+
+    await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
+    const [path, body] = apiPost.mock.calls[0] as [string, Record<string, unknown>];
+    // The verb is the completion one, and the BODY is the empty object the route's
+    // `.nullish()` schema wants: Fastify hands a bodyless POST to the validator as
+    // `null` (LESSONS-LEARNED #12), so `{}` is not pedantry.
+    expect(path).toBe(`/enrollments/${ENROLLMENT_ID}/complete`);
+    expect(body).toEqual({});
+  });
+
+  it('reads a COMPLETED row as terminal — date, recorder, and no other verb', async () => {
+    renderAttendance(course(), TEACHER_USER, {
+      [`/courses/${COURSE_ID}/enrollments`]: () => COMPLETED_PAGE,
+      [`/courses/${COURSE_ID}/attendance`]: (_path, options) => {
+        const query = (options as { query?: { date?: string } }).query ?? {};
+        return attendanceRegister(query.date ?? '1970-01-01');
+      },
+    });
+
+    await openStudentsTab();
+
+    expect(await screen.findByText('Completed')).toBeInTheDocument();
+    // The stamp names WHEN and WHO, not merely the state.
+    expect(screen.getByText(/recorded by Dana Okafor/)).toBeInTheDocument();
+
+    // The only verb a COMPLETED row answers to. `assertTransition` refuses approve,
+    // reject and withdraw from here with a 409, so a button for any of them is a
+    // guarantee of failure.
+    expect(await screen.findByRole('button', { name: 'Uncomplete' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reject' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Complete' })).toBeNull();
+  });
+
+  it('takes a completion back through its own verb, not a second complete', async () => {
+    const user = userEvent.setup();
+    apiPost.mockResolvedValue({});
+    renderAttendance(course(), TEACHER_USER, {
+      [`/courses/${COURSE_ID}/enrollments`]: () => COMPLETED_PAGE,
+      [`/courses/${COURSE_ID}/attendance`]: (_path, options) => {
+        const query = (options as { query?: { date?: string } }).query ?? {};
+        return attendanceRegister(query.date ?? '1970-01-01');
+      },
+    });
+
+    await openStudentsTab();
+    await user.click(await screen.findByRole('button', { name: 'Uncomplete' }));
+
+    await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
+    const [path] = apiPost.mock.calls[0] as [string];
+    expect(path).toBe(`/enrollments/${ENROLLMENT_ID}/uncomplete`);
+  });
+
+  it('offers a non-owning teacher neither verb, because ownsCourse reads the course', async () => {
+    renderAttendance(
+      course({
+        teacher: { id: OTHER_STUDENT_ID, name: 'Someone Else', role: 'TEACHER', avatarUrl: null },
+        offerings: [offering({ viewerEnrollmentStatus: null })],
+      }),
+      TEACHER_USER,
+      {
+        [`/courses/${COURSE_ID}/enrollments`]: () => COMPLETED_PAGE,
+      },
+    );
+
+    await screen.findByRole('heading', { level: 1, name: 'Welding Fundamentals' });
+
+    // The whole Students tab is absent, so neither verb can be reached at all. Note
+    // what this does NOT prove: `ownsCourse` refusing a colleague is decided by the
+    // `Gate` on the ROW's subject, and the tab's absence means the gate was never
+    // asked. `EnrollmentCompletionActions.test.tsx` drives that gate directly, with a
+    // roster this page would not have served.
+    await waitFor(() =>
+      expect(screen.queryByRole('tab', { name: /students/i })).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByRole('button', { name: /^complete$/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^uncomplete$/i })).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Withdrawal — Phase 5, gap 1: the viewer's own seat
+// ---------------------------------------------------------------------------
+
+/** The viewer's own PENDING request, on a course whose intake agrees that they hold one. */
+const OWN_PENDING = {
+  ...OWN_ENROLLMENT,
+  id: '01JGXDFAM0K2Z1GYCSNM5F5RD7',
+  status: 'PENDING',
+  decidedAt: null,
+  decidedBy: null,
+};
+
+function pendingSeatCourse(): CourseDetail {
+  return course({ offerings: [offering({ viewerEnrollmentStatus: 'PENDING' })] });
+}
+
+describe('CourseDetail withdrawal — the viewer’s own seat', () => {
+  it('offers a student the withdrawal on a request they may no longer want', async () => {
+    renderAttendance(pendingSeatCourse(), VIEWER, {
+      '/enrollments': () => ({ data: [OWN_PENDING], meta: EMPTY_PAGE.meta }),
+    });
+
+    expect(await screen.findByRole('heading', { name: 'Your place' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Withdraw' })).toBeEnabled();
+  });
+
+  it('sends the reason it collected', async () => {
+    const user = userEvent.setup();
+    apiPost.mockResolvedValue({});
+    renderAttendance(pendingSeatCourse(), VIEWER, {
+      '/enrollments': () => ({ data: [OWN_PENDING], meta: EMPTY_PAGE.meta }),
+    });
+
+    await user.click(await screen.findByRole('button', { name: 'Withdraw' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByRole('textbox'), 'My Thursday shifts changed.');
+    // Scoped to the dialog, because the card's own Withdraw is still on screen
+    // behind it and opened this.
+    await user.click(within(dialog).getByRole('button', { name: 'Withdraw' }));
+
+    await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
+    const [path, body] = apiPost.mock.calls[0] as [string, Record<string, unknown>];
+    expect(path).toBe(`/enrollments/${OWN_PENDING.id}/withdraw`);
+    expect(body).toEqual({ reason: 'My Thursday shifts changed.' });
+  });
+
+  it('calls the reason OPTIONAL in the copy, because the wire schema is', async () => {
+    const user = userEvent.setup();
+    apiPost.mockResolvedValue({});
+    renderAttendance(pendingSeatCourse(), VIEWER, {
+      '/enrollments': () => ({ data: [OWN_PENDING], meta: EMPTY_PAGE.meta }),
+    });
+
+    await user.click(await screen.findByRole('button', { name: 'Withdraw' }));
+    const dialog = await screen.findByRole('dialog');
+
+    // A confirm that demanded a reason would be the Messages screen's empty-state
+    // lie pointed at an endpoint that does not: `withdrawEnrollmentSchema` is
+    // `reason: …optional()` and the route binds it `.nullish()`.
+    expect(within(dialog).getByText(/optional, up to 500 characters/i)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Withdraw' }));
+
+    // An empty reason sends the EMPTY OBJECT, not `{ reason: '' }` — an empty
+    // string would land in `decisionNote` as an empty string, which is not the null
+    // `settle` writes for a reasonless withdrawal.
+    await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
+    const [, body] = apiPost.mock.calls[0] as [string, Record<string, unknown>];
+    expect(body).toEqual({});
+  });
+
+  it('offers a TEACHER no withdrawal at all, even on their own course', async () => {
+    // A teacher owns every seat on their course and may approve or reject one, but
+    // `enrollment:withdraw` is a bare `deny` for the role (policy.ts:227-233): a
+    // teacher removing a student is a REJECTION — a different verb, a different audit
+    // row, a different notification.
+    //
+    // This test proves the SECTION is absent, not that the `Gate` refused. Two
+    // independent facts make it so here: the payload carries no
+    // `viewerEnrollmentStatus` for a non-student (courses.service.ts:329), so the
+    // lookup never runs, and no row in the list is theirs. `ViewerSeatActions.test.tsx`
+    // removes both and drives the gate directly.
+    renderAttendance(course(), TEACHER_USER, {
+      [`/courses/${COURSE_ID}/enrollments`]: () => ROSTER_PAGE,
+    });
+
+    await screen.findByRole('heading', { level: 1, name: 'Welding Fundamentals' });
+
+    expect(screen.queryByRole('heading', { name: 'Your place' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Withdraw' })).toBeNull();
+  });
+
+  it('never shows the section to a student who holds no row on this course', async () => {
+    renderAttendance(course({ offerings: [offering({ viewerEnrollmentStatus: null })] }), VIEWER, {
+      '/enrollments': () => EMPTY_PAGE,
+    });
+
+    await screen.findByRole('heading', { level: 1, name: 'Welding Fundamentals' });
+
+    expect(screen.queryByRole('heading', { name: 'Your place' })).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Start a conversation — Phase 5, gap 2
+// ---------------------------------------------------------------------------
+
+const CONVERSATION_ID = '01JGXDFAM0K2Z1GYCSNM5F5RE1';
+
+describe('CourseDetail conversation', () => {
+  it('opens the thread with this course’s teacher, find-or-create in one POST', async () => {
+    const user = userEvent.setup();
+    apiPost.mockResolvedValue({ id: CONVERSATION_ID });
+    renderAttendance(course({ offerings: [offering({ viewerEnrollmentStatus: null })] }), VIEWER, {
+      '/enrollments': () => EMPTY_PAGE,
+    });
+
+    await user.click(await screen.findByRole('button', { name: /message dana/i }));
+
+    await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
+    const [path, body] = apiPost.mock.calls[0] as [string, Record<string, unknown>];
+    expect(path).toBe('/conversations');
+    /*
+     * NO `title` and NO `message`, and both omissions are load-bearing. The server
+     * dedups a direct thread only when `title === undefined`
+     * (conversations.service.ts:449-455), so a title would create a NEW conversation
+     * on every click; and an opening message is posted under a freshly minted
+     * idempotency key, so a retried create would put a second line in the thread it
+     * had just found.
+     */
+    expect(body).toEqual({ participantIds: [TEACHER_ID] });
+
+    await waitFor(() =>
+      expect(navigate).toHaveBeenCalledWith({
+        to: '/messages',
+        search: { conversationId: CONVERSATION_ID },
+      }),
+    );
+  });
+
+  it('gives a teacher no button on their own course, because they would message themself', async () => {
+    renderAttendance(course(), TEACHER_USER, { '/enrollments': () => EMPTY_PAGE });
+
+    await screen.findByRole('heading', { level: 1, name: 'Welding Fundamentals' });
+
+    // Not a policy denial — `conversation:create` is a bare allow for all three
+    // signed-in roles — but a one-participant thread is not a conversation, and the
+    // server's dedup branch needs two.
+    expect(screen.queryByRole('button', { name: /message/i })).toBeNull();
   });
 });
