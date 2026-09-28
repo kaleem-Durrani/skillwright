@@ -79,6 +79,27 @@ test's: the admin stat tiles report an 18px target because the link inside paint
 label would have broken the tile to satisfy a measurement of something the finger never
 aims at.
 
+**And then the follow-ups, because "deliberately not done" is not the same as "never".** The
+leave route exists, the deletion finaliser has a sweeper, the seed awards a certificate, and
+a task can carry its brief. Two of them produced something worth writing down:
+
+- **The leave design note was right about its claim and wrong about its conclusion.** A
+  direct thread really cannot survive one side leaving — `findDirectConversation` matches on
+  a live participant count. But refusing the leave would have left a student no way out of a
+  thread only an ADMIN could seat them in, and deleting it would destroy the survivor's
+  history over the leaver's decision. A direct thread may be abandoned, and the survivor is
+  told plainly that they are the only one left. The gate needed a subject field the write
+  does not change, so `Subject` gained `memberIds` — every seat ever held — beside
+  `participantIds`, and `conversation:read` still says `isParticipant`, so a leaver loses
+  access and keeps their row.
+- **The second lesson-30 singleton was Redis.** `deriveTestRedisUrl` hard-coded database 1
+  for every suite, so the file that partitions Postgres by name did **not** partition Redis,
+  and any two runs in parallel deleted each other's rate-limit counters. The failure it
+  produces is a lie — a test reports that a rate limit did not apply, passes in isolation
+  every time, and touches none of the other run's code. It cost two agents a false
+  regression report today. Now derived from the test database name, exactly parallel to
+  `deriveTestUrl`.
+
 **Two things were deliberately not done, and both are in `docs/DEFERRED.md` rather than
 buried here.** The object store has no image left — `minio/minio` is **deleted from Docker
 Hub** and the official binary returns 410 Gone — which blocks `pnpm infra:up` for anyone
