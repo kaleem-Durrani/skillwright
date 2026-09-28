@@ -10,6 +10,7 @@ import {
   sweepSpentRecoveryCodes,
 } from '@skillwright/db';
 import { runRetentionSweep } from '../src/modules/audit/retention.sweeper.js';
+import { finaliseDueAccountDeletions } from '../src/modules/users/users.lifecycle.service.js';
 import {
   buildApp,
   clearAuditEvents,
@@ -509,6 +510,187 @@ describe('runRetentionSweep', () => {
     // the sweep returned rather than rejecting out of the interval callback.
     await runRetentionSweep();
     expect(await prisma.session.count({ where: { userId } })).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The fifth pass: due account deletions
+// ---------------------------------------------------------------------------
+
+describe('finaliseDueAccountDeletions', () => {
+  /**
+   * A row mid-cool-off, written at its final state rather than aged into it.
+   *
+   * `deletionEffectiveFor` is written by `requestDeletion` as "now plus the cool-off",
+   * so a deadline in the future IS a pending deletion and one in the past IS a due one.
+   * The test reaches for the deadline rather than the clock because the row is the
+   * authority — the same reasoning users.lifecycle.test.ts gives for winding the clock
+   * forward instead of waiting thirty days.
+   */
+  async function scheduleDeletion(email: string, effectiveFor: Date): Promise<string> {
+    const userId = await createAccount(email);
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        deletionRequestedAt: new Date(Date.now() - 30 * DAY_MS),
+        deletionEffectiveFor: effectiveFor,
+      },
+    });
+    return userId;
+  }
+
+  const softDeletedAt = (userId: string): Promise<Date | null> =>
+    prisma.user
+      .findUniqueOrThrow({ where: { id: userId }, select: { deletedAt: true } })
+      .then((r) => r.deletedAt);
+
+  /**
+   * THE NEGATIVE CONTROL, and the assertion the whole pass rests on.
+   *
+   * A deletion inside the cool-off is still Cancellable — the person is entitled to
+   * `DELETE /users/me/deletion` and get their account back. No age threshold, no batch
+   * bound and no scheduler may select it, and there is deliberately no `maxAgeMs`
+   * parameter a caller could tune here: the only input is the row, exactly as
+   * `sweepExpiredSessions` takes no age either.
+   */
+  it('leaves a deletion whose window has not passed exactly where it is', async () => {
+    const pending = await scheduleDeletion(
+      'cooling-off@example.com',
+      new Date(Date.now() + 29 * DAY_MS),
+    );
+
+    expect(await finaliseDueAccountDeletions()).toBe(0);
+    expect(await softDeletedAt(pending)).toBeNull();
+  });
+
+  /**
+   * AGE IS NOT THE SELECTOR, stated as its own case rather than left to the first one.
+   *
+   * A decade-old account with a NULL `deletionEffectiveFor` is an account somebody is
+   * still using, and a sweeper that reached for `createdAt` would take it. `User` is
+   * one of the few tables in this schema with no expiry on it at all, which is the
+   * strongest form of that argument: there is no column here that could mean "dead".
+   */
+  it('never finalises an old account nobody asked to delete', async () => {
+    const userId = await createAccount('ancient@example.com');
+    await prisma.user.update({
+      where: { id: userId },
+      data: { createdAt: new Date(Date.now() - 3650 * DAY_MS) },
+    });
+
+    expect(await finaliseDueAccountDeletions()).toBe(0);
+    expect(await softDeletedAt(userId)).toBeNull();
+  });
+
+  /**
+   * THE CASE NOTHING COVERED, and the reason this pass exists.
+   *
+   * Every test above is about a row that survives. This one is the inverse and it is
+   * the whole point: an owner who asked to be deleted and then never signed in again.
+   * The previous mechanism — `finaliseDueDeletions`, called from `findLiveSession` —
+   * cannot reach this account at all, because reaching it requires the account to make
+   * a request, and signing back in is precisely how the deletion would have been
+   * CANCELLED. So the accounts that most need finalising were the ones the lazy path
+   * was guaranteed never to see.
+   *
+   * No request is made. Not a login, not a `GET /me`, nothing: the fixture is inserted
+   * directly and the only call in the test is the sweep. If this test ever started
+   * passing because a request finalised the row, it would be testing the old mechanism
+   * under a new name, which is how a gap gets re-closed by accident.
+   */
+  it('finalises a due deletion with nobody asking, soft-deleting the row and purging its sessions', async () => {
+    const userId = await scheduleDeletion('never-returns@example.com', new Date(Date.now() - 1000));
+    const sessionId = await makeSession(userId, {
+      expiresAt: new Date(Date.now() + 7 * DAY_MS),
+      absoluteExpiresAt: new Date(Date.now() + 30 * DAY_MS),
+    });
+
+    expect(await finaliseDueAccountDeletions()).toBe(1);
+
+    expect(await softDeletedAt(userId)).not.toBeNull();
+    // A live session on a soft-deleted account is a credential that outlives the
+    // account, so the purge is part of "finalised" rather than a separate concern.
+    expect(await exists(prisma.session.count({ where: { id: sessionId } }))).toBe(false);
+  });
+
+  /**
+   * The audit row, because the pass writes an irreversible act and the trail is how it
+   * is explained afterwards. The other three passes DELETE rows nothing reads; this one
+   * soft-deletes an account, so it goes through the extended client on purpose.
+   *
+   * `actorId` is NULL, and asserting THAT is the point rather than a convenience. On
+   * the request path the account holder is the actor; here there is no request, so there
+   * is no ambient audit context, and the honest record of "the cool-off elapsed and a
+   * timer acted" is a deletion with nobody attached to it. Writing the subject's own id
+   * here would be the tidier row and the false one — it would say they deleted
+   * themselves, which is a belief rather than an event, and the request that started it
+   * is on its own row already.
+   */
+  it('writes the derived DELETE audit row with no actor, because nobody acted', async () => {
+    const userId = await scheduleDeletion('audited@example.com', new Date(Date.now() - 1000));
+    await clearAuditEvents();
+
+    await finaliseDueAccountDeletions();
+
+    const event = await prisma.auditEvent.findFirstOrThrow({
+      where: { entityType: 'User', entityId: userId },
+    });
+    expect(event.action).toBe('DELETE');
+    expect(event.actorId).toBeNull();
+  });
+
+  /**
+   * THE TIMER ACTUALLY RUNS IT. The four passes above call the function directly, and a
+   * pass that is correct in isolation and missing from `runRetentionSweep` is a feature
+   * that still never happens — which is the precise defect this pass was written to fix.
+   * So the wiring is asserted through the same entry point `startRetentionSweeper`
+   * schedules.
+   */
+  it('is on the retention timer, not only callable by hand', async () => {
+    const userId = await scheduleDeletion('on-the-timer@example.com', new Date(Date.now() - 1000));
+
+    await runRetentionSweep();
+
+    expect(await softDeletedAt(userId)).not.toBeNull();
+  });
+
+  /**
+   * IDEMPOTENT ON CRASH-RETRY. A second pass over an already-finalised row finds
+   * nothing, because the predicate excludes a `deletedAt` that is already set — so
+   * "crashed halfway through a batch" leaves each row either done or not done, and
+   * "not done" is simply the next tick's work.
+   */
+  it('is idempotent, and a re-run reports nothing rather than counting the same row twice', async () => {
+    await scheduleDeletion('retry-once@example.com', new Date(Date.now() - 1000));
+    await scheduleDeletion('retry-twice@example.com', new Date(Date.now() - 2000));
+
+    expect(await finaliseDueAccountDeletions()).toBe(2);
+    expect(await finaliseDueAccountDeletions()).toBe(0);
+  });
+
+  /**
+   * The per-run bound, and what it does and does not mean.
+   *
+   * A bound on WORK, not a threshold on eligibility: the account left out of this run
+   * is still inside the predicate, so the next run takes it. A sweeper that silently
+   * dropped a row past `maxPerRun` would be the opposite and much worse failure, so the
+   * second assertion is the one that matters.
+   */
+  it('bounds the work per run without dropping anybody out of the queue', async () => {
+    const first = await scheduleDeletion('batch-1@example.com', new Date(Date.now() - 3000));
+    const second = await scheduleDeletion('batch-2@example.com', new Date(Date.now() - 2000));
+    const third = await scheduleDeletion('batch-3@example.com', new Date(Date.now() - 1000));
+
+    expect(await finaliseDueAccountDeletions({ maxPerRun: 1 })).toBe(1);
+    // Oldest deadline first, so the bound cannot be used to starve an old deadline.
+    expect(await softDeletedAt(first)).not.toBeNull();
+    expect(await softDeletedAt(second)).toBeNull();
+    expect(await softDeletedAt(third)).toBeNull();
+
+    expect(await finaliseDueAccountDeletions({ maxPerRun: 1 })).toBe(1);
+    expect(await softDeletedAt(second)).not.toBeNull();
+    expect(await finaliseDueAccountDeletions()).toBe(1);
+    expect(await softDeletedAt(third)).not.toBeNull();
   });
 });
 

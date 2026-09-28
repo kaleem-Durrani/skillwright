@@ -699,7 +699,7 @@ async function seedUsers(departmentIds: string[]) {
   return { teachers, students, admins };
 }
 
-type SeededOffering = { id: string; capacity: number };
+type SeededOffering = { id: string; capacity: number; startDate: Date };
 type SeededCourse = {
   id: string;
   code: string;
@@ -781,7 +781,7 @@ async function seedCourses(
         create: { id: did('offering', `${code}:${intake.key}`), ...offeringData },
         update: offeringData,
       });
-      offerings.push({ id: offering.id, capacity });
+      offerings.push({ id: offering.id, capacity, startDate: intake.startDate });
     }
 
     courses.push({
@@ -801,12 +801,38 @@ async function seedCourses(
   return courses;
 }
 
+/**
+ * A seat the chain can hang off: the enrolment row PLUS the names the certificate
+ * banner and the award below need, resolved here rather than re-queried later.
+ *
+ * Returned rather than re-derived because the award has to point at a REAL row with a
+ * real `@@unique([studentId, offeringId])` behind it. A certificate is issued against
+ * an enrolment, never against a student — `issueCertificateSchema` names the seat for
+ * exactly the reason in the shared schema's own comment — so anything this seed wrote
+ * that did not come from one of these rows would be a certificate no route could have
+ * produced.
+ */
+type CompletedSeat = {
+  id: string;
+  studentId: string;
+  studentName: string;
+  studentEmail: string;
+  courseId: string;
+  courseName: string;
+  courseCode: string;
+  teacherId: string;
+  offeringStartDate: Date;
+  /** Filled by `demoAwardSeat`, which is the only caller of `seedAward`. */
+  qualificationCode?: string;
+};
+
 async function seedEnrollments(
   courses: SeededCourse[],
   students: SeededUser[],
   admins: SeededUser[],
-) {
+): Promise<CompletedSeat[]> {
   let total = 0;
+  const completed: CompletedSeat[] = [];
 
   for (const [index, course] of courses.entries()) {
     // The running intake carries the plan this seed has always had; the future
@@ -846,11 +872,29 @@ async function seedEnrollments(
           // Decisions alternate between the course's own teacher and an admin, because the
           // policy layer allows both and only seeded data proves the UI renders both.
           const decider = n % 4 === 0 ? admins[n % admins.length]!.id : course.teacherId;
+          /*
+           * `completedAt` and `completedById`, and the same rule as `approvedCount`
+           * below: this seed has always written COMPLETED seats, and until this it
+           * wrote them with `completedAt` NULL. schema.prisma calls that column "the
+           * ONLY thing that distinguishes a completed student from one merely
+           * approved" — so those rows were claiming a completion with no date on it,
+           * which is the exact defect a seed is supposed to make visible rather than
+           * produce. A certificate is dated from the SEAT (`issuedAt` is the
+           * registrar's date, not the completion's), so the demo read "awarded on
+           * <nothing>" until this was fixed.
+           *
+           * The decider signs it, for the same reason they sign the decision: the
+           * column is an attribution and an unattributed qualification is the thing
+           * schema.prisma's `completedById` comment exists to prevent.
+           */
+          const isCompleted = status === 'COMPLETED';
           const data = {
             status,
             requestedAt: at(-50 + (cursor % 30)),
             decidedAt: decided ? at(-48 + (cursor % 30)) : null,
             decidedById: decided ? decider : null,
+            completedAt: isCompleted ? at(-10 + (cursor % 30)) : null,
+            completedById: isCompleted ? decider : null,
             decisionNote:
               status === 'REJECTED'
                 ? 'Prerequisite not met: complete the Level 1 course first.'
@@ -859,7 +903,7 @@ async function seedEnrollments(
                   : null,
           };
 
-          await prisma.enrollment.upsert({
+          const row = await prisma.enrollment.upsert({
             where: { studentId_offeringId: { studentId: student.id, offeringId: offering.id } },
             create: {
               id: did('enrollment', `${course.code}:${offeringIndex}:${student.id}`),
@@ -869,6 +913,20 @@ async function seedEnrollments(
             },
             update: data,
           });
+
+          if (isCompleted) {
+            completed.push({
+              id: row.id,
+              studentId: student.id,
+              studentName: student.name,
+              studentEmail: student.email,
+              courseId: course.id,
+              courseName: course.name,
+              courseCode: course.code,
+              teacherId: course.teacherId,
+              offeringStartDate: offering.startDate,
+            });
+          }
 
           if (status === 'APPROVED') approved += 1;
           total += 1;
@@ -884,7 +942,277 @@ async function seedEnrollments(
     }
   }
 
-  logger.info('seed.enrollments', { count: total });
+  logger.info('seed.enrollments', { count: total, completed: completed.length });
+  return completed;
+}
+
+/**
+ * The register behind every COMPLETED seat.
+ *
+ * WHY COMPLETED SEATS AND NOT ALL OF THEM. The seed's own chain, written out on
+ * `issueCertificateSchema` and in migration 0013, is
+ *
+ *     seat -> attend -> submit -> be assessed -> complete -> qualify -> verify
+ *
+ * and the arrow this step supplies is the one the seed had been skipping: a
+ * COMPLETED enrolment with no `AttendanceRecord` under it asserts a completion nobody
+ * can look at. It is the same class of defect as the `completedAt: null` this seed was
+ * also writing, and it was invisible for the same reason — the row existed, the column
+ * asserting it did not.
+ *
+ * It is scoped to COMPLETED seats because that is the only seat the chain runs on.
+ * A PENDING applicant has not started and an APPROVED student is mid-course; giving
+ * them registers would be inventing a timetable the course data does not describe, and
+ * `CourseOffering.endDate` is `at(60 + index * 3)` — a course that has not finished.
+ * Marking somebody PRESENT for a session that has not happened is the one thing a
+ * register must never say.
+ *
+ * SESSIONS ARE WEEKLY FROM THE OFFERING'S OWN `startDate`, not from EPOCH, so the
+ * register agrees with the intake it belongs to. `sessionDate` is `@db.Date` — a bare
+ * calendar date — so each is pinned to UTC midnight rather than inheriting the hour
+ * from the offering, which would make the same day compare unequal to itself.
+ *
+ * Upserted on `@@unique([enrollmentId, sessionDate])`, the same key the model calls
+ * "the read path for per-enrollment history", so a re-run converges on the same rows.
+ */
+async function seedAttendance(seats: CompletedSeat[]) {
+  const SESSIONS_PER_COURSE = 8;
+  const STATUSES = [
+    'PRESENT',
+    'PRESENT',
+    'PRESENT',
+    'PRESENT',
+    'PRESENT',
+    'LATE',
+    'ABSENT',
+  ] as const;
+
+  let count = 0;
+  for (const seat of seats) {
+    const rnd = prngFor(`attendance:${seat.courseCode}:${seat.id}`);
+    for (let session = 0; session < SESSIONS_PER_COURSE; session += 1) {
+      const status = pick(STATUSES, rnd);
+      // `+ 7` is the weekly cadence; `setUTCHours(0,0,0,0)` is the `@db.Date` half.
+      const sessionDate = new Date(seat.offeringStartDate.getTime() + session * 7 * DAY_MS);
+      sessionDate.setUTCHours(0, 0, 0, 0);
+
+      const data = {
+        status,
+        // The course's own teacher, because that is who the register belongs to and
+        // `markedById` is an attribution rather than a formality.
+        markedById: seat.teacherId,
+        note:
+          status === 'ABSENT'
+            ? 'Notified; no reason given.'
+            : status === 'LATE'
+              ? 'Arrived after the practical had started.'
+              : null,
+      };
+
+      await prisma.attendanceRecord.upsert({
+        where: { enrollmentId_sessionDate: { enrollmentId: seat.id, sessionDate } },
+        create: {
+          id: did('attendance', `${seat.id}:${sessionDate.toISOString().slice(0, 10)}`),
+          enrollmentId: seat.id,
+          sessionDate,
+          ...data,
+        },
+        update: data,
+      });
+      count += 1;
+    }
+  }
+
+  logger.info('seed.attendance', { count, enrollments: seats.length });
+}
+
+/** The 32 symbols a person can transcribe off a printout. See shared/src/schema/certificate.ts. */
+const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+
+/**
+ * A certificate reference for a SEEDED award, and the reason it is not a random one.
+ *
+ * `reference` is `@unique` and it is the whole security argument of
+ * `GET /certificates/verify/:reference` (shared/src/schema/certificate.ts, and the
+ * comment on `generateReference` in certificates.service.ts). Nothing about that
+ * argument may be weakened here, so the SHAPE is reproduced exactly: 26 Crockford
+ * base32 characters, last one masked to three bits, alphabet identical, and the same
+ * bit-packing loop as the server's so a seeded reference is indistinguishable in form
+ * from a minted one — which it must be, because the verify route validates it with
+ * the same `referenceSchema` and a seeded row that failed that would be a certificate
+ * the one unauthenticated route refuses to answer for.
+ *
+ * WHAT IS DELIBERATELY NOT REPRODUCED IS THE ENTROPY SOURCE: the bytes come from
+ * `prngFor`, not `randomBytes`. This seed is DETERMINISTIC and IDEMPOTENT by
+ * construction, and `reference` being unique is precisely what makes a random value
+ * fatal here — an upsert keyed on it would find nothing on the second run and INSERT
+ * A SECOND AWARD, so `pnpm db:seed` would quietly double every certificate in the demo
+ * every time anybody ran it. A stable value keyed on the seat is the only thing an
+ * idempotent seed can write into a unique column it has to look the row up by.
+ *
+ * A reader who wants to know whether a seeded reference is safe to paste into a
+ * verifier should know the answer up front: it is not, and it does not need to be. It
+ * is development data in a development database, its whole value is that a screenshot
+ * in a bug report refers to the same row on the reader's machine, and no production
+ * path can ever reach this function.
+ */
+export function seededReference(key: string): string {
+  const rnd = prngFor(`reference:${key}`);
+  const bytes = Array.from({ length: 16 }, () => Math.floor(rnd() * 256));
+
+  let out = '';
+  let bitBuffer = 0;
+  let bitsHeld = 0;
+  let index = 0;
+  for (let produced = 0; produced < 26; produced += 1) {
+    while (bitsHeld < 5) {
+      // The 17th read is past the end of the array and coerces to zero, which is
+      // exactly what makes the final character carry three real bits rather than
+      // five. `generateReference` does the same arithmetic; the mask below is what
+      // makes the two agree.
+      bitBuffer = (bitBuffer << 8) | (bytes[index] ?? 0);
+      bitsHeld += 8;
+      index += 1;
+    }
+    const value = (bitBuffer >> (bitsHeld - 5)) & 0b11111;
+    bitsHeld -= 5;
+    out += produced === 25 ? CROCKFORD[value & 0b111] : CROCKFORD[value];
+  }
+  return out;
+}
+
+/**
+ * ONE pre-awarded certificate, hanging off a real COMPLETED seat.
+ *
+ * Six qualifications are seeded (see `seedQualifications`) and no award was, so the
+ * catalogue existed and nothing had ever been issued against it: `GET /certificates`
+ * was empty, the holder's Qualifications tab was empty, and the one unauthenticated
+ * route in the system — `GET /certificates/verify/:reference` — had no row to answer
+ * for. The feature could be demonstrated only by driving the issue dialog, which is a
+ * UI test wearing a seed's clothes.
+ *
+ * The chain is seeded END TO END rather than the award alone, because the award is the
+ * only row in it that is not already here: the seat was seeded (COMPLETED, with a
+ * `completedAt` as of this change), the register behind it is `seedAttendance`, and
+ * what this adds is the last arrow. A certificate with no register behind its seat is
+ * the same unbacked claim in a different table.
+ *
+ * ONE award, not one per catalogue entry, and deliberately: the catalogue is six rows
+ * so the ISSUE DIALOG has something to offer, while a demo award is one person's
+ * record. Seeding six would put a certificate on accounts that never sat the course
+ * those standards belong to — CSWIP 3.1 is a welding-inspector standard and handing it
+ * to whoever happened to be first in the array would make the demo data a lie in the
+ * one place it is most checked.
+ *
+ * NO `artifactUploadId`, and the reason is worth stating because the alternative looks
+ * like completeness. The issue route renders a PDF and pushes it through the presign ->
+ * PUT -> commit path, so a real certificate's artefact is an object in the bucket; the
+ * seed has no object-store client and inventing a plausible `Upload` row would produce
+ * a COMMITTED upload pointing at a key no object exists behind — a Download button that
+ * mints a valid presigned URL and then 404s, which is worse than no button because it
+ * looks like the feature working. The null case is a STATE THIS PRODUCT ALREADY RENDERS
+ * HONESTLY: `certificateSchema.artifact` is nullable, `downloadUrlFor` answers 409 for
+ * it, and the SPA says "The document for this certificate is not available. The
+ * qualification is still recorded." — the exact truth about this row.
+ */
+async function seedAward(seat: CompletedSeat) {
+  const qualificationCode = seat.qualificationCode;
+  if (!qualificationCode) {
+    throw new Error('seed.awards: no qualification chosen for this seat; see demoAwardSeat.');
+  }
+  const qualification = await prisma.qualification.findFirstOrThrow({
+    where: { code: qualificationCode },
+    select: { id: true, code: true, name: true, awardingBody: true },
+  });
+
+  const reference = seededReference(`${seat.id}:${qualification.id}`);
+  const issuedAt = at(-5);
+
+  const data = {
+    studentId: seat.studentId,
+    qualificationId: qualification.id,
+    enrollmentId: seat.id,
+    issuedById: seat.teacherId,
+    reference,
+    issuedAt,
+    // Null, and never populated: see the note on the function. Stated here as an
+    // explicit `undefined` rather than left to the column default so that adding an
+    // `@default` to the model later cannot silently start writing one.
+    artifactUploadId: null,
+  };
+
+  const row = await prisma.studentQualification.upsert({
+    where: { reference },
+    create: { id: did('award', reference), ...data },
+    update: data,
+  });
+
+  logger.info('seed.awards', { count: 1, reference, code: qualification.code });
+  return {
+    ...row,
+    qualificationName: qualification.name,
+    awardingBody: qualification.awardingBody,
+    // Carried for the banner only. The award's holder and its course are facts the
+    // banner states and nothing reads, but they are read by whoever runs the seed.
+    studentName: seat.studentName,
+    studentEmail: seat.studentEmail,
+    courseName: seat.courseName,
+  };
+}
+
+/**
+ * The standard a seat in a given DEPARTMENT can plausibly lead to, and nothing wider.
+ *
+ * The award could have been handed the first entry of the catalogue and nobody would
+ * have checked — but CSWIP 3.1 is a welding-inspector standard, and putting it on a
+ * student who sat an electrical course makes the demo data wrong in the one place it
+ * is most likely to be looked at seriously. The table is one line per department, which
+ * is the whole cost of not doing that.
+ *
+ * A department with no entry THROWS rather than defaulting. There are six departments
+ * and six qualifications, so a missing entry means somebody added a department and did
+ * not decide what its students can be awarded — a decision that belongs to whoever made
+ * that change, loudly, and not to a `?? 'C&G-L3-DIP'` at three in the morning.
+ */
+const AWARD_BY_DEPARTMENT_PREFIX: Record<string, string> = {
+  WELD: 'CSWIP-3-1',
+  AUTO: 'C&G-L3-DIP',
+  ELEC: 'HND-EEE',
+  HVAC: 'FGAS-CAT-I',
+  CNC: 'NVQ-L4-ENG-MAINT',
+  PLMB: 'C&G-L3-DIP',
+};
+
+/**
+ * Which completed seat carries the demo award.
+ *
+ * THE DEMO STUDENT'S OWN, so the account printed at the top of the banner is the
+ * account whose Qualifications tab is not empty the moment somebody signs in — the
+ * whole reason a demo row exists is that it is one click from the login card.
+ *
+ * `?? completed[0]` is a fallback for a catalogue change that leaves the demo student
+ * without a completed seat, and it is here so that change degrades the DEMO rather
+ * than failing `db:seed` outright. It is not silent: the banner names the holder's
+ * email, so a fallback is visible in the output of the run that caused it.
+ */
+function demoAwardSeat(completed: CompletedSeat[], demoStudent: SeededUser): CompletedSeat {
+  const seat = completed.find((row) => row.studentId === demoStudent.id) ?? completed[0];
+  if (!seat) {
+    throw new Error(
+      'seed.awards: no COMPLETED enrolment to award a certificate against. The demo award ' +
+        'hangs off a real seat because that is what the issue route requires, and a ' +
+        'certificate with no seat is a row nothing in this system can produce.',
+    );
+  }
+  const prefix = seat.courseCode.split('-')[0]!;
+  const code = AWARD_BY_DEPARTMENT_PREFIX[prefix];
+  if (!code) {
+    throw new Error(
+      `seed.awards: no awardable qualification is mapped to department "${prefix}" ` +
+        '(see AWARD_BY_DEPARTMENT_PREFIX).',
+    );
+  }
+  return { ...seat, qualificationCode: code };
 }
 
 async function seedResources(courses: Array<{ id: string; code: string; teacherId: string }>) {
@@ -1294,7 +1622,14 @@ export async function seed(): Promise<void> {
 
   const { teachers, students, admins } = await seedUsers(departmentIds);
   const courses = await seedCourses(departmentIds, teachers);
-  await seedEnrollments(courses, students, admins);
+  const completedSeats = await seedEnrollments(courses, students, admins);
+
+  // The register behind every completed seat, before the award that depends on it —
+  // the same order the chain runs in, so a reader can follow it top to bottom.
+  await seedAttendance(completedSeats);
+
+  const demoStudent = students[0]!;
+  const award = await seedAward(demoAwardSeat(completedSeats, demoStudent));
 
   const resources = await seedResources(courses);
   const announcements = await seedAnnouncements([...admins, ...teachers.slice(0, 4)]);
@@ -1302,7 +1637,6 @@ export async function seed(): Promise<void> {
   await seedConversations(teachers, students, admins);
   await seedNotifications(students, teachers, courses);
 
-  const demoStudent = students[0]!;
   writeBanner(
     box([
       'Skillwright seed complete — development credentials',
@@ -1329,6 +1663,14 @@ export async function seed(): Promise<void> {
       'AWARD CATALOGUE — what a certificate can be issued against:',
       ...qualifications.map((q) => `  ${q.code}  ${q.name}  (${q.awardingBody})`),
       '  a COMPLETED seat + any of these is the demo path to a certificate.',
+      null,
+      'ONE AWARD IS ALREADY ISSUED, so the chain is visible before you click anything:',
+      `  ${award.qualificationName}  (${award.awardingBody})`,
+      `  holder   ${award.studentName}  <${award.studentEmail}>`,
+      `  from     ${award.courseName} — a COMPLETED seat with a register behind it`,
+      `  verify   GET /api/v1/certificates/verify/${award.reference}`,
+      '  its PDF is NOT seeded: the document is rendered at issue time, so the holder',
+      '  sees the honest "not available" line rather than a download that 404s.',
       null,
       'Avatars are derived, not stored. Example:',
       `  ${avatarUrlFor(demoStudent.id).slice(0, 72)}…`,

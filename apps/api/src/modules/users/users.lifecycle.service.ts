@@ -65,7 +65,9 @@ export const ACCOUNT_DELETION_COOL_OFF_MS = ACCOUNT_DELETION_COOL_OFF_DAYS * 24 
  * WHAT IT DOES NOT DO, which is the feature: it does not delete anything. It writes
  * `deletionRequestedAt` and `deletionEffectiveFor`, destroys every session, and
  * answers. `deletedAt` is set by `finaliseDueDeletions` when the window has passed,
- * or lazily by `findLiveSession` on the account's next authenticated request. The
+ * on whichever of the two paths gets there first: the account's next authenticated
+ * request, through `findLiveSession`, or the retention sweeper's tick, through
+ * `finaliseDueAccountDeletions`. The
  * gap between the two is the cool-off, and it exists because "delete my account" is
  * a button a person clicks on a bad afternoon, and an instant irreversible delete
  * served over HTTP by a product whose entire job is being the system of record for
@@ -206,24 +208,68 @@ export async function deletionStatus(userId: string): Promise<AccountDeletionSta
 }
 
 /**
+ * The soft delete itself, and the only place the write and the session purge happen.
+ *
+ * Both callers above and below reach a DUE row and come straight here, so "finalised"
+ * has one definition rather than two that can drift — the structural half of
+ * LESSONS-LEARNED 28, applied to a two-line body where a comment asking the next
+ * person to keep them in step would be a wish.
+ *
+ * Soft delete, NOT a hard one — the schema's rule 3, and in this case rule 2 as
+ * well: `Course.teacherId`, `Resource.authorId` and `Announcement.authorId` are
+ * `Restrict`, so a physical delete of any teacher who ever taught would be refused by
+ * the database. Enrolments, attendance, grades and the audit trail all survive the
+ * person, and that is the decision rather than an oversight: a school that issued a
+ * qualification in somebody's name and then deleted the record of them is worse off
+ * than one holding a dormant row.
+ *
+ * The `DELETE` audit row is derived by the extension from exactly this transition
+ * (`deriveUpdateAction`: deletedAt null → set), and it is written by whichever
+ * caller arrives. Its actor is NOT always the account holder, and the difference is
+ * worth stating because the old comment here asserted it was:
+ *
+ *   request path — the account's own session triggered the write, so the ambient
+ *     audit context names the person, which is the truth (nobody else did this to
+ *     them);
+ *   sweep path — there is no request, so there is no ambient context and the row
+ *     records `actorId: null`. That is not a hole in the trail, it is the accurate
+ *     answer: the person asked, and then time passed. A sweeper attributing the
+ *     deletion to its subject would be asserting that they deleted themselves, which
+ *     is the belief, not the event. The row says what happened and leaves the request
+ *     that started it to the row that recorded the request.
+ *
+ * That row is also why this goes through the EXTENDED `prisma` and not `basePrisma`
+ * as the retention sweepers in packages/db do — the other three passes delete rows
+ * nothing reads afterwards, and this one writes the record of an irreversible act.
+ *
+ * THE WRITE IS NOT CONDITIONAL ON `deletedAt: null`, so the two callers can in
+ * principle both land — an account presenting a session in the same millisecond a sweep
+ * tick selects it. Prisma's `update` is keyed on the id alone, and making it conditional
+ * would mean `updateMany`, whose audit-extension branch records the caller's input with
+ * no ids. The cost of the race, stated so nobody has to work it out: a second `DELETE`
+ * audit row and a `deletedAt` a moment later. Both paths are already idempotent in the
+ * sense that matters — the account is soft-deleted exactly once in substance — and the
+ * alternative costs a round trip on every authenticated request to prevent a duplicated
+ * log line that says the same thing twice.
+ */
+async function softDeleteAccount(userId: string): Promise<void> {
+  await prisma.user.update({ where: { id: userId }, data: { deletedAt: new Date() } });
+  await destroyAllSessions(userId);
+
+  log.info({ userId }, 'deletion finalised after the cool-off');
+}
+
+/**
  * Turns a DUE deletion into an actual soft delete. Returns true when it wrote.
  *
- * CALLED FROM `findLiveSession`, which is the only place in the system every
- * authenticated request passes through, and that placement is the design rather than
- * a convenience. A background sweeper would be the tidier shape and it is
- * explicitly NOT what exists yet: `docs/roadmap/10-FEATURE-PLAN.md` Phase 7 owns
- * the sweepers, and three of them (Session, Verification, RecoveryCode) are still
- * unwritten. Building a fourth one here, for one model, would be that phase's work
- * done badly and in the wrong file. What exists instead is correct without a
- * scheduler: the account cannot be USED before this runs, because the only way in
- * is a session cookie, and the only way a session cookie becomes a session is
- * through the function below. So the deletion takes effect on the account's next
- * request and no request can outrun it.
+ * CALLED FROM `findLiveSession` on every authenticated request.
+ * THAT placement is still the load-bearing one: the account cannot be USED before
+ * this runs, because the only way in is a session cookie and the only way a session
+ * cookie becomes a session is through the function below. No request can outrun it.
  *
- * What it cannot do is delete an account whose owner never comes back. That is a
- * real gap, it is Phase 7's gap, and it is recorded as one rather than papered over
- * with a half-built sweeper: the row is dormant and unreadable either way, so the
- * consequence is disk, not access.
+ * What it cannot do is finalise an account whose owner never comes back — there is
+ * no request, so nothing calls it. `finaliseDueAccountDeletions` below is that
+ * gap's answer, and this function is what it calls.
  *
  * The indexed predicate is `deletionEffectiveFor <= now` with `deletedAt IS NULL`
  * (migration 0011_user_lifecycle's index), and it runs once per authenticated
@@ -237,24 +283,79 @@ export async function finaliseDueDeletions(userId: string): Promise<boolean> {
   });
   if (!due) return false;
 
-  // Soft delete, NOT a hard one — the schema's rule 3, and in this case rule 2 as
-  // well: `Course.teacherId`, `Resource.authorId` and `Announcement.authorId` are
-  // `Restrict`, so a physical delete of any teacher who ever taught would be
-  // refused by the database. Enrolments, attendance, grades and the audit trail all
-  // survive the person, and that is the decision rather than an oversight: a school
-  // that issued a qualification in somebody's name and then deleted the record of
-  // them is worse off than one holding a dormant row.
-  //
-  // The `DELETE` audit row is derived by the extension from exactly this transition
-  // (`deriveUpdateAction`: deletedAt null → set), and it is written by the caller —
-  // which is this module, on the request the account's own session triggered. The
-  // actor is therefore the person themselves, which is the truth: nobody else did
-  // this to them.
-  await prisma.user.update({ where: { id: due.id }, data: { deletedAt: new Date() } });
-  await destroyAllSessions(due.id);
-
-  log.info({ userId: due.id }, 'deletion finalised after the cool-off');
+  await softDeleteAccount(due.id);
   return true;
+}
+
+/**
+ * Finalises every account whose cool-off has passed, with nobody asking.
+ *
+ * WHY THIS EXISTS, in the words of the comment that stood here before it: the request
+ * path alone "cannot delete an account whose owner never comes back". An account whose
+ * owner asks to be deleted and then does not sign in again is the ORDINARY case for
+ * self-service deletion, not an edge one — signing back in is precisely how you cancel,
+ * so the accounts that most need finalising are the ones least likely to trigger the
+ * request path. The row is dormant and unreadable either way, which is why the
+ * consequence was recorded as disk rather than as access, and why this sat on the
+ * record instead of being written down as a defect.
+ *
+ * IT CALLS `finaliseDueDeletions` PER ROW rather than restating the predicate, and the
+ * extra indexed read per row is the price paid. `sweepExpiredSessions` in
+ * packages/db/src/retention/sweepers.ts copies `findLiveSession`'s own test for
+ * exactly this reason; a comment asking the next person to keep two copies of a WHERE
+ * clause in step is a wish (LESSONS-LEARNED 28), whereas a sweeper that CALLS the
+ * request-path function cannot drift from it even in principle. The batch select below
+ * finds candidates through the index; it is not the decision. The decision is still
+ * made by the one function, and the extra read also re-checks the row under whatever
+ * happened between the select and the write.
+ *
+ * THE PREDICATE IS THE SAFETY ARGUMENT, and it is the same one the other three passes
+ * make: `deletionEffectiveFor` is written by `requestDeletion` as "now plus the
+ * cool-off" and means "after this instant the account is deleted", so the instant
+ * passing IS the declaration that the row is worthless. Age alone selects nothing —
+ * a twenty-year-old account nobody ever asked to delete is untouched, and that is the
+ * negative control the test asserts.
+ *
+ * IDEMPOTENT ON CRASH-RETRY for the reason every pass here is: the write is
+ * `deletedAt = now` guarded by `deletedAt: null` in the predicate, so a re-run after
+ * a crash finds the already-finalised rows outside the predicate and does nothing. A
+ * half-finished run leaves each row either soft-deleted or not, and "not" is simply
+ * the next run's work.
+ *
+ * SEQUENTIAL, with a per-row catch, because each row's purge destroys sessions and one
+ * unreachable account must not strand the rest of the batch. `maxPerRun` bounds the
+ * work per tick; a backlog larger than one run drains across successive ticks rather
+ * than in one statement, which is the trade `AUDIT_PRUNE_BATCH` makes for the only
+ * table here that genuinely grows without bound.
+ */
+export async function finaliseDueAccountDeletions(options?: {
+  maxPerRun?: number;
+}): Promise<number> {
+  const maxPerRun = options?.maxPerRun ?? 100;
+
+  const due = await prisma.user.findMany({
+    where: { deletedAt: null, deletionEffectiveFor: { lte: new Date() } },
+    // Oldest deadline first, so the batch size cannot be used to starve an
+    // old deletion behind newly-due ones indefinitely.
+    orderBy: { deletionEffectiveFor: 'asc' },
+    take: maxPerRun,
+    select: { id: true },
+  });
+
+  let finalised = 0;
+  for (const row of due) {
+    try {
+      if (await finaliseDueDeletions(row.id)) finalised += 1;
+    } catch (error) {
+      // The row is still inside the predicate on the next tick, so this is not lost
+      // work; it is a delay, and saying so is the difference between a sweeper that
+      // recovers and one whose log reads as a permanent failure.
+      log.error({ err: error, userId: row.id }, 'due account deletion failed; will retry');
+    }
+  }
+
+  if (finalised > 0) log.info({ finalised }, 'due account deletions finalised');
+  return finalised;
 }
 
 // ---------------------------------------------------------------------------

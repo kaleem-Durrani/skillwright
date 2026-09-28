@@ -39,9 +39,30 @@ function deriveTestUrl(source: string | undefined): string {
 }
 
 /** Rate-limit keys live in Redis db 1 so `resetRateLimits` cannot clear development's. */
-function deriveTestRedisUrl(source: string | undefined): string {
+/**
+ * Redis has sixteen databases and every API suite in this directory was pointed at
+ * database 1 — so the suite that partitions Postgres by name did NOT partition Redis,
+ * and any two runs in parallel deleted each other's rate-limit counters.
+ *
+ * The failure it produces is a lie. `resetRateLimits` does `KEYS rl:*` then `DEL`, so
+ * a concurrent run empties the buckets a sibling is asserting on mid-test, and the
+ * assertion reports that a rate limit did not apply. It passes in isolation every
+ * time. Observed twice while three agents worked in this tree, each time on a test
+ * that touched none of the other agent's code.
+ *
+ * Derived from the test DATABASE name for the same reason `deriveTestUrl` derives the
+ * database: one identity, two resources, and a name that says which run it belongs to.
+ * A name does not map cleanly to 0-15, so it is hashed — the requirement is that two
+ * different names give two different buckets and the same name gives the same one
+ * every run, not that any particular name lands anywhere meaningful.
+ */
+function deriveTestRedisUrl(source: string | undefined, database: string): string {
   const url = new URL(source ?? 'redis://localhost:6379');
-  url.pathname = '/1';
+  let hash = 0;
+  for (let i = 0; i < database.length; i += 1) {
+    hash = (hash * 31 + database.charCodeAt(i)) | 0;
+  }
+  url.pathname = `/${Math.abs(hash) % 16}`;
   return url.toString();
 }
 
@@ -51,7 +72,10 @@ fallback('PORT', '4010');
 fallback('HOST', '127.0.0.1');
 
 process.env.DATABASE_URL = process.env.TEST_DATABASE_URL ?? deriveTestUrl(process.env.DATABASE_URL);
-process.env.REDIS_URL = deriveTestRedisUrl(process.env.REDIS_URL);
+process.env.REDIS_URL = deriveTestRedisUrl(
+  process.env.REDIS_URL,
+  new URL(process.env.DATABASE_URL).pathname.replace(/^\//, ''),
+);
 
 const targetDatabase = new URL(process.env.DATABASE_URL).pathname.replace(/^\//, '');
 if (!targetDatabase.endsWith('_test')) {

@@ -133,6 +133,22 @@ const envSchema = z.object({
   RETENTION_SWEEP_INTERVAL_MS: count.default(3_600_000),
 
   /**
+   * How many due account deletions ONE tick of the retention sweeper may finalise.
+   *
+   * A per-run work bound rather than an interval, which is why it is a separate key: an
+   * interval says how often the clock rings, this says how much the answer may cost when
+   * it does. A hundred is generous for a system with one API process, and a backlog
+   * larger than that drains across successive hourly ticks rather than in one statement —
+   * the same trade `AUDIT_PRUNE_BATCH` makes for the audit table.
+   *
+   * It is a BOUND and not a threshold: nothing about an account's deletion depends on it,
+   * only how quickly a large backlog is worked off. Every account the predicate selects
+   * is finalised on some tick regardless of this number, and a pass that is skipping
+   * because the queue is empty is not "delayed" by it.
+   */
+  ACCOUNT_DELETION_SWEEP_MAX_PER_RUN: count.default(100),
+
+  /**
    * How long a SPENT recovery code's hash is kept before it is reclaimed.
    *
    * A month, and the word doing the work is SPENT. This age never applies to an unused
