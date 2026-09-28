@@ -190,6 +190,48 @@ async function measureControls(page: Page, root: string): Promise<Measurement> {
   }, root) as Promise<Measurement>;
 }
 
+/**
+ * The same two rules, measured against an ARBITRARY selector.
+ *
+ * Needed because `measureControls` above selects `button, a, input, select,
+ * textarea`, and a Radix `SelectItem` is a `div[role="option"]` — none of those five.
+ * Pointing the shared helper at the listbox would therefore measure ZERO controls
+ * and pass, which is the vacuous pass its own count assertion exists to prevent.
+ * A selector that cannot see the thing is not a measurement of it.
+ */
+async function measureBoxes(page: Page, selector: string): Promise<Measurement> {
+  return page.evaluate((sel) => {
+    const TOUCH_MIN = 44;
+    const TOUCH_SLACK = 0.5;
+    const offenders: Array<{
+      tag: string;
+      label: string;
+      width: number;
+      height: number;
+    }> = [];
+    let measured = 0;
+
+    for (const element of document.querySelectorAll<HTMLElement>(sel)) {
+      const style = getComputedStyle(element);
+      if (style.display === 'none' || style.visibility === 'hidden') continue;
+      if (element.getClientRects().length === 0) continue;
+      if (element.closest('[aria-hidden="true"]')) continue;
+
+      const rect = element.getBoundingClientRect();
+      measured += 1;
+      if (rect.height + TOUCH_SLACK < TOUCH_MIN || rect.width + TOUCH_SLACK < TOUCH_MIN) {
+        offenders.push({
+          tag: element.tagName,
+          label: (element.getAttribute('aria-label') ?? element.textContent ?? '').slice(0, 60),
+          width: Math.round(rect.width * 10) / 10,
+          height: Math.round(rect.height * 10) / 10,
+        });
+      }
+    }
+    return { offenders, measured };
+  }, selector) as Promise<Measurement>;
+}
+
 test.describe('the assignments tab at 375px', () => {
   test.beforeEach(async ({ page }) => {
     await openAssignmentsTab(page);
@@ -250,5 +292,131 @@ test.describe('the hand-in dialog at 375px', () => {
     const { offenders, measured } = await measureControls(page, '[role="dialog"]');
     expect(measured, 'the hand-in dialog measured too few controls').toBeGreaterThanOrEqual(3);
     expect(offenders, JSON.stringify(offenders, null, 2)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The brief picker
+// ---------------------------------------------------------------------------
+
+/**
+ * The one file a teacher can attach to a task, as `resourceSchema` serves it.
+ *
+ * The list it comes from is `GET /courses/:courseId/resources` — the SAME request the
+ * Resources tab makes, and the same one the picker reads. Stubbing it here rather
+ * than inventing a route is the point: a stub for an endpoint the app does not call
+ * would let the picker regress to fetching something of its own without a single
+ * test going red.
+ */
+const courseResource = {
+  id: 'r-brief',
+  title: 'Fillet weld worksheet',
+  description: 'The printable version of the week three notes.',
+  type: 'DOCUMENT',
+  courseId: courseDetail.id,
+  courseName: courseDetail.name,
+  author: { id: 'u-1', name: 'Person 1', role: 'TEACHER', avatarUrl: null },
+  isPublic: false,
+  uploadId: 'up-brief',
+  externalUrl: null,
+  sizeBytes: 2048,
+  contentType: 'application/pdf',
+  commentCount: 0,
+  createdAt: nowIso,
+  updatedAt: nowIso,
+};
+
+/**
+ * The task dialog, opened by the person who is allowed to open it.
+ *
+ * The student session above cannot reach this: `assignment:create` is refused to a
+ * student, so the button is not rendered at all and there is no dialog to measure. A
+ * spec that opened it under that session would measure an empty page and pass.
+ */
+async function openTaskDialog(page: Page): Promise<void> {
+  await page.route('**/api/v1/**', (route) => {
+    const path = new URL(route.request().url()).pathname.replace('/api/v1', '');
+    const json = (body: unknown) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+
+    if (path === '/auth/me') {
+      return json({
+        actor: { id: 'u-1', role: 'TEACHER', status: 'ACTIVE', provenance: 'PASSWORD' },
+        user: userDetails(1, 'TEACHER'),
+        expiresAt: '2026-12-31T00:00:00.000Z',
+      });
+    }
+    if (path === `/courses/${courseDetail.id}`) return json(courseDetail);
+    if (path === `/courses/${courseDetail.id}/resources`) return json(paginated([courseResource]));
+    // A bare array, which is what the teacher's reader is served. Empty, so the
+    // panel shows its empty state and the dialog opens from there.
+    if (path === `/offerings/${OFFERING_ID}/assignments`) return json([]);
+    return json(paginated([]));
+  });
+
+  await page.setViewportSize(PHONE);
+  await page.goto(`/courses/${courseDetail.id}`);
+  await page.waitForLoadState('networkidle');
+  await page.waitForTimeout(300);
+  await page.getByRole('tab', { name: 'Assignments' }).click();
+  await page.getByRole('button', { name: 'Set a task' }).first().click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+}
+
+test.describe('the task dialog at 375px', () => {
+  test('offers the course files, and a brief stays optional', async ({ page }) => {
+    await openTaskDialog(page);
+    const dialog = page.getByRole('dialog');
+
+    // Optional, and it says so before it is touched rather than after a 422.
+    await expect(dialog.getByRole('combobox', { name: 'Attached file' })).toBeVisible();
+    await expect(dialog.getByText(/Optional\./)).toBeVisible();
+
+    // The default is no file, which is a legitimate state and not a blank control.
+    await expect(dialog.getByRole('combobox', { name: 'Attached file' })).toHaveText(/No file/);
+  });
+
+  test('holds 44px on the picker trigger and on every option in the list', async ({ page }) => {
+    await openTaskDialog(page);
+    const dialog = page.getByRole('dialog');
+
+    const trigger = dialog.getByRole('combobox', { name: 'Attached file' });
+    const closed = await measureControls(page, '[role="dialog"]');
+    // The count first, for the reason the panel test gives: a dialog that rendered
+    // its error state would have nothing to measure and would pass the floor.
+    expect(closed.measured, 'the task dialog measured too few controls').toBeGreaterThanOrEqual(5);
+    expect(closed.offenders, JSON.stringify(closed.offenders, null, 2)).toEqual([]);
+
+    await trigger.click();
+    // The list is portalled to the body, OUTSIDE the dialog — which is exactly why a
+    // measurement scoped to `[role="dialog"]` cannot see the options at all.
+    const option = page.getByRole('option', { name: /Fillet weld worksheet/ });
+    await expect(option).toBeVisible();
+
+    /*
+     * Settle BEFORE measuring, and the reason is a number rather than a habit.
+     * `SelectContent` wraps its viewport in a Motion element, and the pop transition
+     * scales it: measured the instant the list appeared, every option reported
+     * 43.4px — 44 multiplied by a scale factor still on its way to 1 — and a 44px
+     * assertion failed against a control that is exactly 44px. This is LESSONS-LEARNED
+     * #21 with a transform rather than an opacity: `getBoundingClientRect` returns the
+     * TRANSFORMED box, so an animation in flight is a measurement of the animation.
+     */
+    await page.waitForTimeout(600);
+
+    const open = await measureBoxes(page, '[role="listbox"] [role="option"]');
+    expect(open.measured, 'the picker list measured too few options').toBeGreaterThanOrEqual(2);
+    expect(open.offenders, JSON.stringify(open.offenders, null, 2)).toEqual([]);
+  });
+
+  test('never scrolls sideways with the picker open', async ({ page }) => {
+    await openTaskDialog(page);
+    await page.getByRole('combobox', { name: 'Attached file' }).click();
+    await expect(page.getByRole('option', { name: /Fillet weld worksheet/ })).toBeVisible();
+
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(1);
   });
 });

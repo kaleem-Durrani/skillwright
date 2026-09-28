@@ -13,6 +13,7 @@ import { FormField } from '@/components/ui/FormField';
 import { Input } from '@/components/ui/Input';
 import { Textarea } from '@/components/ui/Textarea';
 import { toast } from '@/components/ui/Toast';
+import { AssignmentBriefPicker } from './AssignmentBriefPicker.js';
 
 /**
  * The FORM's shape: every control a string, because a datetime control and an instant
@@ -41,6 +42,13 @@ const formShape = z.object({
     .string()
     .trim()
     .regex(/^\d+(\.\d{1,2})?$/, 'A mark out of a number, e.g. 100 or 62.5'),
+  /**
+   * The attached file, as a string like every other control here — `''` is "no file",
+   * which is the DEFAULT and a legitimate answer rather than an empty one to refuse.
+   * The wire's `string | null` is decided in `mutationFn`, not here, because the
+   * empty string and the id have to survive the resolver unchanged.
+   */
+  resourceId: z.string(),
 });
 
 type FormValues = z.infer<typeof formShape>;
@@ -63,6 +71,7 @@ function toFormValues(assignment: AssignmentDto | undefined, defaultDueAt: strin
       brief: '',
       dueAt: toLocalInput(defaultDueAt),
       maxScore: '100',
+      resourceId: '',
     };
   }
   return {
@@ -70,6 +79,9 @@ function toFormValues(assignment: AssignmentDto | undefined, defaultDueAt: strin
     brief: assignment.brief,
     dueAt: toLocalInput(assignment.dueAt),
     maxScore: String(assignment.maxScore),
+    // The DTO carries the brief, so edit seeds the picker from the row it was
+    // opened for and needs no second request to know what is attached.
+    resourceId: assignment.resourceId ?? '',
   };
 }
 
@@ -110,7 +122,7 @@ export function AssignmentFormDialog({
     defaultValues: toFormValues(assignment, defaultDueAt),
   });
   const { errors, isDirty: formIsDirty } = form.formState;
-  const { reset, setError } = form;
+  const { reset, setError, setValue } = form;
 
   /**
    * Seeded once per opening, keyed on which task this dialog is for — the same ref
@@ -130,8 +142,21 @@ export function AssignmentFormDialog({
 
   const save = useMutation({
     mutationFn: (values: FormValues) => {
+      /*
+       * The brief travels as `null` for "no file" and as the id otherwise, and on
+       * PATCH it travels ONLY when the teacher actually moved the picker.
+       *
+       * `updateAssignmentSchema` reads three states, not two: an id swaps the brief,
+       * an explicit `null` DETACHES it, and an absent key leaves it alone. A client
+       * that always sent the field would turn every unrelated edit — a moved
+       * deadline, a reworded sentence — into a detach if the seed were ever wrong,
+       * and the one path where nothing looks wrong is the one that must not carry it.
+       */
+      const briefChanged = values.resourceId !== (assignment?.resourceId ?? '');
+      const resource = values.resourceId === '' ? null : values.resourceId;
       const body = {
-        ...(isEditing ? {} : { offeringId }),
+        ...(isEditing ? {} : { offeringId, resourceId: resource }),
+        ...(isEditing && briefChanged ? { resourceId: resource } : {}),
         title: values.title,
         brief: values.brief,
         // `new Date(local).toISOString()` is the one conversion, and it is deliberately
@@ -248,6 +273,20 @@ export function AssignmentFormDialog({
               {...register('brief', { onChange: () => setDirty(true) })}
             />
           </FormField>
+
+          <AssignmentBriefPicker
+            courseId={courseId}
+            value={form.watch('resourceId')}
+            disabled={locked}
+            error={errors.resourceId?.message}
+            onChange={(next) => {
+              setValue('resourceId', next, { shouldValidate: true, shouldDirty: true });
+              // The same latch the text controls raise: the PATCH button stays closed
+              // until something has actually been touched, and a picker is no
+              // different from a textbox in that respect.
+              setDirty(true);
+            }}
+          />
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <FormField label="Due" required error={errors.dueAt?.message}>
