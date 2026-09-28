@@ -29,6 +29,62 @@ On 2026-09-21 it produced one pull request carrying **31 unrelated majors** acro
 **The contract-drift guard re-proven on the merge commit.** _(verified — one declaration renamed, `apps/api` typecheck exited 2, schema restored and the two SHA-256 hashes compared)_
 
 **Green — observed on 2026-09-28:** shared **852** at 100% of `src/**` · API **488** across 19 files at 93.84 / 85.02 / 91.91 / 93.84 · web **394** across 44 files · db **10** · e2e **129** across three viewport projects · real-stack **6** · typecheck 5/5 plus `typecheck:scripts` · lint 5/5 · build 3/3 · `format:check` · `check:brand` · `check:mobile-first` · `docs:permissions --check` · `docker build`, and the running image probed: `/readyz` reporting `database: ok, redis: ok`, the shell at 200, `/index.html` at `no-cache`, a fingerprinted asset at `immutable`, and its `.map` at 404.
+---
+
+## 2026-09-28 (the whole second roadmap — the lifecycle closes)
+
+**`EnrollmentStatus.COMPLETED` had a colour, two Zod enums, a policy actor type and no writer. It now has a writer, and a qualification hanging off it.** _(verified — the sweep run serially on one database: shared **1063** (64 actions, **1015** decisions proved) · API **637** across 25 files · web **548** across 60 files · db **10** · e2e **439** across three viewport projects · 14 migrations from scratch · typecheck 5/5 · lint 5/5 · format:check · check:brand (796 files) · check:mobile-first (202) · docs:permissions current)_
+
+`docs/roadmap/10-FEATURE-PLAN.md` opened on the finding that a training platform which can
+seat a student, mark them present and publish their materials — and then has nowhere to
+record that they finished — is not yet a training platform. Every phase of that plan is
+now implemented:
+
+| Phase | What it closed                                                                                                                                                                                                      |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0c    | Mobile is a measurement, not a claim: 44px and no-sideways-scroll moved from `/login` alone to all 22 routes, plus tab-bar checks that did not exist. 129 → 300 tests.                                              |
+| 0d    | `format:check` covers YAML; the 27 stale `audit.ts` citations converted to name symbols.                                                                                                                            |
+| 1     | `COMPLETED` reachable, with `completedAt`/`completedBy` and a `COMPLETE` audit verb.                                                                                                                                |
+| 2     | Assignments and submissions. `Submission` hangs off the **Enrollment**, not the User: a seat is required before a hand-in.                                                                                          |
+| 3     | Certificates: a modelled qualification, a public verify-by-reference route, a hand-written PDF generator chosen by **measurement** (3,854 bytes / 0.21 ms against Chromium's 45,899 / 385 ms and 241 MiB resident). |
+| 4     | A 30-person cohort is no longer thirty clicks — `POST /users/bulk` with a **dry run**.                                                                                                                              |
+| 5     | All five holes where an API existed and nothing called it. A student could not withdraw; `/messages` said "Start one from a course page" and no course page had the button.                                         |
+| 6     | Self-service deletion with a cool-off; a data export that omits audit rows, because an audit row's diff is a full copy of whatever was written.                                                                     |
+| 7     | Four sweepers where there was one. `Session`, `Verification`, `RecoveryCode`, `AuditEvent` all grew without bound.                                                                                                  |
+| 8     | The append-only claim is now true — and **could not have been done the planned way**.                                                                                                                               |
+| 9     | Search dies at **32,767 rows**, not 10,000: one bind variable per id against Postgres's ceiling. Rate limiting split three ways. Requests followable end to end.                                                    |
+
+**Two measurements changed what got built.** `Security.md` claimed the audit log was
+append-only while the `REVOKE` sat commented out. The plan said implement the REVOKE;
+measured first, **it would have done nothing** — the API connects as the table's OWNER and
+as a SUPERUSER, and a REVOKE from a superuser restricts nothing. It is a trigger instead.
+And the obvious trigger is a production incident: `AuditEvent.actorId` is `ON DELETE SET
+NULL`, which Postgres implements as a literal UPDATE, so a `BEFORE UPDATE` trigger that
+raises unconditionally makes **every `DELETE FROM "User"` fail** — taking out the fixture
+helper every suite depends on, and every real account deletion with it.
+
+**The comment sweep found a comment that was wrong rather than merely stale.**
+`resources.test.ts` argued that deletion order mattered because `Resource.uploadId` is
+`onDelete: SetNull`, so nulling it under a live DOCUMENT row would trip a CHECK. The
+relation is **`Restrict`**. The nulling cannot happen and that CHECK conflict has not
+existed since migration 0003 — an argument about a mechanism the database does not have.
+Which is why it was worth the sweep: a stale anchor is a nuisance, and a stale claim is a
+trap.
+
+**Three defects the mobile gate found, and one the gate was wrong about.** The wordmark was
+32px on all 15 authenticated routes, the admin rail 38px, three detail-page back-links
+18px — all `tap md:min-h-0`, all measured, no `test.skip()`. The fourth failure was the
+test's: the admin stat tiles report an 18px target because the link inside paints
+`after:absolute after:inset-0` and the tile is the real target at 64px, so padding the
+label would have broken the tile to satisfy a measurement of something the finger never
+aims at.
+
+**Two things were deliberately not done, and both are in `docs/DEFERRED.md` rather than
+buried here.** The object store has no image left — `minio/minio` is **deleted from Docker
+Hub** and the official binary returns 410 Gone — which blocks `pnpm infra:up` for anyone
+cloning today and CI's integration job. And the full `ci.yml` still produces a run with
+zero jobs, narrowed from three candidates to one: the rewritten gate. Both need a decision
+that is not mine.
 
 ---
 

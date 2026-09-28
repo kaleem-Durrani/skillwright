@@ -62,6 +62,13 @@ before anything else is changed:
 **Owner decision required.** This is a product decision about what this project asserts about
 its own infrastructure, not a maintenance chore.
 
+**Update 2026-09-28.** Phase 3 made the stakes concrete rather than theoretical. The
+certificate generator stores its PDF through the existing presign -> staging -> commit
+path, so a certificate is an `Upload` exactly like a syllabus — and the audit trail for a
+qualification now runs through the same `assertUploadClaimable` the audit extension
+depends on. Whatever store is chosen has to satisfy two properties the repository already
+asserts about the current one, and both are now covered by tests rather than by comment.
+
 ---
 
 ## D2 — The full `ci.yml` produces a workflow with zero jobs
@@ -97,6 +104,16 @@ an artefact nobody has run is a guess. Guessing between three candidates by push
    in the API. This is the cheap answer and needs only authentication.
 2. Re-adding the three candidate changes **one at a time** to the reduced file, so each is
    isolated by a run that either schedules or does not.
+
+**Update 2026-09-28.** The three candidates are now narrowed to ONE. Two are ruled out by
+construction: the e2e jobs (removed from the file, still 0 jobs) and the added `unit`-job
+steps and `typecheck:scripts` (the reduced file has neither and schedules fine). What
+remains is **the rewritten `ci` gate**, which is the only candidate that changes how
+GitHub evaluates the workflow. It is also the most likely to be the cause for a reason
+nobody had considered: the gate's step body interpolates
+`${{ join(needs.*.result, " ") }}` with a **double-quoted** string inside a YAML block
+scalar, where the version that scheduled used single quotes. That is the single
+structural difference left, and it is one line to test.
 
 ---
 
@@ -147,3 +164,28 @@ is the reason it is worth remembering: it was deliberately not bundled with D2's
 since changing what `format:check` says about a file the bisect is editing makes the
 bisect harder to read. Sequencing a one-line fix away from a diagnostic is sometimes the
 right call and sometimes cowardice; this one was cheap enough to do immediately after.
+
+---
+
+## D6 — The audit retention window is unset, on purpose
+
+**Status:** open, needs a policy decision · **Raised:** 2026-09-28
+
+Phase 7 shipped the MECHANISM and deliberately did not ship the NUMBER.
+`AUDIT_RETENTION_DAYS` has no default; the pruner deletes nothing while it is unset and
+the API logs that on every boot, so the fact is visible rather than buried in a config
+default.
+
+**The trade-off, stated plainly: the `AuditEvent` table grows without bound until someone
+decides.** That is the correct default for a compliance record — silently deleting an
+audit row because nobody configured a number is the failure mode nobody can undo — but it
+is still a decision being deferred, and a real deployment will hit it.
+
+**What would unblock it.** A number, from whoever owns data retention: how long an
+audit trail must survive for this school, and whether an expunged row should be deleted
+or tombstoned. Note that Phase 8 made `AuditEvent` genuinely append-only with a trigger,
+so "prune" is now a privileged act rather than a side effect, and the pruner declares
+itself (`skillwright.audit_prune`) so the act is distinguishable in its own log.
+
+**Not decided, and worth deciding with it:** whether a `Notification` deserves the same
+treatment. Nothing sweeps notifications either.
