@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { ArrowLeft, SendHorizonal } from 'lucide-react';
+import { ArrowLeft, SendHorizonal, UserRoundPlus } from 'lucide-react';
 import { ulid } from 'ulid';
 /*
  * The two response envelopes, taken from the package that DEFINES them.
@@ -19,8 +19,10 @@ import { api } from '@/lib/api';
 import { qk } from '@/lib/query';
 import { cn } from '@/lib/cn';
 import { useSession } from '@/lib/session';
+import { useCan } from '@/lib/policy';
 import { formatRelative, formatTime } from '@/lib/format';
 import type { ConversationDto, MessageDto, ParticipantDto, SendMessageInput } from '@/lib/types';
+import { AddParticipantDialog } from '@/components/conversations/AddParticipantDialog';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button, IconButton } from '@/components/ui/Button';
@@ -51,6 +53,26 @@ export function MessagesPage() {
   // this page does not own that route file. A page flip is not a link anyone needs
   // to share, so component state is the right home for it.
   const [page, setPage] = useState(1);
+
+  /*
+   * THE OPEN THREAD'S ROSTER, HELD SEPARATELY FROM THE LIST, and the reason is
+   * that there is no `GET /conversations/:conversationId`.
+   *
+   * The read routes on this module are `GET /conversations` (the list),
+   * `/:id/messages` and `/:id/read` — and the last of those answers with the
+   * REFRESHED conversation, which is how the badge below is reconciled by
+   * `writeConversationRow`. So the membership of a thread is knowable from exactly
+   * one place in the SPA, and that place is the page. A `?conversationId=` link to
+   * a thread on another page of the list, or a roster that has just gained a
+   * participant, would both leave this state stale if it were derived from the
+   * current list page alone.
+   *
+   * `null` means "not loaded" and is DIFFERENT from "loaded and empty": the header
+   * falls back to the generic label rather than claiming a thread has nobody in
+   * it, which is the failure a `?? []` would produce.
+   */
+  const [thread, setThread] = useState<ConversationDto | null>(null);
+  const queryClient = useQueryClient();
 
   /*
    * No `enabled: policy.can('conversation:read')` here, deliberately — the client-side
@@ -89,6 +111,25 @@ export function MessagesPage() {
 
   const open = (id: string | undefined) =>
     void navigate({ search: id ? { conversationId: id } : {} });
+
+  /*
+   * Seed the open thread's roster from the list, and let the SERVER overwrite it
+   * whenever the list itself changes.
+   *
+   * The effect is on `conversations.data` rather than on the query, so it runs when
+   * a new page object arrives and not on every render, and `setThread(found)` is
+   * called with a row the list already holds rather than a copy — so the 30-second
+   * poll is what keeps a thread whose membership changed on another device honest.
+   * Nothing writes `thread` back into the list cache, so the two cannot ping-pong.
+   */
+  useEffect(() => {
+    if (!conversationId) {
+      setThread(null);
+      return;
+    }
+    const found = conversations.data?.data.find((row) => row.id === conversationId);
+    if (found) setThread(found);
+  }, [conversationId, conversations.data]);
 
   return (
     <div className="flex flex-col">
@@ -200,7 +241,23 @@ export function MessagesPage() {
           className={cn(conversationId ? 'flex flex-col' : 'hidden md:flex md:flex-col')}
         >
           {conversationId ? (
-            <Thread conversationId={conversationId} onBack={() => open(undefined)} />
+            <Thread
+              conversationId={conversationId}
+              conversation={thread}
+              onBack={() => open(undefined)}
+              onRosterChange={(updated) => {
+                setThread(updated);
+                /*
+                 * The endpoint answers with the refreshed conversation, so the LIST
+                 * row is written from the same object the header is — rather than
+                 * leaving the list to redraw the membership it just changed on its
+                 * next 30-second poll. It is the same `writeConversationRow` the
+                 * read receipt uses, deliberately: one function, two callers, one
+                 * definition of which cache entries hold a conversation page.
+                 */
+                writeConversationRow(queryClient, updated);
+              }}
+            />
           ) : (
             <EmptyState
               variant="empty"
@@ -299,7 +356,24 @@ function isConversationPage(data: unknown): data is Paginated<ConversationDto> {
   );
 }
 
-function Thread({ conversationId, onBack }: { conversationId: string; onBack: () => void }) {
+function Thread({
+  conversationId,
+  conversation,
+  onBack,
+  onRosterChange,
+}: {
+  conversationId: string;
+  /**
+   * The open thread's row from the list, or `null` when the id came from a
+   * deep link and the thread is not on the page that is loaded. `null` degrades
+   * the header to a generic label and hides the participant list — it never
+   * claims a thread has nobody in it, which is what `?? []` would render.
+   */
+  conversation: ConversationDto | null;
+  onBack: () => void;
+  /** Writes a refreshed conversation back to the page, so the header updates. */
+  onRosterChange: (conversation: ConversationDto) => void;
+}) {
   const { user } = useSession();
   const client = useQueryClient();
   const [draft, setDraft] = useState('');
@@ -542,6 +616,39 @@ function Thread({ conversationId, onBack }: { conversationId: string; onBack: ()
     send.mutate({ content, clientMsgId });
   };
 
+  /*
+   * `conversation:join` is SUBJECT-INDEPENDENT — anonymous deny, STUDENT deny,
+   * TEACHER deny, ADMIN allow, every cell a terminal rule reading no Subject field
+   * ("Self-joining an arbitrary thread is the whole attack. Only an admin adds a
+   * participant, and only to a thread that already exists"). So a bare `can()` with
+   * no subject is not a shortcut here, it is the complete gate, and passing one
+   * would only invent a way for the two to disagree.
+   *
+   * It is asked on the PAGE rather than passed in, because the page is where
+   * `useSession` already lives and the action does not depend on which thread is
+   * open — an admin may seat somebody into a thread they are not themselves seated
+   * in, which is exactly what the service's `lastMessage: null` branch above is
+   * written for.
+   */
+  const canAddParticipant = useCan('conversation:join');
+  const [adding, setAdding] = useState(false);
+
+  /*
+   * The header names the thread. It used to say the literal word "Conversation"
+   * on every thread, which is the one piece of information a messaging screen has
+   * no other way to give: the list row is above it on a desktop and BEHIND it on
+   * a phone, so below `md` the person reading the messages had nothing but a
+   * back arrow telling them whose they were. The label is the same one the list
+   * builds — a title, else the seated counterparts' names joined — so the two
+   * cannot disagree about what a thread is called.
+   */
+  const label = conversation
+    ? (conversation.title ??
+      counterparts(conversation, user?.id)
+        .map((participant) => participant.user.name)
+        .join(', '))
+    : '';
+
   return (
     <div className="flex flex-col rounded-[var(--card-radius)] border border-[var(--card-border)] bg-[var(--card-bg)]">
       <div className="flex items-center gap-2 border-b border-line-subtle p-2">
@@ -551,8 +658,51 @@ function Thread({ conversationId, onBack }: { conversationId: string; onBack: ()
           onClick={onBack}
           className="md:hidden"
         />
-        <span className="truncate text-sm font-semibold">Conversation</span>
+        {/*
+          The label is a BUTTON for an admin and plain text for everybody else, from
+          one piece of state: the dialog is the only thing behind it, and a control
+          that does nothing for the nine people out of ten who cannot use it is the
+          affordance-that-lies this repository keeps finding. The two are also
+          distinguishable to a screen reader — a button announces as a button, which
+          is what "you can add somebody here" means.
+        */}
+        {canAddParticipant ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setAdding(true)}
+            className="min-w-0 flex-1 justify-start px-1"
+            aria-label={`Add someone to ${label || 'this conversation'}`}
+          >
+            <UserRoundPlus aria-hidden="true" className="size-4 shrink-0" />
+            <span className="truncate">{label || 'Conversation'}</span>
+          </Button>
+        ) : (
+          <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+            {label || 'Conversation'}
+          </span>
+        )}
       </div>
+
+      {/*
+        Mounted whenever the trigger has been used, and with an EMPTY roster when
+        the thread is not on the list page that is loaded. The dialog still works
+        in that state: it names who is already in the thread by excluding them from
+        the candidates, and an unknown roster means nobody is excluded — while the
+        endpoint is an UPSERT that re-seats somebody who has left. Gating the
+        dialog on the roster instead would have made the trigger open nothing at
+        all for a deep link, which is the affordance-that-lies problem one level
+        worse.
+      */}
+      {adding ? (
+        <AddParticipantDialog
+          conversationId={conversationId}
+          participants={conversation?.participants ?? []}
+          open={adding}
+          onOpenChange={setAdding}
+          onUpdated={onRosterChange}
+        />
+      ) : null}
 
       <div className="scroll-y flex flex-col gap-2 p-3 [block-size:55dvh] md:[block-size:60dvh]">
         {messages.isPending ? (

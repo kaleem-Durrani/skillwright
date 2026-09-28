@@ -200,6 +200,33 @@ export type {
 export type { CommentDto } from '@skillwright/shared/schema';
 
 // ---------------------------------------------------------------------------
+// Certificates
+// ---------------------------------------------------------------------------
+
+/**
+ * `CertificateDto` is the holder's record of a qualification. Two things are worth
+ * knowing before a screen renders it.
+ *
+ * There is NO field naming the holder. The certificate belongs to whoever is looking
+ * at it — the DTO is served by a route that self-scopes to the caller — and the public
+ * verify response carries a name because that route has no caller to scope to. Adding
+ * a `studentId` here would put every student's account id on a payload a teacher reads.
+ *
+ * `revokedAt` and `revokedReason` are the whole of the revocation on this DTO, and
+ * `revokedBy` is who did it. A revoked certificate is still here, still downloadable
+ * and still verified by the public route — it says `revoked: true` — so a screen must
+ * render the state rather than hide the row.
+ */
+export type {
+  CertificateDto,
+  CertificateList,
+  CertificateReference,
+  QualificationDto,
+  QualificationList,
+  VerifyResult,
+} from '@skillwright/shared/schema';
+
+// ---------------------------------------------------------------------------
 // Conversations and messages
 // ---------------------------------------------------------------------------
 

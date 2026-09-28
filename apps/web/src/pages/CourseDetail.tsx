@@ -42,6 +42,9 @@ import { MessageTeacherButton } from '@/components/courses/MessageTeacherButton'
 import { RegisterExportButtons } from '@/components/courses/RegisterExportButtons';
 import { ViewerSeatActions } from '@/components/courses/ViewerSeatActions';
 import { AssignmentsPanel } from '@/components/assignments/AssignmentsPanel';
+import { EnrollmentCertificateActions } from '@/components/certificates/EnrollmentCertificateActions';
+import { IssueCertificateDialog } from '@/components/certificates/IssueCertificateDialog';
+import { QualificationsPanel } from '@/components/certificates/QualificationsPanel';
 import { ResourceFormDialog } from '@/components/resources/ResourceFormDialog';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button, IconButton } from '@/components/ui/Button';
@@ -217,6 +220,17 @@ export function CourseDetailPage() {
    * cell decides on the role alone.
    */
   const isStudent = user?.role === 'STUDENT';
+
+  /**
+   * The seat a certificate dialog is open for, or `null`.
+   *
+   * One value rather than an `open` boolean beside a nullable row, for the reason
+   * `resourceForm` above gives: there is no way to represent an open dialog that is
+   * neither creating nor editing, which is the state a stale `setOpen(true)` produces.
+   * The dialog is remounted per target by `key` below, so it never opens holding the
+   * previous student's name.
+   */
+  const [issuingFor, setIssuingFor] = useState<EnrollmentDto | null>(null);
 
   /**
    * The resource form's target in ONE value: `null` is closed, `'new'` is create, and a
@@ -602,6 +616,27 @@ export function CourseDetailPage() {
             to gate on; what this tab shows is simply what the API serves.
           */}
           <TabsTrigger value="assignments">Assignments</TabsTrigger>
+          {/*
+            The student's own record of what they have been awarded, and the end of the
+            chain this page otherwise stops one step short: seat, attend, submit,
+            assessed, completed — and then nowhere to record the outcome.
+
+            SHOWN TO STUDENTS BY A ROLE READ, and that is worth being explicit about,
+            because the rule against role reads is about AUTHORIZATION and this is not
+            one. `certificate:read` is subject-dependent (`isEnrolledStudent` for a
+            student, `or(ownsCourse, isAuthor)` for a teacher), so there is no subject
+            this tab could be gated on and a bare `can()` would deny every viewer — the
+            panel underneath self-scopes on the server exactly as the Assignments tab
+            does, and its own comment says why.
+
+            The read is here to decide what the page is FOR, not who may use it: a
+            certificate is a student's record, and a teacher's reader of somebody else's
+            is a per-student screen that does not exist yet. That is Phase 5's
+            `GET /users/:id` gap, and faking it here — showing a teacher a list of
+            certificates with no student on any of them, because the DTO deliberately
+            carries no holder — would be a tab that answers no question.
+          */}
+          {isStudent ? <TabsTrigger value="qualifications">Qualifications</TabsTrigger> : null}
           {policy.can('enrollment:read', viewerSubject) ? (
             <TabsTrigger value="students" count={pendingCount}>
               Students
@@ -807,6 +842,12 @@ export function CourseDetailPage() {
           <AssignmentsPanel course={data} offering={selectedOffering} />
         </TabsContent>
 
+        {isStudent ? (
+          <TabsContent value="qualifications">
+            <QualificationsPanel />
+          </TabsContent>
+        ) : null}
+
         {policy.can('enrollment:read', viewerSubject) ? (
           <TabsContent value="students">
             {/*
@@ -893,7 +934,23 @@ export function CourseDetailPage() {
                   cell: (entry) => (
                     <div className="flex items-center gap-2.5">
                       <Avatar name={entry.student.name} src={entry.student.avatarUrl} size="sm" />
-                      <span className="truncate font-medium text-fg">{entry.student.name}</span>
+                      {/*
+                        The name opens `GET /enrollments/:id` — the seat's own page,
+                        with the decision record and the attendance summary. The
+                        avatar beside it stays plain: `user:read` is `isSelf` for a
+                        teacher, so a link to `/users/$id` here would be an
+                        affordance that renders on this very roster and then answers
+                        403 to the teacher looking at it. `EnrollmentDto.student` is
+                        a `UserSummary` and carries no email, which is the right
+                        amount to know about somebody from a roster.
+                      */}
+                      <Link
+                        to="/enrollments/$id"
+                        params={{ id: entry.id }}
+                        className="tap -my-2 flex items-center rounded-[var(--control-radius)] px-1 font-medium text-fg hover:underline focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-focus"
+                      >
+                        <span className="truncate">{entry.student.name}</span>
+                      </Link>
                     </div>
                   ),
                 },
@@ -936,13 +993,20 @@ export function CourseDetailPage() {
                     disabled={decide.isPending || !policy.can('enrollment:approve', viewerSubject)}
                   />
                 ) : (
-                  <EnrollmentCompletionActions
-                    entry={entry}
-                    course={data}
-                    pending={decide.isPending}
-                    onComplete={(id) => decide.mutate({ id, action: 'complete' })}
-                    onUncomplete={(id) => decide.mutate({ id, action: 'uncomplete' })}
-                  />
+                  <div className="flex items-center justify-end gap-2">
+                    <EnrollmentCertificateActions
+                      entry={entry}
+                      course={data}
+                      onIssue={setIssuingFor}
+                    />
+                    <EnrollmentCompletionActions
+                      entry={entry}
+                      course={data}
+                      pending={decide.isPending}
+                      onComplete={(id) => decide.mutate({ id, action: 'complete' })}
+                      onUncomplete={(id) => decide.mutate({ id, action: 'uncomplete' })}
+                    />
+                  </div>
                 )
               }
               renderCard={(entry) => (
@@ -950,7 +1014,13 @@ export function CourseDetailPage() {
                   <div className="flex items-start gap-3">
                     <Avatar name={entry.student.name} src={entry.student.avatarUrl} size="md" />
                     <div className="flex min-w-0 flex-1 flex-col">
-                      <span className="truncate text-sm font-medium">{entry.student.name}</span>
+                      <Link
+                        to="/enrollments/$id"
+                        params={{ id: entry.id }}
+                        className="tap -my-2 flex items-center rounded-[var(--control-radius)] px-1 text-sm font-medium hover:underline focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-focus"
+                      >
+                        <span className="truncate">{entry.student.name}</span>
+                      </Link>
                       <span className="truncate text-2xs text-fg-tertiary">
                         Intake {formatOfferingDates(entry.offering)} · requested{' '}
                         {formatRelative(entry.requestedAt)}
@@ -977,14 +1047,29 @@ export function CourseDetailPage() {
                       disabled={decide.isPending}
                     />
                   ) : entry.status === 'PENDING' ? null : (
-                    <EnrollmentCompletionActions
-                      block
-                      entry={entry}
-                      course={data}
-                      pending={decide.isPending}
-                      onComplete={(id) => decide.mutate({ id, action: 'complete' })}
-                      onUncomplete={(id) => decide.mutate({ id, action: 'uncomplete' })}
-                    />
+                    <div className="flex flex-col gap-2">
+                      <EnrollmentCompletionActions
+                        block
+                        entry={entry}
+                        course={data}
+                        pending={decide.isPending}
+                        onComplete={(id) => decide.mutate({ id, action: 'complete' })}
+                        onUncomplete={(id) => decide.mutate({ id, action: 'uncomplete' })}
+                      />
+                      {/*
+                        The card's PRIMARY rendering, not a fallback — see the component's
+                        own header. `EnrollmentCompletionActions` is `block` here and the
+                        certificate control sits under it rather than beside it, because
+                        at 375px a card's action area is one column and two side-by-side
+                        controls would put two 44px targets where a thumb expects one.
+                      */}
+                      <EnrollmentCertificateActions
+                        block
+                        entry={entry}
+                        course={data}
+                        onIssue={setIssuingFor}
+                      />
+                    </div>
                   )}
                 </Card>
               )}
@@ -1032,6 +1117,26 @@ export function CourseDetailPage() {
         onConfirm={(reason) =>
           rejecting && decide.mutate({ id: rejecting.id, action: 'reject', reason })
         }
+      />
+
+      {/*
+        The last dialog on this page, and the only one whose target is chosen by a row
+        action rather than by a form. It owns its own mutation, its own catalogue fetch
+        and its own invalidation, so this component decides only WHICH SEAT it is pointed
+        at — the same division `ResourceFormDialog` has below.
+      */}
+      <IssueCertificateDialog
+        // `issue-` prefixed, and that is not a style choice. `RejectDialog` above is a
+        // SIBLING keyed on the same `'none'` sentinel while both dialogs are closed, and
+        // React warned about two children sharing a key the first time this was run —
+        // a dialog that remounts itself unpredictably is a dialog that opens holding the
+        // previous request's state.
+        key={`issue-${issuingFor?.id ?? 'none'}`}
+        open={issuingFor !== null}
+        onOpenChange={(open) => !open && setIssuingFor(null)}
+        enrollmentId={issuingFor?.id ?? ''}
+        studentName={issuingFor?.student.name ?? ''}
+        courseName={issuingFor?.course.name ?? data.name}
       />
 
       {/*

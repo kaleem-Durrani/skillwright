@@ -150,6 +150,19 @@ export const qk = {
   enrollmentAttendance: (enrollmentId: string) =>
     ['enrollments', enrollmentId, 'attendance'] as QueryKey,
   enrollments: (params: Record<string, unknown> = {}) => ['enrollments', params] as QueryKey,
+  /*
+   * The single enrolment row behind `routes/_app/enrollments.$id.tsx`, and it
+   * deliberately shares the `enrollments` HEAD with the list above and with
+   * `enrollmentAttendance` rather than getting a head of its own.
+   *
+   * Every write to a seat — approve, reject, withdraw, complete — already
+   * invalidates the `['enrollments']` prefix (CourseDetail.tsx's `decide`), so a
+   * detail page reading and writing this slot is swept by the same call that
+   * refreshes the roster it was opened from. A key the writes do not reach would
+   * make the detail page the one screen in the app that can disagree with the list
+   * behind it.
+   */
+  enrollment: (enrollmentId: string) => ['enrollments', enrollmentId] as QueryKey,
   // Single-row key, distinct from `resources()` for the same reason `course` sits
   // beside `courses`: `routes/_app/resources.$resourceId.tsx`'s loader and any
   // detail screen need to invalidate or read ONE row without knowing what filters
@@ -183,9 +196,40 @@ export const qk = {
   // the detail screen need to invalidate or read ONE row without knowing what
   // filters the list was under.
   announcement: (announcementId: string) => ['announcements', announcementId] as QueryKey,
+  /*
+   * Two key spaces under `certificates`, and the split is the same one the module makes.
+   *
+   *   - `certificates(studentId?)` is the LIST the Qualifications tab reads. It is
+   *     self-scoped for a student, and the filter is in the key so switching which
+   *     student a teacher is reading is a fetch rather than a stale read.
+   *   - `certificate(certificateId)` is ONE row, for the signed-URL download. It is a
+   *     separate segment beside the list for the reason `course` sits beside `courses`:
+   *     a detail reader must be able to name one row without knowing what filters the
+   *     list was under.
+   *
+   * A blanket `['certificates']` invalidation after an issue reaches both, which is what
+   * the issue dialog does — issuing changes the holder's list and nobody else's, and the
+   * prefix is cheaper to get right than enumerating the two.
+   */
+  certificates: (studentId?: string) =>
+    ['certificates', 'list', ...(studentId === undefined ? [] : [studentId])] as QueryKey,
+  certificate: (certificateId: string) => ['certificates', 'detail', certificateId] as QueryKey,
   conversations: ['conversations'] as QueryKey,
   messages: (conversationId: string) => ['conversations', conversationId, 'messages'] as QueryKey,
   users: (params: Record<string, unknown> = {}) => ['users', params] as QueryKey,
+  /*
+   * The single account behind `routes/_app/users.$id.tsx` — `GET /users/:id`, which
+   * had a route, a policy gate and a complete DTO and no caller in the SPA at all.
+   *
+   * Same head as the admin table above, and for the same reason
+   * `department(departmentId)` sits beside `departments()`: suspending or
+   * reinstating a row sweeps `['users']`, so the detail page and the table it was
+   * opened from can never show two different statuses for one person.
+   *
+   * A blanket `['users']` invalidation also reaches it, which matters because
+   * `PATCH /users/:id` writes exactly this row.
+   */
+  user: (userId: string) => ['users', userId] as QueryKey,
   departments: ['departments'] as QueryKey,
   // Single-row key under the same head as the list above, for the same reason
   // `course` sits beside `courses`: `routes/_app/departments.$id.tsx` and the

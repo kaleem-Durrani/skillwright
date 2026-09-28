@@ -219,6 +219,28 @@ export function useMfaVerify() {
   });
 }
 
+/**
+ * Everything that has to happen after EITHER sign-out, extracted so the two
+ * mutations cannot drift.
+ *
+ * The body of this function was the `onSettled` of `useLogout` verbatim, and the
+ * alternative — a second copy for `POST /auth/logout-all` — is how a screen ends
+ * up with a "sign out everywhere" that navigates differently, or does not clear
+ * the cache, or leaves the shell standing over the login form. The argument notes
+ * on `useLogout` below are the argument for all of it; they moved with the code
+ * rather than being restated, because a comment that sits above a shared function
+ * and a comment that sits above one of two callers are the same comment and only
+ * one of them is true.
+ */
+function endSession(
+  client: ReturnType<typeof useQueryClient>,
+  navigate: ReturnType<typeof useNavigate>,
+): void {
+  client.setQueryData(qk.session, { user: null } satisfies SessionResponse);
+  client.removeQueries({ predicate: (query) => query.queryKey[0] !== 'session' });
+  void navigate({ to: '/login' });
+}
+
 export function useLogout() {
   const client = useQueryClient();
   const navigate = useNavigate();
@@ -287,9 +309,38 @@ export function useLogout() {
      * session is a data leak the next user on a shared workshop machine sees.
      */
     onSettled: () => {
-      client.setQueryData(qk.session, { user: null } satisfies SessionResponse);
-      client.removeQueries({ predicate: (query) => query.queryKey[0] !== 'session' });
-      void navigate({ to: '/login' });
+      endSession(client, navigate);
+    },
+  });
+}
+
+/**
+ * `POST /auth/logout-all` — revoke EVERY session this account holds, on every
+ * device, not just the one that is asking.
+ *
+ * The route has existed since the auth module did (`auth.routes.ts`, bound to
+ * `authService.logoutAll`, which destroys every `Session` row for the user and
+ * returns the count it removed). It had no caller in the SPA at all, and the
+ * Settings screen told people to do the thing it would not do: the Sessions card
+ * read "Sign out everywhere if you have used a shared workshop machine" above a
+ * button labelled **Sign out**, which revokes exactly one session — this browser's.
+ * That is the Messages empty-state class of lie (the roadmap calls it "a copy is a
+ * lie"), one screen over, and the honest fix is the button rather than the
+ * sentence: the sentence is a correct description of what somebody on a shared
+ * machine needs, and the capability was already on the server.
+ *
+ * `onSettled` and not `onSuccess`, and for the reason `useLogout` gives: a network
+ * blip on the way out must still empty THIS browser, because a cache entry that
+ * outlives its session is the data leak the next person on that machine sees. The
+ * difference between the two hooks is then only the URL, and the body is shared.
+ */
+export function useLogoutAll() {
+  const client = useQueryClient();
+  const navigate = useNavigate();
+  return useMutation({
+    mutationFn: () => api.post<{ revoked: number }>('/auth/logout-all'),
+    onSettled: () => {
+      endSession(client, navigate);
     },
   });
 }

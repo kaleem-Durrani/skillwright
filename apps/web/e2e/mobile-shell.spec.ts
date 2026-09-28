@@ -79,6 +79,64 @@ const departmentDetail = {
 };
 
 /**
+ * The two detail records Phase 5 added, built from the same exported helpers as
+ * everything else above.
+ *
+ * `userDetails(n, role)` is `fixtures.ts`'s own factory and already carries every
+ * field `userDetailSchema` declares, so the user detail page gets a real record
+ * rather than a list envelope. The enrolment has to be hand-written: no fixture
+ * exports one, and a catch-all `paginated([])` handed to a page that calls
+ * `.student.name` renders its error state — which holds one button, and a
+ * 44px assertion over one button is a rule about nothing.
+ */
+const userDetailRecord = {
+  ...userDetails(2, 'STUDENT'),
+  phoneNumber: '+44 161 555 0142',
+  bio: 'Runs the Thursday evening workshop.',
+  mfaEnabled: true,
+  lastLoginAt: nowIso,
+  studentProfile: {
+    departmentId: 'dep-2',
+    departmentName: 'Fabrication',
+    enrollmentNo: 'ENR-0099',
+    enrolledOn: nowIso,
+  },
+};
+
+const enrollmentDetail = {
+  id: 'e-1',
+  status: 'APPROVED',
+  student: { id: 'u-2', name: 'Person 2', role: 'STUDENT', avatarUrl: null },
+  course: {
+    id: 'c-1',
+    code: 'WELD-101',
+    slug: 'course-1',
+    name: courseDetail.name,
+    department,
+    teacher: { id: 'u-1', name: 'Person 1', role: 'TEACHER', avatarUrl: null },
+    duration: { value: 6, unit: 'WEEK' },
+    publishedAt: nowIso,
+  },
+  offering: {
+    id: 'off-1',
+    startDate: nowIso,
+    endDate: null,
+    capacity: 20,
+    workshopCapacity: 8,
+    approvedCount: 2,
+    seatsRemaining: 18,
+    isFull: false,
+    workshopSeatsRemaining: 6,
+  },
+  requestedAt: nowIso,
+  decidedAt: nowIso,
+  decidedBy: { id: 'u-1', name: 'Person 1', role: 'TEACHER', avatarUrl: null },
+  decisionNote: 'Portfolio accepted in place of the certificate.',
+  completedAt: null,
+  completedBy: null,
+};
+
+/**
  * `fixtures.ts`' `stubApi`, plus the three detail endpoints it does not carry.
  *
  * The catch-all in the shared stub answers `paginated([])`, and a detail screen
@@ -133,6 +191,17 @@ async function stubApi(page: Page, signedIn: boolean): Promise<void> {
     if (path === '/courses/c-1') return json(courseDetail);
     if (path === '/courses/c-1/resources') return json(paginated([resource]));
     if (path === '/resources/r-1') return json(resource);
+    /*
+     * Phase 5's two new detail routes. They are here rather than only in
+     * `phase5-holes.spec.ts` because this file is what the mobile-first contract
+     * is measured by, and a new page that is not in `ROUTES` is a page nobody has
+     * measured — which is the exact gap the ROUTES list exists to close.
+     */
+    if (path === '/users/u-1') return json(userDetailRecord);
+    if (path === '/enrollments/e-1') return json(enrollmentDetail);
+    if (path === '/enrollments/e-1/attendance') {
+      return json({ counts: { PRESENT: 3, ABSENT: 1, LATE: 0 }, total: 4, recent: [] });
+    }
     if (path === '/announcements') return json(paginated([announcement]));
     if (path === '/announcements/a-1') return json(announcement);
 
@@ -173,6 +242,20 @@ const ROUTES: LeafRoute[] = [
   { path: '/search', signedIn: true, minControls: 2 },
   { path: '/settings', signedIn: true, minControls: 4 },
   { path: '/departments/dep-1', signedIn: true, minControls: 4 },
+  /*
+   * Phase 5's two detail pages, on exactly the same two rules as every other
+   * route above — which is the point of this list being every leaf route rather
+   * than a selection: a new page that is not in it is a page nobody measured.
+   *
+   * `minControls` COUNTED, not guessed, from the rendered accessibility tree at
+   * 375px: the shell's own controls plus this page's. Five here against four for
+   * the enrolment is the difference between a page that has an Edit action and
+   * one that does not, and it is the number that stops the 44px rule passing
+   * vacuously over an error state — which holds one button and would satisfy both
+   * rules with nothing measured.
+   */
+  { path: '/users/u-1', signedIn: true, minControls: 5 },
+  { path: '/enrollments/e-1', signedIn: true, minControls: 4 },
   { path: '/admin', signedIn: true, minControls: 4 },
   { path: '/admin/users', signedIn: true, minControls: 4 },
   { path: '/admin/courses', signedIn: true, minControls: 4 },

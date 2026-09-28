@@ -19,7 +19,7 @@
  */
 import type { ReactNode } from 'react';
 import type { SessionUser } from '@/lib/session';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent, { type UserEvent } from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -172,7 +172,14 @@ beforeEach(() => {
 
 function renderPage(
   served: CourseDetail = course(),
-  options: { viewer?: SessionUser; mine?: unknown; offeringTasks?: unknown[] } = {},
+  options: {
+    viewer?: SessionUser;
+    mine?: unknown;
+    offeringTasks?: unknown[];
+    certificates?: unknown;
+    qualifications?: unknown;
+    roster?: unknown;
+  } = {},
 ): void {
   apiGet.mockImplementation((path) => {
     if (path === `/courses/${COURSE_ID}`) return Promise.resolve(served);
@@ -183,6 +190,17 @@ function renderPage(
     // no envelope and no pager: a task list is as long as the intake is).
     if (path.startsWith('/offerings/') && path.endsWith('/assignments')) {
       return Promise.resolve(options.offeringTasks ?? []);
+    }
+    // Phase 3. The certificate list self-scopes, so the Qualifications tab asks for it
+    // with no filter at all; the catalogue is a bare array for the same reason the
+    // per-intake task list is.
+    if (path === '/certificates') {
+      return Promise.resolve(options.certificates ?? { data: [] });
+    }
+    if (path === '/qualifications') return Promise.resolve(options.qualifications ?? []);
+    // The students tab's roster, which the Phase 3 row action hangs off.
+    if (path === `/courses/${COURSE_ID}/enrollments`) {
+      return Promise.resolve(options.roster ?? EMPTY_PAGE);
     }
     // The resources tab's list; everything else this page might ask for is noise.
     return Promise.resolve(EMPTY_PAGE);
@@ -1229,5 +1247,147 @@ describe('CourseDetail assignments — a teacher', () => {
 
     await screen.findByText('No tasks on this intake yet');
     expect(screen.queryByRole('button', { name: 'Set a task' })).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Certificates — Phase 3: the Qualifications tab, and issuing from a finished seat
+// ---------------------------------------------------------------------------
+
+/**
+ * The Phase 1 block above already declares a `COMPLETED_PAGE` fixture, and this one
+ * REUSES it rather than declaring a second that says the same thing with a different
+ * date. Two fixtures for one state is how a test ends up asserting against a shape the
+ * wire cannot produce, and the reader of the second learns nothing the first did not
+ * say.
+ */
+
+const CERTIFICATE = {
+  id: '01JGXDFAM0K2Z1GYCSNM5F5RE1',
+  reference: '9F2A7C4B1D6E8A035C7B9D2E4K6P',
+  issuedAt: '2026-09-20T09:00:00.000Z',
+  issuedBy: { id: TEACHER_ID, name: 'Dana Okafor', role: 'TEACHER', avatarUrl: null },
+  qualification: {
+    id: 'q-1',
+    code: 'cswip-31',
+    name: 'CSWIP 3.1 Welding Inspector',
+    level: '3',
+    awardingBody: 'BSI',
+  },
+  enrollmentId: ENROLLMENT_ID,
+  revokedAt: null,
+  revokedBy: null,
+  revokedReason: null,
+  artifact: {
+    id: 'up-1',
+    originalName: 'certificate-9F2A7C4B1D6E8A035C7B9D2E4K6P.pdf',
+    contentType: 'application/pdf',
+    sizeBytes: 3854,
+  },
+};
+
+const CATALOGUE = [
+  {
+    id: 'q-1',
+    code: 'cswip-31',
+    name: 'CSWIP 3.1 Welding Inspector',
+    level: '3',
+    awardingBody: 'BSI',
+  },
+];
+
+describe('CourseDetail — the Qualifications tab', () => {
+  it('is offered to a student, and fetches its own list when opened', async () => {
+    renderPage(course(), { certificates: { data: [CERTIFICATE] } });
+
+    const tab = await screen.findByRole('tab', { name: 'Qualifications' });
+    await userEvent.click(tab);
+
+    // The fetch is the assertion. This tab has NO policy gate — `certificate:read`
+    // reads `studentId` and `courseTeacherId` and this screen has neither, so a bare
+    // `can()` would deny every viewer and the panel would sit on its skeleton forever
+    // with no error and no log line (LESSONS-LEARNED #15). The list self-scopes on the
+    // server instead, and a regression that re-adds a gate would show up as this never
+    // resolving rather than as anything on screen.
+    await waitFor(() => expect(apiGet).toHaveBeenCalledWith('/certificates'));
+    expect(await screen.findByText('CSWIP 3.1 Welding Inspector')).toBeInTheDocument();
+  });
+
+  it('is not offered to a teacher, because a certificate is a student’s record', async () => {
+    renderPage(course(), { viewer: TEACHER_USER });
+
+    await screen.findByRole('heading', { level: 1, name: 'Welding Fundamentals' });
+    expect(screen.queryByRole('tab', { name: 'Qualifications' })).not.toBeInTheDocument();
+  });
+
+  it('says so plainly when there is nothing to show', async () => {
+    renderPage(course());
+    await userEvent.click(await screen.findByRole('tab', { name: 'Qualifications' }));
+
+    expect(await screen.findByText('No qualifications yet')).toBeInTheDocument();
+  });
+});
+
+describe('CourseDetail — issuing a certificate', () => {
+  beforeAll(() => {
+    for (const name of ['hasPointerCapture', 'setPointerCapture', 'releasePointerCapture']) {
+      Object.defineProperty(Element.prototype, name, {
+        value: () => false,
+        writable: true,
+        configurable: true,
+      });
+    }
+  });
+
+  it('offers the control on no APPROVED seat, because the API refuses one with a 409', async () => {
+    renderAttendance(course(), TEACHER_USER, {
+      [`/courses/${COURSE_ID}/enrollments`]: () => ROSTER_PAGE,
+      // The register is the tab's working surface and is stubbed here only so it does
+      // not crash on a response shape this file does not model — it is not what these
+      // tests are about, and the existing completion tests stub it for the same reason.
+      [`/courses/${COURSE_ID}/attendance`]: () => attendanceRegister('1970-01-01'),
+    });
+
+    await openStudentsTab();
+
+    // An APPROVED seat has not been completed, and a certificate is only ever conferred
+    // from a COMPLETED one. The affordance is not rendered at all rather than rendered
+    // and refused — the same reason `EnrollmentCompletionActions` offers Complete only
+    // where `ALLOWED_TRANSITIONS` permits it.
+    expect(screen.queryByRole('button', { name: 'Issue certificate' })).not.toBeInTheDocument();
+  });
+
+  it('opens a dialog naming the student, and posts the SEAT', async () => {
+    const user = userEvent.setup();
+    apiPost.mockResolvedValue(CERTIFICATE);
+    renderAttendance(course(), TEACHER_USER, {
+      [`/courses/${COURSE_ID}/enrollments`]: () => COMPLETED_PAGE,
+      [`/courses/${COURSE_ID}/attendance`]: () => attendanceRegister('1970-01-01'),
+      '/qualifications': () => CATALOGUE,
+    });
+
+    await openStudentsTab();
+    await user.click(await screen.findByRole('button', { name: 'Issue certificate' }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(
+      within(dialog).getByText(/Ada Okafor completed Welding Fundamentals/),
+    ).toBeInTheDocument();
+
+    const trigger = within(dialog).getByRole('combobox', { name: 'Qualification' });
+    await waitFor(() => expect(trigger).toBeEnabled());
+    trigger.focus();
+    await user.keyboard('{Enter}');
+    await user.click(await screen.findByRole('option', { name: /CSWIP 3.1/ }));
+    await user.click(within(dialog).getByRole('button', { name: 'Issue certificate' }));
+
+    await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
+    // The seat, not the student. A body carrying `studentId` would let a certificate be
+    // issued to somebody who never sat the course, and the service would have nothing
+    // to check that against.
+    expect(apiPost.mock.calls[0]?.[1]).toEqual({
+      enrollmentId: ENROLLMENT_ID,
+      qualificationId: 'q-1',
+    });
   });
 });

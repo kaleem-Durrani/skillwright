@@ -15,7 +15,7 @@ import { api, apiUrl } from '@/lib/api';
 import { qk } from '@/lib/query';
 import { subject, usePolicy } from '@/lib/policy';
 import { ApiError } from '@/lib/problem';
-import { useLogout, useSession } from '@/lib/session';
+import { useLogout, useLogoutAll, useSession } from '@/lib/session';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { AccountDeletionDialog } from '@/components/users/AccountDeletionDialog';
 import { AvatarPicker } from '@/components/settings/AvatarPicker';
@@ -507,6 +507,7 @@ function SecurityTab() {
   const policy = usePolicy();
   const client = useQueryClient();
   const logout = useLogout();
+  const logoutAll = useLogoutAll();
   const [deleting, setDeleting] = useState(false);
   // No `navigate` here any more. The Sign out button below used to hand a
   // per-call `onSettled` to `logout.mutate()`, and that handler rode the
@@ -828,24 +829,66 @@ function SecurityTab() {
 
       <Separator />
 
+      {/*
+        TWO BUTTONS, BECAUSE THERE ARE TWO ACTS.
+
+        The copy here used to read "Sign out everywhere if you have used a shared
+        workshop machine" above a single button labelled **Sign out**, which calls
+        `POST /auth/logout` and destroys ONE session — this browser's. The sentence
+        was a correct description of what somebody who has just left their seat on
+        a workshop machine needs to be told, and the button beside it did something
+        else. That is the Messages empty-state class of lie the roadmap names
+        ("`/messages`'s empty state says 'Start one from a course page' — and no
+        course page has the affordance. The copy is a lie."), and the fix there was
+        to build the affordance rather than to reword the sentence. The affordance
+        already existed: `POST /auth/logout-all` destroys every `Session` row for
+        the account and returns how many it removed.
+
+        So both are here, labelled for what each does, and the sentence is split
+        into the two claims it was really making. "Sign out" ends THIS session —
+        which is what you want nine times out of ten, and what the account menu's
+        Sign out already does. "Sign out everywhere" ends every one, including the
+        phone in your pocket, and is the one for a shared machine.
+
+        The second button is not behind a confirm dialog. It is reversible in the
+        only way that matters — you sign back in — and a dialog here would be one
+        more tap on a screen somebody opens precisely because they are already in a
+        hurry to hand the machine over. What it does NOT undo is the account being
+        locked out of a session an attacker holds, which is the reason to offer it.
+      */}
       <Card className="flex flex-col gap-4">
         <CardTitle>Sessions</CardTitle>
         <p className="text-sm text-fg-secondary">
-          Sign out everywhere if you have used a shared workshop machine.
+          Sign out on this device only, or everywhere if you have used a shared workshop machine.
         </p>
-        <Button
-          variant="danger"
-          block
-          className="sm:w-auto sm:self-start"
-          loading={logout.isPending}
-          // No per-call `onSettled` — see the note on the account menu's Sign out
-          // in AppShell.tsx. `useLogout` navigates itself, from the mutation's own
-          // `onSettled`, because a per-call handler rides the observer and this
-          // screen renders nothing once the session is gone (Settings.tsx:169).
-          onClick={() => logout.mutate(undefined)}
-        >
-          Sign out
-        </Button>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <Button
+            variant="secondary"
+            block
+            className="sm:w-auto sm:self-start"
+            loading={logout.isPending}
+            // No per-call `onSettled` — see the note on the account menu's Sign out
+            // in AppShell.tsx. `useLogout` navigates itself, from the mutation's own
+            // `onSettled`, because a per-call handler rides the observer and this
+            // screen renders nothing once the session is gone (Settings.tsx:169).
+            onClick={() => logout.mutate(undefined)}
+          >
+            Sign out
+          </Button>
+          <Button
+            variant="danger"
+            block
+            className="sm:w-auto sm:self-start"
+            loading={logoutAll.isPending}
+            // `logoutAll` shares `endSession` with `useLogout` rather than repeating
+            // it, so "everywhere" empties this browser's cache and navigates exactly
+            // the way "here" does. Two copies of that sequence is how one of them
+            // ends up leaving the shell standing over the login form.
+            onClick={() => logoutAll.mutate()}
+          >
+            Sign out everywhere
+          </Button>
+        </div>
       </Card>
 
       <Separator />

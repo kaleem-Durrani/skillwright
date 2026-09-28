@@ -6,6 +6,7 @@ import {
   Pencil,
   Plus,
   Search,
+  UserRound,
   UserRoundCheck,
   UserRoundX,
   UsersRound,
@@ -295,6 +296,7 @@ export function AdminUsersPage() {
         actions={(entry) => (
           <RowMenu
             user={entry}
+            onView={() => void navigate({ to: '/users/$id', params: { id: entry.id } })}
             onEdit={() => setEditing(entry)}
             onSuspend={() => setSuspending(entry)}
             onReinstate={() => reinstate.mutate(entry.id)}
@@ -324,6 +326,7 @@ export function AdminUsersPage() {
                 </div>
                 <RowMenu
                   user={entry}
+                  onView={() => void navigate({ to: '/users/$id', params: { id: entry.id } })}
                   onEdit={() => setEditing(entry)}
                   onSuspend={() => setSuspending(entry)}
                   onReinstate={() => reinstate.mutate(entry.id)}
@@ -441,11 +444,25 @@ export function AdminUsersPage() {
 
 function RowMenu({
   user,
+  onView,
   onEdit,
   onSuspend,
   onReinstate,
 }: {
   user: UserDetail;
+  /**
+   * Opens `GET /users/:id`.
+   *
+   * A CALLBACK rather than a `<Link>` in the row, and that is not a style
+   * preference. `DataTable` renders a real `<table>` from `md` up and a card list
+   * below it, so a link on the name would have to be written twice and would put a
+   * router dependency into every cell renderer this table has; the row menu is
+   * already the one place each row's actions live, and it renders in both
+   * layouts. The page owns the `navigate` and hands it down, which also means the
+   * navigation is testable without a mounted router — the reason this table's
+   * suite has never needed one.
+   */
+  onView: () => void;
   onEdit: () => void;
   onSuspend: () => void;
   onReinstate: () => void;
@@ -462,9 +479,17 @@ function RowMenu({
    * row keeps a suspended account's menu honest without a second subject build.
    */
   const canReinstate = policy.can('user:reinstate') && user.status === 'SUSPENDED';
+  /*
+   * `user:read` is asked with the row's own subject, not bare. Its ADMIN cell is a
+   * bare `allow` but its STUDENT and TEACHER cells are `isSelf` (policy.ts), so a
+   * subject-free call would be false for a teacher looking at a colleague — which is
+   * the LESSONS-LEARNED #15 trap in its other direction: it would hide the action
+   * from the one role that legitimately has it.
+   */
+  const canView = policy.can('user:read', target);
 
   // Nothing permitted means no menu at all — an empty menu is worse than none.
-  if (!canSuspend && !canUpdate && !canReinstate) return null;
+  if (!canView && !canSuspend && !canUpdate && !canReinstate) return null;
 
   return (
     <DropdownMenu>
@@ -476,6 +501,16 @@ function RowMenu({
         />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
+        {/*
+          FIRST, because it is the only READ-only item in a menu of writes, and an
+          admin opening a menu is far more often asking "who is this" than "change
+          this".
+        */}
+        {canView ? (
+          <DropdownMenuItem icon={<UserRound className="size-4" />} onSelect={onView}>
+            View account
+          </DropdownMenuItem>
+        ) : null}
         {/*
           This item was rendered with no `onSelect` behind it — a menu entry that
           looked available and did nothing, which is worse than its absence,

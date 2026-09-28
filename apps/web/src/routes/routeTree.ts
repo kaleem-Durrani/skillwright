@@ -17,6 +17,8 @@ import { Route as messagesRoute } from './_app/messages.js';
 import { Route as notificationsRoute } from './_app/notifications.js';
 import { Route as searchRoute } from './_app/search.js';
 import { Route as settingsRoute } from './_app/settings.js';
+import { Route as userDetailRoute } from './_app/users.$id.js';
+import { Route as enrollmentDetailRoute } from './_app/enrollments.$id.js';
 import { Route as adminLayout } from './_app/admin.js';
 import { Route as adminIndexRoute } from './_app/admin.index.js';
 import { Route as adminUsersRoute } from './_app/admin.users.js';
@@ -59,6 +61,18 @@ export const routeTree = rootRoute.addChildren([
     // A department detail is reachable by any signed-in role, so it hangs off the
     // app layout beside the course detail — not inside the admin-only subtree.
     departmentDetailRoute,
+    /*
+     * The same argument for both of these, and it is the reason they are not under
+     * the admin subtree. `user:read` is `isSelf` for a student and a teacher, so
+     * `/users/$id` is a page they may legitimately open — their own. `enrollment:read`
+     * is `isEnrolledStudent` for a student, so `/enrollments/$id` is the page a
+     * student opens for their own seat. Filing either under `/admin` would make
+     * the `_app` guard and the policy matrix disagree about who each is for, and
+     * the disagreement would be silent until somebody was redirected away from a
+     * page the API would have served them.
+     */
+    userDetailRoute,
+    enrollmentDetailRoute,
     adminLayout.addChildren([
       adminIndexRoute,
       adminUsersRoute,

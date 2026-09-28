@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { MAX_PAGE_SIZE, withdrawEnrollmentSchema } from '@skillwright/shared/schema';
 import { api, type Paginated } from '@/lib/api';
@@ -174,7 +175,19 @@ function ViewerSeatCard({
   return (
     <Card className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex min-w-0 flex-col gap-1">
-        <span className="text-sm font-medium">{formatOfferingDates(row.offering)}</span>
+        {/*
+          The intake dates open `GET /enrollments/:id` — the seat's own page, with
+          who decided it and when. A link and not a button, because there is nothing
+          to confirm: it is a record to read, and a card whose only control opened a
+          record would be a button wearing a record's clothes.
+        */}
+        <Link
+          to="/enrollments/$id"
+          params={{ id: row.id }}
+          className="tap -my-2 flex w-fit items-center rounded-[var(--control-radius)] px-1 text-sm font-medium hover:underline focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-focus"
+        >
+          <span className="truncate">{formatOfferingDates(row.offering)}</span>
+        </Link>
         <StatusChip status={row.status} />
       </div>
       <Gate action="enrollment:withdraw" subject={enrollmentSubject(row, course)}>
