@@ -22,10 +22,10 @@ const dashboardRoutes: FastifyPluginAsync = async (fastify) => {
    * beside it. If a `dashboard:read` action is ever added, this comment and those
    * clauses change together.
    *
-   *   `courses`            -> `course:read`       policy.ts:118-124  -> ownCoursesWhere
-   *   `pendingEnrollments` -> `enrollment:read`   policy.ts:160-165  -> pendingEnrollmentsWhere
-   *   `unreadMessages`     -> `conversation:read` policy.ts:397-404  -> unreadMessagesQuery
-   *   `resources`          -> `resource:read`     policy.ts:191-196  -> visibleResourcesWhere
+   *   `courses`            -> `course:read`       (`POLICY`)         -> ownCoursesWhere
+   *   `pendingEnrollments` -> `enrollment:read`   (`POLICY`)         -> pendingEnrollmentsWhere
+   *   `unreadMessages`     -> `conversation:read` (`POLICY`)         -> unreadMessagesQuery
+   *   `resources`          -> `resource:read`     (`POLICY`)         -> visibleResourcesWhere
    *
    * WHY it cannot go through the gate, which is the same structural reason
    * enrollments.routes.ts:32-40 gives: not one of those four actions can be asked as a

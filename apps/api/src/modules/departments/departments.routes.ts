@@ -14,7 +14,8 @@ import * as departmentService from './departments.service.js';
 
 /**
  * Departments are the one module whose whole policy surface is role-only: every cell
- * of policy.ts:328-354 is `allow` or `deny`, so each route is fully gated by a bare
+ * of the four `department:*` rows in `POLICY` is `allow` or `deny`, so each route is
+ * fully gated by a bare
  * `authorize(action)` and no handler needs `requireActor` — `authorize` has already
  * thrown `unauthenticated()` for a null actor by the time a handler runs, and no
  * service below reads the caller.

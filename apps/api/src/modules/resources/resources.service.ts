@@ -185,12 +185,13 @@ export async function loadResourceSubject(
 
 /**
  * Subject for `resource:create`, which is the COURSE and not a resource — there is no
- * row yet, and policy.ts:197-204 gates a teacher on `ownsCourse` precisely so that
+ * row yet, and `resource:create` in `POLICY` gates a teacher on `ownsCourse` so that
  * "a teacher could file a resource into a colleague's course by guessing a courseId"
  * cannot happen. The id therefore comes off the BODY, and the author is the session.
  *
  * It duplicates courses.service.ts's `loadCourseSubject` on purpose, on the same
- * reasoning as enrollments.service.ts:125-127: the module that declares the route owns
+ * reasoning as `loadEnrollmentSubject` in enrollments.service.ts: the module that
+ * declares the route owns
  * the gate, and importing across modules to save five lines would make a resource write
  * fail to authorize when the courses module is refactored.
  *
@@ -220,14 +221,14 @@ export async function loadResourceCourseSubject(courseId: string): Promise<Subje
 // ---------------------------------------------------------------------------
 
 /**
- * The `resource:read` policy rows (policy.ts:191-196) expressed as a WHERE clause.
+ * The `resource:read` policy rows (`POLICY`) expressed as a WHERE clause.
  *
  * A list cannot ask `can()` a yes/no question — there is no single subject — so each
  * branch below mirrors one policy row and must be changed with it:
  *   anonymous -> and(isPublic, isPublished)                        (policy.ts)
  *   STUDENT   -> or(and(isPublic, isPublished), enrolledApproved)  (policy.ts)
  *   TEACHER   -> or(and(isPublic, isPublished), ownsCourse, isAuthor)
- *   ADMIN     -> allow                                 (policy.ts:195)
+ *   ADMIN     -> allow                                 (`POLICY`)
  *
  * Reading `actor.role` here is choosing which WHERE mirrors which policy row — the one
  * legitimate role read named by CONTRIBUTING.md:48-55. It is NOT a permission check:
@@ -376,10 +377,10 @@ function orderFor(query: ListResourcesQuery): Prisma.ResourceOrderByWithRelation
 /**
  * The cross-course list, `GET /resources`.
  *
- * `Actor | null`, because the anonymous row of `resource:read` is `isPublic` and not
- * `deny` (policy.ts:192): a logged-out visitor is a legitimate caller here and gets the
+ * `Actor | null`, because the anonymous cell of `resource:read` is `publicAndLive` and
+ * not `deny` (`POLICY`): a logged-out visitor is a legitimate caller here and gets the
  * public shelf. Seeing that a public resource EXISTS is deliberately wider than
- * `resource:download`, which refuses anonymous outright (policy.ts:217-226).
+ * `resource:download`, which refuses anonymous outright (`POLICY`).
  *
  * A `q` text term switches the whole read to `listRanked`: ranking needs the stored
  * `searchVector` tsvector and the trigram index (migration 0002), which live in the
@@ -507,8 +508,8 @@ export async function getById(id: string): Promise<ResourceDto> {
  * The short-lived signed GET behind `GET /resources/:id/download`, after
  * `authorize('resource:download')` has already accepted the caller.
  *
- * That gate is narrower than `resource:read` — anonymous is `deny` (policy.ts:217-226)
- * where reading a public resource is `isPublic` — so by the time this runs the caller is
+ * That gate is narrower than `resource:read` — anonymous is `deny` (`POLICY`)
+ * where reading a public resource is `publicAndLive` — so by the time this runs the caller is
  * entitled to the BYTES and not merely to the row. Nothing below is about who is asking;
  * it is about whether there is an object to hand back at all.
  *
@@ -712,7 +713,8 @@ export async function update(id: string, input: UpdateResourceInput): Promise<Re
 }
 
 /**
- * Soft delete only — schema.prisma:5-7 rule 3, which is why every read in this file
+ * Soft delete only — rule 3 of the design-rules block at the head of schema.prisma, which
+ * is why every read in this file
  * filters `deletedAt`. A hard delete would also cascade the row's comments away
  * (`Resource.comments`, declared `onDelete: Cascade` in schema.prisma), and "remove this
  * file from the course" does not mean "erase the

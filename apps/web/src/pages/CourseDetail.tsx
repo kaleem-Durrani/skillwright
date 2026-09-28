@@ -79,7 +79,8 @@ const RESOURCE_ICON: Record<ResourceTypeValue, LucideIcon> = {
   DOCUMENT: FileText,
   VIDEO: Video,
   LINK: Link2,
-  // Added in migration 0010, which reversed the reservation at schema.prisma:75-78:
+  // Added in migration 0010, which reversed the reservation recorded on `enum ResourceType`
+  // in schema.prisma:
   // an assignment's brief is course material, so it is filed as a Resource rather than
   // through a second attachment mechanism. Icon rather than removed, because the key
   // type is what makes this a checked lookup — deleting the entry would restore
@@ -148,8 +149,8 @@ function courseSubject(
 
 /**
  * The Subject for ONE resource row. `resource:download` is
- * `or(isPublic, enrolledApproved)` for a student and `or(isPublic, ownsCourse, isAuthor)`
- * for a teacher (policy.ts:217-226), so the decision needs three fields the resource
+ * `resourceVisibleToStudent` for a student and `resourceVisibleToTeacher` for a teacher
+ * (`POLICY`), so the decision needs three fields the resource
  * carries plus two only the course knows.
  *
  * WHY it is not `subject({ ...resource })`: a spread supplies `isPublic` and `courseId`
@@ -280,8 +281,8 @@ export function CourseDetailPage() {
   /*
    * No `enabled` gate, deliberately — and it used to have one.
    *
-   * `resource:read` is decided PER ROW: its anonymous rule is `isPublic` and its
-   * STUDENT rule is `or(isPublic, enrolledApproved)` (policy.ts:191-196). The gate here
+   * `resource:read` is decided PER ROW: its anonymous rule is `publicAndLive` and its
+   * STUDENT rule is `resourceVisibleToStudent` (`POLICY`). The gate here
    * asked that question with `viewerSubject`, which is a COURSE — and a course has no
    * `isPublic`, only `publishedAt`. So the `isPublic` disjunct could never fire and the
    * tab was closed to every signed-in non-admin who was not enrolled, while the API
@@ -369,7 +370,7 @@ export function CourseDetailPage() {
    * (upload.ts:108-113) — a URL signed for five minutes against a PRIVATE bucket,
    * never a path. The gate is `resource:download`, which is strictly narrower than
    * the `resource:read` that got the row onto this screen: anonymous is `deny`
-   * (policy.ts:217-226), so a logged-out visitor sees the row and is answered 401
+   * (`POLICY`), so a logged-out visitor sees the row and is answered 401
    * for the bytes.
    *
    * `window.location.assign`, not an `<a download>`: the signed GET carries
@@ -465,7 +466,7 @@ export function CourseDetailPage() {
 
   /*
    * `resource:create` is COURSE-scoped — `ownsCourse` for a teacher, with no publication
-   * term (policy.ts:221-228) — so it is asked with the course subject, exactly once, and
+   * term (`POLICY`) — so it is asked with the course subject, exactly once, and
    * the same answer drives the header button and the empty state's action. Two `can()`
    * calls for one decision is two places for one of them to be given the wrong subject.
    */
@@ -1330,7 +1331,7 @@ function ResourceAccess({
  * the card, or it would be missing below `md`.
  *
  * THE SUBJECT IS THE ROW, NOT THE COURSE. `resource:update` and `resource:delete` are
- * `ownsCourse` for a TEACHER (policy.ts:229-240), which reads `courseTeacherId` — a field
+ * `ownsCourse` for a TEACHER (`POLICY`), which reads `courseTeacherId` — a field
  * that lives on the course and not on `ResourceDto` — so neither a bare row nor the
  * course subject answers the question being asked here. `resourceSubject` is the
  * projection that carries both halves, and it is the one the download gate already uses.

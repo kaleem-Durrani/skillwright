@@ -16,7 +16,7 @@ import { enrollmentSubject } from './enrollmentSubject';
  * spent a phase being visible on a phone and unreachable on a laptop.
  *
  * WHY ONLY TWO OF THE FOUR VERBS APPEAR HERE. `ALLOWED_TRANSITIONS`
- * (enrollments.service.ts:221-227) is the whole contract:
+ * in enrollments.service.ts is the whole contract:
  *
  *   PENDING   → APPROVED | REJECTED | WITHDRAWN
  *   APPROVED  → REJECTED | WITHDRAWN | COMPLETED
@@ -32,7 +32,7 @@ import { enrollmentSubject } from './enrollmentSubject';
  *
  * Each button is `Gate`d on the verb it fires, asked with the ROW's subject rather
  * than the course's. `enrollment:complete` and `enrollment:uncomplete` are
- * `ownsCourse` for a TEACHER (policy.ts:254-265), and `ownsCourse` reads
+ * `ownsCourse` for a TEACHER (`POLICY`), and `ownsCourse` reads
  * `courseTeacherId` — a field that lives on the course, so neither a bare row nor a
  * guess answers it. Widening either gate to make a button appear is the mistake
  * LESSONS-LEARNED #15 records; the answer is a subject that carries the field.

@@ -191,7 +191,7 @@ export function SettingsPage() {
 
         <TabsContent value="profile">
           {/*
-            `user:update` is `isSelf` for STUDENT and TEACHER (policy.ts:306-311), and
+            `user:update` is `isSelf` for STUDENT and TEACHER (`POLICY`), and
             `isSelf` reads `Subject.userId` and DENIES when it is absent rather than
             defaulting to the actor (combinators.ts:46-49). The subject-free call that
             used to be here therefore came back false for every student and teacher on
@@ -223,7 +223,7 @@ function ProfileTab({ canEdit, isDemo }: { canEdit: boolean; isDemo: boolean }) 
   /**
    * No `enabled:` gate on this query, on purpose.
    *
-   * `user:read` is `isSelf` for STUDENT and TEACHER (policy.ts:297-305), and a
+   * `user:read` is `isSelf` for STUDENT and TEACHER (`POLICY`), and a
    * subject-free `can()` runs it against EMPTY_SUBJECT, where `isSelf` is false
    * (combinators.ts:46-49). Gating on that would disable the query for everyone but
    * an admin, and a disabled query never leaves `status: 'pending'` — the form would

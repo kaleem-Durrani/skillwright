@@ -48,7 +48,7 @@ export function DepartmentRowActions({ department, onEdit }: DepartmentRowAction
   const [conflict, setConflict] = useState<string | null>(null);
 
   // No subject argument, deliberately: every rule behind these actions is a bare
-  // role allow/deny (policy.ts:354-402), so the answer cannot depend on one.
+  // role allow/deny (`POLICY`), so the answer cannot depend on one.
   const canUpdate = policy.can('department:update');
   const deleteDecision = policy.check('department:delete');
   const showDelete = deleteDecision.allowed || deleteDecision.rule === 'provenance:DEMO';

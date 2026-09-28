@@ -25,7 +25,7 @@ import { enrollmentSubject } from './enrollmentSubject';
  * place and then had no way to take it back. The gap is Phase 5's first hole, and
  * it closes here rather than on the roster because a withdrawal is not a staff
  * action: `enrollment:withdraw` is `isEnrolledStudent` for a STUDENT and a bare
- * `deny` for a TEACHER (policy.ts:227-233), and a teacher removing someone is a
+ * `deny` for a TEACHER (`POLICY`), and a teacher removing someone is a
  * REJECTION — a separate verb, a separate audit row, a separate notification.
  *
  * WHY "THE VIEWER'S OWN ROW" IS COMPARED RATHER THAN ASSUMED. The page already
@@ -34,7 +34,7 @@ import { enrollmentSubject } from './enrollmentSubject';
  * stops working for an admin who happens to hold a seat of their own. Instead the
  * rows are fetched and matched on `row.student.id === sessionUser.id`, which is the
  * same comparison the server's own `visibilityWhere` makes
- * (enrollments.service.ts:292-316) and is true for every role.
+ * (`visibilityWhere` in enrollments.service.ts) and is true for every role.
  *
  * `viewerEnrollmentStatus` is still what decides whether the LOOKUP RUNS, because
  * "does this viewer hold any row at all" is a question the course payload has
@@ -66,7 +66,7 @@ export function ViewerSeatActions({ course }: { course: CourseDetail }) {
 
   /*
    * `settle()` DELETES A SEAT: a withdrawal from APPROVED decrements
-   * `CourseOffering.approvedCount` (enrollments.service.ts:711-719), so the intake
+   * `CourseOffering.approvedCount` (`settle` in enrollments.service.ts), so the intake
    * card above this — its chip, its `seatsRemaining`, its `isFull` — is stale the
    * moment the call lands. `qk.course` is that payload.
    *
@@ -217,8 +217,8 @@ function ViewerSeatCard({
  * flow; copying that promise here would have been the same lie pointed at an
  * endpoint that does not require it.
  *
- * It is still OFFERED, because `settle` stores it in `decisionNote`
- * (enrollments.service.ts:721-732) and the teacher — who now holds a seat to
+ * It is still OFFERED, because `settle` in enrollments.service.ts stores it in
+ * `decisionNote` and the teacher — who now holds a seat to
  * re-offer — reads that column on the roster this very page renders. So the field
  * is optional in the contract and useful in practice, and those are different
  * sentences that both belong on screen.

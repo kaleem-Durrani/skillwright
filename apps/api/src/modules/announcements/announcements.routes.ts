@@ -39,7 +39,7 @@ const announcementsRoutes: FastifyPluginAsync = async (fastify) => {
    * per-row decision, because there it has a subject to run it against.
    *
    * `request.actor`, not `requireActor(request)`: the anonymous row of
-   * `announcement:read` is `isPublished` (policy.ts:230), so a logged-out visitor is a
+   * `announcement:read` is `isPublished` (`POLICY`, anonymous), so a logged-out visitor is a
    * legitimate caller and gets the published feed.
    */
   app.get(
@@ -69,7 +69,7 @@ const announcementsRoutes: FastifyPluginAsync = async (fastify) => {
     {
       schema: { body: createAnnouncementSchema, response: { 201: announcementDetailSchema } },
       // No subject loader: `announcement:create` is TEACHER/ADMIN `allow`
-      // (policy.ts:238-243) and is in `SUBJECT_INDEPENDENT_ACTIONS` — there is no row
+      // (`POLICY`) and is in `SUBJECT_INDEPENDENT_ACTIONS` — there is no row
       // yet to load a subject for, on the same shape as `course:create`
       // (courses.routes.ts:73).
       preHandler: authorize('announcement:create'),

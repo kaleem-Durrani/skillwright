@@ -33,8 +33,8 @@ function idOf(request: FastifyRequest): string {
  *
  * Written as a conditional rather than `{ userId: request.actor?.id }` because
  * exactOptionalPropertyTypes rejects `string | undefined` against
- * `Subject.userId?: string` (actor.ts:53-56) — the enrollments.service.ts:133 /
- * courses.service.ts:133 spelling. Returning `undefined` for an anonymous caller is
+ * `Subject.userId?: string` (actor.ts:53-56) — the `loadRequestedCourseSubject` spelling
+ * in enrollments.service.ts. Returning `undefined` for an anonymous caller is
  * also the correct policy input: `isSelf` denies on an absent `userId`
  * (combinators.ts:46-49), and `authorize` turns that into 401 rather than 403
  * (auth.plugin.ts:121).
@@ -46,8 +46,8 @@ function selfSubject(request: FastifyRequest): Subject | undefined {
 /**
  * The subject for the two `/:id` routes: the TARGET, not the caller.
  *
- * This is the whole point of policy.ts:323-331 — `user:read` "stays self-only so that
- * a teacher cannot enumerate the directory one id at a time" — and of policy.ts:348-354,
+ * This is the whole point of `POLICY`'s `user:read` — "stays self-only so that
+ * a teacher cannot enumerate the directory one id at a time" — and of `user:suspend`,
  * where `not(isSelf)` stops an admin suspending themself and locking the last admin out
  * of the instance. Putting the ACTOR's id here instead would silently invert both.
  *
@@ -65,7 +65,7 @@ const usersRoutes: FastifyPluginAsync = async (fastify) => {
 
   /*
    * A BARE `authorize('user:list')`, with no subject loader, is a COMPLETE gate here:
-   * policy.ts:355-360 is anonymous deny / STUDENT deny / TEACHER deny / ADMIN allow, and
+   * `user:list` in `POLICY` is anonymous deny / STUDENT deny / TEACHER deny / ADMIN allow, and
    * every cell is a terminal rule that reads no Subject field. That is the
    * departments.routes.ts:15-29 argument, and it is why this list needs neither the
    * `visibilityWhere` clause `GET /enrollments` grew nor a `requireActor` in the handler
@@ -88,7 +88,7 @@ const usersRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   /*
-   * Provisioning, Phase 4b. `user:create` is subject-free (policy.ts:338-347 — every
+   * Provisioning, Phase 4b. `user:create` is subject-free (`POLICY` — every
    * cell is a terminal allow/deny decided by role alone, before any target exists to
    * load a subject for), so a BARE `authorize()` is a complete gate here, exactly as
    * for `user:list` above and for every departments route.
@@ -291,7 +291,7 @@ const usersRoutes: FastifyPluginAsync = async (fastify) => {
     async (request) => userService.updateSelf(requireActor(request), request.body),
   );
 
-  // policy.ts:323-331 — STUDENT and TEACHER are `isSelf`, ADMIN is `allow`. The subject
+  // `POLICY`'s `user:read` — STUDENT and TEACHER are `isSelf`, ADMIN is `allow`. The subject
   // is the target, so a teacher asking for someone else's id is 403 (never 404, which
   // would confirm the account exists) and 200 only for their own.
   app.get(

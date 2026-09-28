@@ -38,7 +38,7 @@ const enrollmentsRoutes: FastifyPluginAsync = async (fastify) => {
    * every non-admin: `isEnrolledStudent` and `ownsCourse` both read absent fields and
    * a rule that reads an absent field must deny (actor.ts:46-51). So this route gates
    * on authentication and the policy becomes a WHERE clause — `visibilityWhere` in
-   * the service, which mirrors policy.ts:160-165 row for row.
+   * the service, which mirrors `POLICY`'s `enrollment:read` row for row.
    */
   app.get(
     '/',
@@ -85,8 +85,8 @@ const enrollmentsRoutes: FastifyPluginAsync = async (fastify) => {
     '/',
     {
       schema: { body: requestEnrollmentSchema, response: { 201: enrollmentSchema } },
-      // policy.ts:155 — the subject is the COURSE, not an enrollment: a draft course
-      // cannot accumulate a waiting list. The actor rides along so the subject can
+      // `enrollment:request` in `POLICY` — the subject is the COURSE, not an enrollment:
+      // a draft course cannot accumulate a waiting list. The actor rides along so the subject can
       // carry the requester's completed courses for `hasCompletedPrerequisite`.
       preHandler: authorize('enrollment:request', (request) =>
         enrollmentService.loadRequestedCourseSubject(courseIdOfBody(request), request.actor),
@@ -150,7 +150,8 @@ const enrollmentsRoutes: FastifyPluginAsync = async (fastify) => {
       enrollmentService.reject(requireActor(request), request.params.id, request.body),
   );
 
-  // policy.ts:178-185 denies TEACHER outright. Withdrawal is not an alias for reject.
+  // `enrollment:withdraw` in `POLICY` denies TEACHER outright. Withdrawal is not an
+  // alias for reject.
   app.post(
     '/:id/withdraw',
     {

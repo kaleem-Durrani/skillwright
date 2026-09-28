@@ -14,7 +14,7 @@ import type {
 /**
  * No `loadSubject` helper lives here, deliberately.
  *
- * Every cell of the four department rows in `POLICY` (policy.ts:328-354) is a bare
+ * Every cell of the four `department:*` rows in `POLICY` is a bare
  * `allow` or `deny` — not one of them reads a `Subject` field. A loader would cost a
  * query per request and hand `can()` data no rule consults, so `authorize('department:…')`
  * with no subject loader is the complete gate here. Courses and enrollments, whose

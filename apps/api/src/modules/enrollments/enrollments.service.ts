@@ -275,7 +275,7 @@ type EnrollmentFilters = Pick<
 type EnrollmentSort = Pick<ListEnrollmentsQuery, 'sort' | 'order'>;
 
 /**
- * The WHERE clause that mirrors the `enrollment:read` row rules, policy.ts:160-165:
+ * The WHERE clause that mirrors the `enrollment:read` row rules in `POLICY`:
  *
  *   STUDENT -> isEnrolledStudent -> `studentId = actor.id`
  *   TEACHER -> ownsCourse        -> `course.teacherId = actor.id`
@@ -682,7 +682,8 @@ export async function approve(
  * 40 makes that an obligation of "every transaction that changes an enrollment's
  * status", so it is written once here rather than twice below.
  *
- * They stay separate verbs at the route because policy.ts:180-182 says so: "A
+ * They stay separate verbs at the route because the `enrollment:withdraw` TEACHER cell
+ * says so: "A
  * teacher removing a student is a rejection, not a withdrawal; separate verb,
  * separate audit action, separate notification."
  */
@@ -740,7 +741,7 @@ async function settle(
   // A rejection is news to its student; a withdrawal is news to the COURSE'S TEACHER,
   // who now holds a seat to re-offer — both land after the transaction has committed,
   // best-effort (notify() never throws). The two are separate verbs with separate
-  // notifications for exactly the reason policy.ts:180-182 gives.
+  // notifications for exactly the reason the `enrollment:withdraw` TEACHER cell gives.
   if (next === 'REJECTED' && settled.changed) {
     await notify({
       userIds: [settled.enrollment.studentId],

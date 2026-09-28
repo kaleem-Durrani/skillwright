@@ -24,7 +24,8 @@
 --     F-Gas Category I Certification
 --
 -- and the ONLY place any of them is stored is `TeacherProfile.qualification`, a single
--- free-text `String` on the staff profile (schema.prisma:248). A teacher's own paper
+-- free-text `String` on the staff profile (`TeacherProfile.qualification` in
+-- schema.prisma). A teacher's own paper
 -- qualification and a qualification AWARDED to a student were the same column, in the
 -- same table, in the wrong direction: nothing about a student, nothing a body could be
 -- checked against, and nothing an employer could ask to see. The school teaches to
@@ -83,7 +84,8 @@
 --
 --   `issuedById`   `SetNull`, matching `Enrollment.completedById` and
 --                  `Submission.gradedById`. A certificate with no issuer is the failure
---                  mode the whole audit extension exists to prevent: schema.prisma:505
+--                  mode the whole audit extension exists to prevent: the
+--                  `Enrollment.completedBy` field in schema.prisma
 --                  states it outright for the completion it is the counterpart of ("an
 --                  audit trail with an actor is what the whole extension exists to
 --                  produce, and a teacher who later leaves must not take the

@@ -46,11 +46,11 @@ const resourcesRoutes: FastifyPluginAsync = async (fastify) => {
    * described in auth.plugin.ts:70-80.
    *
    * So visibility is a WHERE clause instead: `visibilityWhere` in the service, which
-   * mirrors policy.ts:191-196 row for row. `GET /resources/:id` below still runs the
+   * mirrors `POLICY`'s `resource:read` row for row. `GET /resources/:id` below still runs the
    * per-row decision, because there it has a subject to run it against.
    *
-   * `request.actor` and not `requireActor(request)`: the anonymous row of
-   * `resource:read` is `isPublic` (policy.ts:192), so a logged-out visitor is entitled
+   * `request.actor` and not `requireActor(request)`: the anonymous cell of
+   * `resource:read` is `publicAndLive` (`POLICY`), so a logged-out visitor is entitled
    * to the public shelf and a null actor is a legitimate caller rather than a 401.
    */
   app.get(
@@ -68,7 +68,8 @@ const resourcesRoutes: FastifyPluginAsync = async (fastify) => {
     '/',
     {
       schema: { body: createResourceSchema, response: { 201: resourceSchema } },
-      // policy.ts:197-204 — the subject is the COURSE NAMED IN THE BODY, not a resource:
+      // `resource:create` in `POLICY` — the subject is the COURSE NAMED IN THE BODY, not a
+      // resource:
       // there is no row yet, and `ownsCourse` is what stops a teacher filing material
       // into a colleague's course by guessing a courseId. Same arrangement as
       // `enrollment:request` (enrollments.routes.ts:58-60).
@@ -97,8 +98,8 @@ const resourcesRoutes: FastifyPluginAsync = async (fastify) => {
 
   /*
    * Deliberately NOT `resource:read`, and the difference is the whole point of the
-   * endpoint: `resource:download` denies anonymous outright (policy.ts:217-226) where
-   * `resource:read` gives them `isPublic` (policy.ts:192). A logged-out visitor may SEE
+   * endpoint: `resource:download` denies anonymous outright (`POLICY`) where
+   * `resource:read` gives them `publicAndLive` (`POLICY`). A logged-out visitor may SEE
    * that a public resource exists and may not pull the bytes out of the private bucket.
    * That is the anti-scraping line, and it is why a logged-out caller is answered 401
    * here rather than 403 — `authorize` reports the missing session first

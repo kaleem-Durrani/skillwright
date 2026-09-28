@@ -30,7 +30,7 @@ import { toast } from '@/components/ui/Toast';
  *
  * THE TEACHER GETS NO BUTTON ON THEIR OWN COURSE, and that is a data check rather
  * than a permission one. `conversation:create` is a bare allow for all three signed-in
- * roles (policy.ts:536-541), so the policy cannot keep a teacher out of it — and a
+ * roles (`POLICY`), so the policy cannot keep a teacher out of it — and a
  * teacher naming themself in `participantIds` produces a one-participant set, which
  * is not the two-person shape the dedup branch requires, so the server would
  * cheerfully seat a thread with a single member in it on every click.

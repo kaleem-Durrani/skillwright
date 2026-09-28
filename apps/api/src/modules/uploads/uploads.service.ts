@@ -210,7 +210,7 @@ function toUploadDto(upload: UploadRow): UploadDto {
 // ---------------------------------------------------------------------------
 
 /**
- * Subject for `upload:commit`, whose every role cell is `isSelf` (policy.ts:385-392).
+ * Subject for `upload:commit`, whose every role cell is `isSelf` (`POLICY`).
  *
  * `isSelf` matches on `subject.userId` and denies when it is absent (combinators.ts:46-49),
  * so the owner is spelled onto that exact key. `ownerId` would be a SILENT 403 that no
@@ -357,7 +357,7 @@ function normaliseMediaType(value: string): string {
  *
  * Already-COMMITTED returns the row unchanged rather than re-heading the object or
  * moving `committedAt`. A double-submitted form and a retried request are the same
- * request, exactly as enrollments.service.ts:389-398 treats a second approve — and
+ * request, exactly as `approve` in enrollments.service.ts treats a second approve — and
  * unlike that one there is not even a counter at stake, only an idempotent answer.
  *
  * No `actor` parameter: nothing here is actor-scoped. `upload:commit` is `isSelf` for

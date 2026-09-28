@@ -88,7 +88,7 @@ export function toAuditEventDetail(event: AuditEventWithActor): AuditEventDetail
  * No visibility clause and no soft-delete filter, both on purpose.
  *
  * There is no `visibilityWhere` here because there is nothing to mirror: `audit:read`
- * (policy.ts:452-457) is anonymous/STUDENT/TEACHER deny, ADMIN allow — four terminal
+ * (`POLICY`) is anonymous/STUDENT/TEACHER deny, ADMIN allow — four terminal
  * cells that read no Subject field — so the route's bare `authorize('audit:read')` is
  * the complete gate and every caller who reaches this function may see every row
  * (the departments.routes.ts:15-29 argument). Adding a WHERE here would give the rule

@@ -24,7 +24,8 @@ import * as auditService from './audit.service.js';
  * fail at the database — there is no third outcome.
  *
  * There is exactly one route and it is fully gated by a bare `authorize('audit:read')`.
- * policy.ts:452-457 is anonymous deny / STUDENT deny / TEACHER deny / ADMIN allow:
+ * `audit:read` in `POLICY` is anonymous deny / STUDENT deny / TEACHER deny / ADMIN
+ * allow:
  * four terminal cells, none of which reads a Subject field, so no subject loader can
  * change the answer and none is passed — the same argument departments.routes.ts:15-29
  * makes for that whole module. This is also why the handler needs no `requireActor`:

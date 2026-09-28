@@ -33,8 +33,8 @@ const uploadsRoutes: FastifyPluginAsync = async (fastify) => {
   /*
    * No subject loader, and that is not an oversight of the kind LESSONS-LEARNED #15
    * describes. `upload:presign` is `deny` for anonymous and a flat `allow` for all three
-   * roles (policy.ts:379-384), so every cell is a subject-free rule — which is why the
-   * action is listed in SUBJECT_INDEPENDENT_ACTIONS (policy.ts:516) and why an empty
+   * roles (`POLICY`), so every cell is a subject-free rule — which is why the
+   * action is listed in SUBJECT_INDEPENDENT_ACTIONS and why an empty
    * subject here denies nobody who should be allowed. The gate is doing one job:
    * refusing logged-out callers a signature into a private bucket.
    *
@@ -61,7 +61,7 @@ const uploadsRoutes: FastifyPluginAsync = async (fastify) => {
 
   /*
    * The subject is the Upload row named in the BODY, and every `upload:commit` cell is
-   * `isSelf` including ADMIN's (policy.ts:385-392). policy.ts:387-388 writes the reason
+   * `isSelf` including ADMIN's (`POLICY`). The `upload:commit` STUDENT cell writes the reason
    * into the table itself: "Committing someone else's pending upload would let an
    * attacker attach bytes they never uploaded."
    *

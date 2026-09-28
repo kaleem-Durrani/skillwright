@@ -14,14 +14,15 @@ import * as notificationService from './notifications.service.js';
  * The subject every route in this module passes, and the reason it is a function
  * rather than an inline object literal at each `authorize()` call.
  *
- * policy.ts:458-470 makes `notification:read` and `notification:update` `isSelf` for
- * all three roles, and policy.ts:460 writes the contract into the policy table itself:
+ * The `notification:read` and `notification:update` rows of `POLICY` make `isSelf` hold
+ * for all three roles, and the `notification:read` STUDENT cell writes the contract into
+ * the policy table itself:
  * "Notification rows are per-user; list endpoints pass `{ userId: actor.id }`".
  *
  * The conditional return is required, not stylistic. Under `exactOptionalPropertyTypes`
  * the obvious `{ userId: request.actor?.id }` does NOT type-check against
  * `Subject.userId?: string`, because `string | undefined` is not assignable to an
- * optional `string` (enrollments.service.ts:133 and courses.service.ts:133 spread a
+ * optional `string` (`loadRequestedCourseSubject` in enrollments.service.ts spreads a
  * conditional for the same reason).
  *
  * Returning `undefined` for an anonymous caller is safe: `can()` evaluates the

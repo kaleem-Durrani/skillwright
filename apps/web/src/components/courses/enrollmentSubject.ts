@@ -3,7 +3,7 @@ import type { CourseDetail, EnrollmentDto } from '@/lib/types';
 
 /**
  * The policy Subject for ONE enrolment row, mirroring the server's projection
- * field for field — `loadEnrollmentSubject` (enrollments.service.ts:109-139).
+ * field for field — `loadEnrollmentSubject` in enrollments.service.ts.
  *
  * It exists as a shared function rather than a projection repeated at each call
  * site because every rule these two screens ask is SUBJECT-DEPENDENT and a

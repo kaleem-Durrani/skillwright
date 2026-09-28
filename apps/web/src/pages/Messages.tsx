@@ -8,7 +8,8 @@ import { ulid } from 'ulid';
  *
  * `@/lib/api` carries its own copies, and the cursor one is wrong: `CursorPage<T>` is
  * `{ data, nextCursor }` while the endpoint sends `{ data, meta: { nextCursor, hasMore } }`
- * (pagination.ts:88-95, bound at conversations.routes.ts:81). Importing the shared
+ * (pagination.ts:88-95, bound at the `GET /conversations/:id/messages` response schema
+ * in conversations.routes.ts). Importing the shared
  * declarations is the same rule the rest of this file now follows — CONTRIBUTING.md:51,
  * "a type hand-written on the client that the schema already describes".
  *
@@ -76,9 +77,10 @@ export function MessagesPage() {
 
   /*
    * No `enabled: policy.can('conversation:read')` here, deliberately — the client-side
-   * mirror of the argument conversations.routes.ts:31-46 makes on the server.
+   * mirror of the argument the `GET /conversations` list route makes in
+   * conversations.routes.ts.
    *
-   * `conversation:read` is `isParticipant` for all three roles (policy.ts:397-404), and
+   * `conversation:read` is `isParticipant` for all three roles (`POLICY`), and
    * `isParticipant` reads `Subject.participantIds` (combinators.ts:82-85). A
    * cross-conversation LIST has no single subject to pass, and `can()` substitutes
    * EMPTY_SUBJECT when the third argument is omitted (can.ts:53) — a rule that reads an
@@ -88,11 +90,12 @@ export function MessagesPage() {
    * this pane rendered its skeleton forever for all three roles.
    *
    * GET /conversations is authentication-gated and the policy is already a WHERE clause
-   * there (`visibilityWhere`, mirroring policy.ts:397-404 row for row), so the rows that
+   * there (`visibilityWhere`, mirroring `POLICY`'s `conversation:read` row for row), so the
+   * rows that
    * arrive are exactly the threads this actor is seated in. Just run the query.
    *
    * A subject-free `can()` is only correct for an action that is subject-INDEPENDENT for
-   * every role — a bare allow/deny, e.g. 'conversation:create' (policy.ts:405-410).
+   * every role — a bare allow/deny, e.g. 'conversation:create' (`POLICY`).
    */
   const conversations = useQuery({
     // `qk.conversations` (lib/query.ts) has no parameter slot for a page — it

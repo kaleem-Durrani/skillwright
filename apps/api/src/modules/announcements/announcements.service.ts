@@ -108,7 +108,8 @@ export function toAnnouncementDetail(
 
 /**
  * Subject for `announcement:read`, `:update`, `:delete` and `:publish` — every gate
- * that names one row (policy.ts:229-253).
+ * that names one row (the `announcement:read`/`:update`/`:delete`/`:publish` rows of
+ * `POLICY`).
  *
  * `undefined` for a missing or soft-deleted row so the policy denies, rather than this
  * loader throwing a bare 404 before the gate has run. An ADMIN still passes the gate on
@@ -145,7 +146,7 @@ export async function loadAnnouncementSubject(id: string): Promise<Subject | und
 // ---------------------------------------------------------------------------
 
 /**
- * The `announcement:read` policy rows (policy.ts:229-235) expressed as a WHERE clause.
+ * The `announcement:read` policy rows (`POLICY`) expressed as a WHERE clause.
  *
  * A list cannot ask `can()` a yes/no question — there is no single subject — so each
  * branch below mirrors one policy row and must be changed with it:
@@ -156,7 +157,7 @@ export async function loadAnnouncementSubject(id: string): Promise<Subject | und
  *
  * STUDENT is written as plain `isPublished` rather than `or(isPublished, isAuthor)`:
  * the two are equivalent for a student because `announcement:create` denies STUDENT
- * outright (policy.ts:238-243), so `authorId` can never equal a student's own id — but
+ * outright (`POLICY`), so `authorId` can never equal a student's own id — but
  * the literal policy row is what this mirrors, not a simplification of it.
  *
  * Reading `actor.role` here is choosing which WHERE mirrors which policy row — the one
@@ -253,7 +254,7 @@ function orderFor(query: ListAnnouncementsQuery): Prisma.AnnouncementOrderByWith
 
 /**
  * `GET /announcements`. `Actor | null` because the anonymous row of
- * `announcement:read` is `isPublished`, not `deny` (policy.ts:230): a logged-out
+ * `announcement:read` is `isPublished`, not `deny` (`POLICY`, anonymous): a logged-out
  * visitor is a legitimate caller here and gets the published feed.
  *
  * A `q` text term switches the whole read to `listRanked`: ranking needs the stored
@@ -424,7 +425,7 @@ async function approvedStudentIdsExcept(exceptUserId: string): Promise<string[]>
 
 /**
  * `announcement:create` was decided at the route with no subject at all — TEACHER and
- * ADMIN are both a flat `allow` (policy.ts:238-243) — so everything here is data
+ * ADMIN are both a flat `allow` (`POLICY`) — so everything here is data
  * shaping. The author is always the session, never the body: `createAnnouncementSchema`
  * has no `authorId` (announcement.ts:44-53), and there is no admin-on-behalf-of field
  * the way `course:create` has `teacherId` — an announcement always speaks in its

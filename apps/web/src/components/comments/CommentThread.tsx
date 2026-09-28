@@ -68,7 +68,8 @@ function listComments(target: CommentTarget, parentId?: string): Promise<Paginat
  * this file.
  *
  * `comment:read` and `comment:create` are FLAT per-role rows — `anonymous: deny`,
- * every signed-in role `allow` (policy.ts:290-302) — and no rule in either reads a
+ * every signed-in role `allow` (the `comment:read` and `comment:create` rows of `POLICY`)
+ * — and no rule in either reads a
  * Subject field. `policy.can()` with no subject is therefore the CORRECT call here,
  * not the anti-pattern LESSONS-LEARNED #15 warns a LIST against: that warning is
  * about a rule which DOES read a subject (`isPublic`, `enrollmentStatus`, …) being
@@ -101,7 +102,7 @@ export function CommentThread(props: CommentThreadProps) {
     onError: (error) => toast.fromError(error, 'Could not post that comment'),
   });
 
-  // Anonymous is the one caller `comment:read` denies outright (policy.ts:290-296) —
+  // Anonymous is the one caller `comment:read` denies outright (`POLICY`) —
   // never part of the logged-out surface even on a published resource — so the
   // query above stays `enabled: false` for them and this says why, rather than
   // leaving the panel blank.
@@ -179,7 +180,7 @@ export function CommentThread(props: CommentThreadProps) {
  * Which controls render is read straight off the DTO — `comment.canEdit` /
  * `comment.canDelete` — computed server-side against `comment:update` /
  * `comment:delete`, never re-derived here: `comment:delete` for a TEACHER is
- * `or(isAuthor, ownsCourse)` (policy.ts:311-317), and `ownsCourse` needs the
+ * `or(isAuthor, ownsCourse)` (`comment:delete` in `POLICY`), and `ownsCourse` needs the
  * comment's COURSE, which this DTO does not carry at all — only `resourceId` /
  * `announcementId`. There is no subject this component could build that rule from.
  */

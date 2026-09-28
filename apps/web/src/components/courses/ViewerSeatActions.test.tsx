@@ -177,7 +177,7 @@ describe('ViewerSeatActions', () => {
     ]);
 
     await screen.findByRole('heading', { name: 'Your place' });
-    // `enrollment:withdraw` is a bare `deny` for TEACHER (policy.ts:231), and the
+    // `enrollment:withdraw` is a bare `deny` for TEACHER (`POLICY`), and the
     // card renders nothing at all — no disabled button, no empty dialog.
     expect(screen.queryByRole('button', { name: 'Withdraw' })).toBeNull();
   });

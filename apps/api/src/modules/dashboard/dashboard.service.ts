@@ -26,7 +26,8 @@ interface CountRow {
  *
  * `GET /dashboard/stats` aggregates across four models, so it mirrors four separate
  * policy row sets. Each clause below is a `visibilityWhere` in the sense
- * enrollments.service.ts:199-215 established — one named function, one policy row set,
+ * `visibilityWhere` in enrollments.service.ts established — one named function, one policy
+ * row set,
  * cited row by row, and the same standing rule: if the function and policy.ts ever
  * disagree, the FUNCTION is the bug. Folding four unrelated models into one function
  * named `visibilityWhere` would give four rules one home and hide which row each
@@ -42,7 +43,7 @@ interface CountRow {
  * Counter 1, `courses`. The "Courses" tile that sits directly above the "Your courses"
  * section (Dashboard.tsx:53), so it counts the actor's OWN courses, not the catalogue.
  *
- * It is `course:read` (policy.ts:118-124), mirrored by courses.service.ts:169-184, and
+ * It is `course:read` (`POLICY`), mirrored by courses.service.ts:169-184, and
  * then NARROWED to ownership:
  *   ADMIN   -> allow                             -> every live course
  *   TEACHER -> or(isPublished, ownsCourse)       -> narrowed to `teacherId = actor.id`
@@ -82,8 +83,8 @@ function ownCoursesWhere(actor: Actor): Prisma.CourseWhereInput {
 /**
  * Counter 2, `pendingEnrollments` (Dashboard.tsx:57).
  *
- * `enrollment:read` (policy.ts:160-165), the same rows enrollments.service.ts:216-235
- * mirrors, with `status: 'PENDING'` on top:
+ * `enrollment:read` (`POLICY`), the same rows `visibilityWhere` in
+ * enrollments.service.ts mirrors, with `status: 'PENDING'` on top:
  *   STUDENT -> isEnrolledStudent -> `studentId = actor.id`
  *   TEACHER -> ownsCourse        -> `course.teacherId = actor.id`
  *   ADMIN   -> allow             -> unrestricted
@@ -94,7 +95,7 @@ function ownCoursesWhere(actor: Actor): Prisma.CourseWhereInput {
  * same clause plus a status filter. If they disagree, this function is the bug.
  *
  * The course's soft-delete filter is written by hand here too: an enrollment on a
- * deleted course is invisible in the queue (enrollments.service.ts:232-234) and must
+ * deleted course is invisible in the queue (`visibilityWhere` in enrollments.service.ts) and must
  * therefore be invisible in the tile.
  */
 function pendingEnrollmentsWhere(actor: Actor): Prisma.EnrollmentWhereInput {
@@ -144,14 +145,15 @@ function pendingEnrollmentsWhere(actor: Actor): Prisma.EnrollmentWhereInput {
  * participant row and counting in JavaScript, which is one query per conversation.
  *
  * Identical for all three roles, so there is no role branch: `conversation:read` is
- * `isParticipant` for STUDENT, TEACHER and ADMIN alike (policy.ts:397-404 — "Admins
+ * `isParticipant` for STUDENT, TEACHER and ADMIN alike (`POLICY` — "Admins
  * moderate threads they were seated in; the schema can seat them, so there is no need
  * for a bypass"). The actor's own seat, `p."userId" = ${actor.id}` with `leftAt IS
  * NULL`, IS the whole scope. If that row rule and this WHERE ever disagree, this
  * query is the bug.
  *
  * A tagged template, never `$executeRawUnsafe`, and `actor.id` is a bound parameter
- * rather than interpolated text — enrollments.service.ts:415-418 is the precedent.
+ * rather than interpolated text — the tagged `$executeRaw` in `approve`
+ * (enrollments.service.ts) is the precedent.
  *
  * `::int` is load-bearing: Postgres `COUNT(*)` is `bigint`, and without the cast the
  * value arrives as a JS BigInt that `z.number()` rejects and `JSON.stringify` throws on.
@@ -191,7 +193,7 @@ function unreadMessagesQuery(actor: Actor): Prisma.PrismaPromise<CountRow[]> {
  * (packages/db/src/audit.ts), so nothing here makes the audit extension reach for its
  * second pool while this transaction holds a connection, and the default budget is
  * correct. The generous
- * `TX_OPTIONS` (enrollments.service.ts:41-50) belongs to interactive transactions that
+ * `TX_OPTIONS` in enrollments.service.ts belongs to interactive transactions that
  * MUTATE an audited model; borrowing it here would be cargo cult.
  *
  * Takes an `Actor`, never a FastifyRequest.

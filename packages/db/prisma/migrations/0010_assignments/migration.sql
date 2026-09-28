@@ -40,7 +40,8 @@
 --      writing it down.
 --
 -- `ResourceType` gains `ASSIGNMENT`, which REVERSES a deliberate refusal recorded at
--- schema.prisma:75-78 — "ASSIGNMENT and QUIZ are deliberately absent: the assessment
+-- `enum ResourceType` in schema.prisma — "ASSIGNMENT and QUIZ are deliberately
+-- absent: the assessment
 -- engine is out of scope, and a reserved enum value is an invitation to build it."
 -- The reservation was correct while there was no engine. It is wrong now, for the
 -- reason the comment itself names: an assignment's brief is a document a school

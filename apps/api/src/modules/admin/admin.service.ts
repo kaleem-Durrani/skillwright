@@ -5,7 +5,7 @@ import type { AdminStats } from './admin.schema.js';
  * No `loadSubject` helper and no `Actor` parameter live here, deliberately.
  *
  * The single route is gated by `authorize('user:list')`, whose four cells
- * (policy.ts:319-324) are bare `allow`/`deny` and read no `Subject` field — the same
+ * in `POLICY` are bare `allow`/`deny` and read no `Subject` field — the same
  * argument departments.service.ts:14-27 makes for its whole module. A loader would cost
  * a query per request and hand `can()` data no rule consults, and nothing below branches
  * on the caller: these are instance-wide counters, identical for every admin who may

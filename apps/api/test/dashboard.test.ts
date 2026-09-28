@@ -330,9 +330,10 @@ describe('the counters', () => {
     // the tile sits above "Your courses" (Dashboard.tsx:53), so it is `course:read`
     // narrowed to ownership, never the catalogue.
     // pendingEnrollments: student B on course A1 only. Student A's PENDING row is on
-    // teacher B's course, and `ownsCourse` (policy.ts:164) does not reach it.
+    // teacher B's course, and `ownsCourse` (the `enrollment:read` TEACHER cell) does not
+    // reach it.
     // resources: the private one on their own course + the public one on B1;
-    // B1's private resource fails or(isPublic, ownsCourse, isAuthor) (policy.ts:194).
+    // B1's private resource fails `resourceVisibleToTeacher` (`POLICY`).
     expect(await statsFor(world.teacherA)).toEqual({
       courses: 2,
       pendingEnrollments: 1,
@@ -353,7 +354,8 @@ describe('the counters', () => {
 
     // courses: `enrolledApproved` only — a PENDING application is not a course you
     // have, so course B1 is absent.
-    // pendingEnrollments: `isEnrolledStudent` (policy.ts:163) — their own row on B1,
+    // pendingEnrollments: `isEnrolledStudent` (the `enrollment:read` STUDENT cell in
+    // `POLICY`) — their own row on B1,
     // never student B's row on A1.
     // resources: the public one, plus the private one on the course they are approved
     // on. B1's private resource is invisible: PENDING is not `enrolledApproved`.
@@ -365,7 +367,7 @@ describe('the counters', () => {
     });
 
     // Student B is approved on nothing, so the only resource they can see is the public
-    // one — which is exactly what `or(isPublic, enrolledApproved)` says (policy.ts:193).
+    // one — which is exactly what `resourceVisibleToStudent` says (`POLICY`).
     expect(await statsFor(world.studentB)).toEqual({
       courses: 0,
       pendingEnrollments: 1,
@@ -388,9 +390,10 @@ describe('the counters', () => {
   it('drops a soft-deleted course out of every counter that reaches it', async () => {
     const world = await seedWorld();
     // seedWorld files one PRIVATE resource on A1 (line 214). This second one is PUBLIC
-    // on purpose: `or(isPublic, ...)` (policy.ts:193-194) never looks at the course, so
-    // a public row on a dead course is the row a clause missing the course-level
-    // soft-delete term keeps visible to every role at once.
+    // on purpose: the `resourceVisible*` cells read the course's `publishedAt` through
+    // `publicAndLive` but NOT its `deletedAt` (`POLICY`), so a public row on a dead
+    // course is the row a clause missing the course-level soft-delete term keeps
+    // visible to every role at once.
     await makeResource(world.courseA1, world.teacherA.id, true);
     const onDeadCourse = await prisma.resource.count({ where: { courseId: world.courseA1 } });
 
@@ -413,7 +416,7 @@ describe('the counters', () => {
     expect(teacher).toEqual({
       courses: 1,
       // The pending row still exists; it is hidden because its course is gone, which is
-      // what `/enrollments?status=PENDING` does too (enrollments.service.ts:232-234).
+      // what `/enrollments?status=PENDING` does too (`visibilityWhere` in enrollments.service.ts).
       pendingEnrollments: 0,
       unreadMessages: 0,
       // Only B1's public resource survives: both of A1's died with the course.
@@ -511,7 +514,7 @@ describe('unreadMessages', () => {
     await message(thread, teacher.id, 3); // the teacher's own: never their own unread
     await message(thread, student.id, 4, { deleted: true }); // soft-deleted
 
-    // A thread neither of them is seated in. `isParticipant` (policy.ts:397-404) is the
+    // A thread neither of them is seated in. `isParticipant` (`POLICY`) is the
     // whole scope, so this must not reach either badge.
     const elsewhere = await conversationOf([{ userId: stranger.id, lastReadSeq: 0 }]);
     await message(elsewhere, stranger.id, 1);

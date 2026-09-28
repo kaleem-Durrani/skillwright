@@ -271,12 +271,13 @@ const coursesRoutes: FastifyPluginAsync = async (fastify) => {
    * The gate is `course:read`, NOT `resource:read`, and that is deliberate.
    *
    * A resource subject here would be wrong twice over. There is no single resource to
-   * build one from — the route returns a page of them — and the anonymous row of
-   * `resource:read` is `isPublic` (policy.ts:191-196), so a caller who is merely not
+   * build one from — the route returns a page of them — and the anonymous cell of
+   * `resource:read` is `publicAndLive`, not a bare `isPublic` (`POLICY`), so a caller who
+   * is merely not
    * enrolled is still entitled to this course's PUBLIC resources. Gating on a resource
    * subject would answer 403 to someone who should have received a shorter list.
    *
-   * Being allowed to read the COURSE (policy.ts:119-125) is the honest precondition for
+   * Being allowed to read the COURSE (`POLICY`'s `course:read`) is the honest precondition for
    * asking what is in it; the resources service then narrows the ROWS, mirroring the
    * `resource:read` rows in a WHERE clause. Same shape as the enrollments list above.
    */

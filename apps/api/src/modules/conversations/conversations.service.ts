@@ -211,7 +211,8 @@ async function conversationDto(actor: Actor, conversationId: string): Promise<Co
 // ---------------------------------------------------------------------------
 
 /**
- * Subject for `conversation:read` and `conversation:send` (policy.ts:397-416).
+ * Subject for `conversation:read` and `conversation:send` (the two rows of `POLICY`
+ * they name).
  *
  * `participantIds` is the ONLY field `isParticipant` reads (combinators.ts:82-85). A
  * wrong key here is a SILENT 403, never a type error, because every Subject field is
@@ -244,11 +245,11 @@ export async function loadConversationSubject(
 // ---------------------------------------------------------------------------
 
 /**
- * The WHERE clause that mirrors the `conversation:read` row rules, policy.ts:397-404:
+ * The WHERE clause that mirrors the `conversation:read` row rules, `POLICY`:
  *
  *   STUDENT -> isParticipant -> an active participant row for the actor
  *   TEACHER -> isParticipant -> the same
- *   ADMIN   -> isParticipant -> the same. policy.ts:401-403: "Admins moderate threads
+ *   ADMIN   -> isParticipant -> the same. The ADMIN cell says: "Admins moderate threads
  *              they were seated in; the schema can seat them, so there is no need for
  *              a bypass." There is deliberately no admin widening below.
  *
@@ -553,7 +554,7 @@ export async function sendMessage(
 
   /*
    * DEFAULT transaction budget on purpose — do NOT add `TX_OPTIONS` here by cargo cult
-   * from enrollments.service.ts:41-50. Conversation, ConversationParticipant and
+   * from `TX_OPTIONS` in enrollments.service.ts. Conversation, ConversationParticipant and
    * Message are all absent from `AUDITED_MODELS` (packages/db/src/audit.ts), so nothing inside this
    * callback writes on the audit extension's SECOND pool. The generous budget exists to
    * absorb that second connection; there is none to absorb here, and three statements
@@ -686,7 +687,8 @@ export async function markRead(
 // ---------------------------------------------------------------------------
 
 /**
- * ADMIN-only (policy.ts:417-424): "Self-joining an arbitrary thread is the whole
+ * ADMIN-only (`conversation:join` in `POLICY`): "Self-joining an arbitrary thread is the
+ * whole
  * attack. Only an admin adds a participant, and only to a thread that already exists."
  * The gate is role-only, so there is no subject loader — which is exactly why the
  * conversation's existence is checked HERE and answered as a 404.
@@ -722,7 +724,7 @@ export async function addParticipant(
   const dto = await conversationDto(actor, conversationId);
 
   /*
-   * policy.ts:397-404 — `conversation:read` is `isParticipant` for ADMIN too. An admin
+   * `conversation:read` is `isParticipant` for ADMIN too (`POLICY`). An admin
    * may SEAT someone into a thread they are not in, but seating someone does not earn
    * the right to read it, and `lastMessage` is message content. It is withheld rather
    * than the whole response being a 204, because the caller still needs to see that

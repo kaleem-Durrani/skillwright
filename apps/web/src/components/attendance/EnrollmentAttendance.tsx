@@ -36,8 +36,8 @@ export interface EnrollmentAttendanceProps {
  *
  * The same rule is why the gate is asked PER ROW rather than once for a list: each
  * row carries its own `id`, and a list of enrolments has no single subject. The
- * server scopes what arrives here anyway (`visibilityWhere`,
- * enrollments.service.ts:217-236), so the client gate is the UI half — no request
+ * server scopes what arrives here anyway (`visibilityWhere` in enrollments.service.ts),
+ * so the client gate is the UI half — no request
  * is even configured for a viewer who would be answered 403.
  */
 export function EnrollmentAttendance({ enrollment, title }: EnrollmentAttendanceProps) {

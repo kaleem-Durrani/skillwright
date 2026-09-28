@@ -436,7 +436,8 @@ describe('GET /audit-events — who may read it', () => {
     const response = await get('', student);
     expect(response.statusCode).toBe(403);
     expect(response.json().code).toBe('FORBIDDEN');
-    // policy.ts:452-457 — a terminal deny that reads no Subject field, which is why the
+    // `audit:read` cells in `POLICY` — a terminal deny that reads no Subject field, which is
+    // why the
     // route can be gated by a bare authorize('audit:read') with no subject loader.
     expect(response.json().detail).toContain('rule: STUDENT:deny');
   });

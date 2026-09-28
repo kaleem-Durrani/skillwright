@@ -31,7 +31,7 @@ const conversationsRoutes: FastifyPluginAsync = async (fastify) => {
   /*
    * No `authorize('conversation:read')` here, deliberately.
    *
-   * `conversation:read` is `isParticipant` for all three roles (policy.ts:397-404), and
+   * `conversation:read` is `isParticipant` for all three roles (`POLICY`), and
    * `isParticipant` reads `Subject.participantIds` (combinators.ts:82-85). A
    * cross-conversation list has no single subject, and the gate with an empty one
    * denies EVERYONE — a rule that reads an absent field must deny (actor.ts:46-51), so
@@ -39,7 +39,7 @@ const conversationsRoutes: FastifyPluginAsync = async (fastify) => {
    * enrollments.routes.ts:32-40 documents.
    *
    * So the route gates on authentication and the policy becomes a WHERE clause:
-   * `visibilityWhere` in the service, which mirrors policy.ts:397-404 row for row. The
+   * `visibilityWhere` in the service, which mirrors `POLICY`'s `conversation:read` row for row. The
    * session-state gates (MFA_PENDING, SUSPENDED, PENDING_VERIFICATION) still apply —
    * they live in auth.plugin.ts's onRequest hook (:63-83), which covers routes that
    * skip `authorize()`, which is what makes skipping it safe here.
@@ -55,7 +55,8 @@ const conversationsRoutes: FastifyPluginAsync = async (fastify) => {
     async (request) => conversationsService.list(requireActor(request), request.query),
   );
 
-  // policy.ts:405-410 is anonymous deny / STUDENT, TEACHER, ADMIN allow: role-only,
+  // `conversation:create` in `POLICY` is anonymous deny / STUDENT, TEACHER, ADMIN
+  // allow: role-only,
   // reading no Subject field, so a BARE authorize() is a complete gate — the same
   // argument departments.routes.ts:15-29 makes for its whole module.
   app.post(
@@ -102,7 +103,8 @@ const conversationsRoutes: FastifyPluginAsync = async (fastify) => {
         body: sendMessageSchema,
         response: { 201: messageSchema },
       },
-      // policy.ts:411-416 — isParticipant for all three roles, same subject as the read.
+      // `conversation:send` in `POLICY` — isParticipant for all three roles, same subject
+      // as the read.
       preHandler: authorize('conversation:send', (request) =>
         conversationsService.loadConversationSubject(conversationIdOf(request)),
       ),
@@ -121,8 +123,8 @@ const conversationsRoutes: FastifyPluginAsync = async (fastify) => {
 
   /*
    * STAND-IN GATE, named rather than assumed: there is no `conversation:mark-read`
-   * action in the `Action` union (policy.ts:26-82), and `conversation:read`
-   * (policy.ts:397-404, isParticipant) is both the closest existing gate and the
+   * action in the `Action` union, and `conversation:read`
+   * (`POLICY`, isParticipant) is both the closest existing gate and the
    * correct predicate — only a seated participant may move their own high-water mark,
    * and the service scopes the UPDATE to `actor.id` so passing this gate never lets one
    * participant move another's. Adding a real action would cost matrix rows in
@@ -153,7 +155,8 @@ const conversationsRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   /*
-   * BARE authorize(): policy.ts:417-424 is anonymous deny / STUDENT deny / TEACHER deny
+   * BARE authorize(): `conversation:join` in `POLICY` is anonymous deny / STUDENT deny /
+   * TEACHER deny
    * / ADMIN allow — "Self-joining an arbitrary thread is the whole attack. Only an admin
    * adds a participant, and only to a thread that already exists." Every cell is a
    * terminal allow/deny that reads no Subject field, so no subject loader is needed and

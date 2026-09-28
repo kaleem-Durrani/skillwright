@@ -627,7 +627,8 @@ describe('POST /users/:id/suspend', () => {
     ).id;
 
     const response = await send('POST', `/${adminId}/suspend`, undefined, admin);
-    // policy.ts:316-317 — self-suspension would lock the last admin out of the instance.
+    // The `user:suspend` ADMIN cell — self-suspension would lock the last admin out of the
+    // instance.
     expect(response.statusCode).toBe(403);
     expect(response.json().detail).toContain('rule: ADMIN:not(isSelf)');
 

@@ -977,7 +977,7 @@ describe('CourseDetail withdrawal — the viewer’s own seat', () => {
 
   it('offers a TEACHER no withdrawal at all, even on their own course', async () => {
     // A teacher owns every seat on their course and may approve or reject one, but
-    // `enrollment:withdraw` is a bare `deny` for the role (policy.ts:227-233): a
+    // `enrollment:withdraw` is a bare `deny` for the role (`POLICY`): a
     // teacher removing a student is a REJECTION — a different verb, a different audit
     // row, a different notification.
     //

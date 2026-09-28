@@ -137,7 +137,8 @@ describe('GET /admin/stats', () => {
     const admin = await signedIn('admin3@example.com', 'ADMIN');
     const goneId = await createAccount('gone@example.com', 'STUDENT');
 
-    // Soft delete is not enforced by the ORM (schema.prisma:6-7 rule 3) — these rows
+    // Soft delete is not enforced by the ORM (rule 3 of the design-rules block at the
+    // head of schema.prisma) — these rows
     // stay in the table and only the service's hand-written filter removes them.
     await prisma.user.update({ where: { id: goneId }, data: { deletedAt: new Date() } });
     await prisma.department.update({
@@ -223,7 +224,7 @@ describe('GET /admin/stats — the permission', () => {
     const response = await get('/stats', student);
     expect(response.statusCode).toBe(403);
     expect(response.json().code).toBe('FORBIDDEN');
-    // policy.ts:321 — `user:list` STUDENT is a bare `deny`, and the stand-in gate is
+    // The `user:list` STUDENT cell is a bare `deny`, and the stand-in gate is
     // only defensible because that cell reads no Subject field.
     expect(response.json().detail).toContain('rule: STUDENT:deny');
   });
@@ -233,7 +234,7 @@ describe('GET /admin/stats — the permission', () => {
 
     const response = await get('/stats', teacher);
     expect(response.statusCode).toBe(403);
-    // policy.ts:322 — a teacher runs courses, not the instance.
+    // The `user:list` TEACHER cell: a teacher runs courses, not the instance.
     expect(response.json().detail).toContain('rule: TEACHER:deny');
   });
 

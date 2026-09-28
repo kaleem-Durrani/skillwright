@@ -77,8 +77,9 @@ export function DashboardPage() {
    *
    * `course:read` is Subject-dependent for both non-admin roles: STUDENT is
    * `or(isPublished, enrolledApproved)` and TEACHER is `or(isPublished, ownsCourse)`
-   * (policy.ts:119-125), which read `publishedAt`, `enrollmentStatus` and
-   * `courseTeacherId` (combinators.ts:55-59, :62-65, :95-98). `can()` substitutes
+   * (`POLICY`: `studentCourseVisible` and `teacherOrPublishedCourse`), which read
+   * `publishedAt`, `enrollmentStatus` and `courseTeacherId` (combinators.ts:55-59, :62-65,
+   * :95-98). `can()` substitutes
    * EMPTY_SUBJECT when the third argument is omitted (can.ts:53) and a rule that reads an
    * absent field must deny (actor.ts:46-51), so the subject-free call was false for every
    * student and every teacher — only ADMIN got through, on its bare `allow`. That is not
@@ -102,7 +103,7 @@ export function DashboardPage() {
    * in it shares, rather than subject-free or by reading the role by hand.
    *
    * `enrollment:approve` is STUDENT `deny` / TEACHER `ownsCourse` / ADMIN `allow`
-   * (policy.ts:167-172), and `ownsCourse` reads `Subject.courseTeacherId`
+   * (the `enrollment:approve` row of `POLICY`), and `ownsCourse` reads `Subject.courseTeacherId`
    * (combinators.ts:55-59). Asked with no subject at all it was false for a TEACHER too —
    * the one person this queue exists for — because `can()` falls back to EMPTY_SUBJECT
    * (can.ts:53) and a rule that reads an absent field must deny (actor.ts:46-51). That
@@ -110,12 +111,12 @@ export function DashboardPage() {
    * only admins with an enrolment queue.
    *
    * The subject is not invented. `GET /enrollments` scopes a teacher's rows to
-   * `course.teacherId = actor.id` (`visibilityWhere`, enrollments.service.ts:216-222), so
+   * `course.teacherId = actor.id` (`visibilityWhere` in enrollments.service.ts), so
    * `courseTeacherId: user.id` is the one fact EVERY row this queue can contain shares —
    * it is `Course.teacherId` for all of them (actor.ts:67-68). The other two roles never
    * read the field: STUDENT is a bare `deny` and ADMIN a bare `allow`, so it decides
    * nothing for them. Deriving the subject from the actor is the same move the per-user
-   * lists make with `{ userId: actor.id }` (policy.ts:460).
+   * lists make with `{ userId: actor.id }` (the `notification:read` STUDENT cell in `POLICY`).
    *
    * One boolean drives the fetch AND the render, so this section can never show a
    * skeleton for a query that will not run. And a student is not merely spared a request
@@ -146,8 +147,8 @@ export function DashboardPage() {
    * CONTRIBUTING.md names, the same move `courseQuery` above makes for a teacher.
    *
    * `GET /enrollments` has no per-subject policy gate because it self-scopes
-   * (`visibilityWhere` narrows a STUDENT's rows to `studentId = actor.id`,
-   * enrollments.service.ts:217-236), so this is safe to run for any signed-in user;
+   * (`visibilityWhere` narrows a STUDENT's rows to `studentId = actor.id` in
+   * enrollments.service.ts), so this is safe to run for any signed-in user;
    * it is simply wasted on everyone who is not a student. Each returned row then
    * carries what `EnrollmentAttendance` needs to build the ENROLLMENT-shaped
    * subject for `attendance:read` — including `course.teacher.id`, which is where

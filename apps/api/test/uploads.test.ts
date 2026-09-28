@@ -339,7 +339,7 @@ describe('POST /uploads/presign', () => {
   /**
    * 401, not 403 — and that is the repository's rule, not a concession.
    *
-   * `upload:presign` denies anonymous (policy.ts:380), and `authorize()` turns a refusal
+   * `upload:presign` denies anonymous (`POLICY`), and `authorize()` turns a refusal
    * with no actor into `unauthenticated()` before it ever reaches `forbidden()`
    * (auth.plugin.ts:121). Every anonymous-denial assertion in this suite says the same
    * thing (enrollments.test.ts:519-524). A logged-out caller therefore never learns a rule
@@ -381,8 +381,8 @@ describe('POST /uploads/presign', () => {
         person.token,
       );
 
-      // policy.ts:379-384 — `upload:presign` is `allow` for all three roles and carries no
-      // subject at all (it is in SUBJECT_INDEPENDENT_ACTIONS, policy.ts:516). Asking for a
+      // `upload:presign` is `allow` for all three roles and carries no
+      // subject at all (it is in SUBJECT_INDEPENDENT_ACTIONS). Asking for a
       // URL is not the same as being allowed to attach the result to anything.
       expect(response.statusCode).toBe(201);
       const signed: PresignBody = response.json();
@@ -508,7 +508,7 @@ describe('POST /uploads/presign', () => {
         // Ignored, not honoured: `presignUploadSchema` (upload.ts:46-53) declares no owner,
         // so zod strips this before the handler sees it. The owner is the session — the only
         // claim the server can verify — and it is what `upload:commit`'s `isSelf` will later
-        // be decided against (policy.ts:385-392), so a body-chosen owner here would hand the
+        // be decided against (`POLICY`), so a body-chosen owner here would hand the
         // commit gate away with it.
         ownerId: victim.id,
       },
@@ -798,7 +798,8 @@ describe('POST /uploads/commit', () => {
 
     expect(response.statusCode).toBe(403);
     expect(response.json().code).toBe('FORBIDDEN');
-    // policy.ts:387-389, verbatim: "Committing someone else's pending upload would let an
+    // The `upload:commit` STUDENT cell, verbatim: "Committing someone else's pending upload
+    // would let an
     // attacker attach bytes they never uploaded." The rule name is what proves the subject
     // was actually loaded — a gate handed no subject at all denies with the SAME name while
     // refusing the owner too, which is LESSONS-LEARNED #15's exact shape.
@@ -1173,7 +1174,7 @@ describe('POST /uploads/commit', () => {
    *
    * `resource:read` gives ADMIN `allow`, a rule that reads no field, so an admin passes the
    * gate on a missing row and the handler answers a truthful 404 (resources.test.ts:590-620).
-   * `upload:commit` has no such cell: all three roles are `isSelf` (policy.ts:385-392). The
+   * `upload:commit` has no such cell: all three roles are `isSelf` (`POLICY`). The
    * loader returns `undefined` for a row that is not there, `can()` runs `isSelf` against
    * EMPTY_SUBJECT (can.ts:53), `subject.userId` is absent, and a rule that reads an absent
    * field must deny (combinators.ts:46-49). So nobody — admin included — can use this
@@ -1202,7 +1203,7 @@ describe('POST /uploads/commit', () => {
 /**
  * The reason this suite exists.
  *
- * `resource:download` is deliberately NARROWER than `resource:read` (policy.ts:217-226):
+ * `resource:download` is deliberately NARROWER than `resource:read` (`POLICY`):
  * the visitor who may see that a public resource exists may not pull its bytes out of the
  * bucket. Every case below is one row of that table — and the last one is the object store
  * answering for itself, with the API taken out of the loop entirely.
@@ -1290,14 +1291,15 @@ describe('GET /resources/:id/download', () => {
     const courseId = await makeCourse(teacher.id);
     const doc = await publishDocument(teacher, courseId, { isPublic: true, marker: 'anon' });
 
-    // policy.ts:192 — the anonymous row of `resource:read` is `isPublic`, so this succeeds
+    // `POLICY` — the anonymous cell of `resource:read` is `publicAndLive` on a published
+    // course, so this succeeds
     // and the catalogue stays browsable without an account.
     const read = await get(`/resources/${doc.resourceId}`);
     expect(read.statusCode).toBe(200);
     expect(read.json().id).toBe(doc.resourceId);
     expect(read.json().uploadId).toBe(doc.uploadId);
 
-    // policy.ts:217-222 — the anonymous row of `resource:download` is `deny`. Same visitor,
+    // The anonymous cell of `resource:download` in `POLICY` is `deny`. Same visitor,
     // same row, one step further, refused. That gap is the anti-scraping line: without it a
     // crawler drains every public course's material in an afternoon.
     const download = await get(`/resources/${doc.resourceId}/download`);
@@ -1449,7 +1451,7 @@ describe('GET /resources/:id/download', () => {
       data: {
         courseId,
         // The author is the teacher who owns the course, so `resource:download` says YES
-        // (policy.ts:217-226) and the 409 below is reached rather than short-circuited by
+        // (`POLICY`) and the 409 below is reached rather than short-circuited by
         // a 403 — a conflict is only meaningful to a caller who was entitled to the row.
         authorId: teacher.id,
         title: 'Handbook whose upload was never confirmed',

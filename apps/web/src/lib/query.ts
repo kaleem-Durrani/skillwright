@@ -19,7 +19,7 @@ function shouldRetry(failureCount: number, error: unknown): boolean {
  * The two codes that mean "the session you think you have is gone".
  *
  * Both are reachable from one suspension, and which one arrives is a race:
- * `users.service.ts:300-310` sets the status AND destroys every session row, so a
+ * `suspend()` in users.service.ts sets the status AND destroys every session row, so a
  * request that lands after the rows are gone finds no session and is anonymous
  * (401), while one that lands between the two writes finds a live session owned by
  * a suspended user and is refused by auth.plugin.ts:63-67 (403). Logging out in

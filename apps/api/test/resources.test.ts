@@ -184,7 +184,7 @@ async function signIn(email: string, role: Role): Promise<Person> {
 
 /**
  * Published unless a test says otherwise. The nested list is gated on `course:read`
- * (policy.ts:117-123), whose anonymous and non-owning-teacher rows are `isPublished` —
+ * (`POLICY`), whose anonymous and non-owning-teacher rows are `isPublished` —
  * a draft course would refuse those callers at the gate and prove nothing about the row
  * filtering underneath it.
  */
@@ -327,7 +327,7 @@ async function seedWorld(): Promise<World> {
 // --- tests -----------------------------------------------------------------
 
 /**
- * Every case here is a row of `resource:read` (policy.ts:191-196) expressed as rows in a
+ * Every case here is a row of `resource:read` (`POLICY`) expressed as rows in a
  * response body. The list narrows with a WHERE clause rather than a subject decision, so
  * these are the only assertions that can show the clause and the policy still agree — a
  * subject-based test exercises a different code path entirely.
@@ -339,7 +339,7 @@ describe("listing a course's resources", () => {
     const response = await get(`/courses/${world.courseA}/resources`);
 
     expect(response.statusCode).toBe(200);
-    // policy.ts:192 — the anonymous row is `isPublic`, and nothing else.
+    // `POLICY` — the anonymous cell is `publicAndLive`, and this course is published.
     expect(idsOf(response)).toEqual([world.publicA]);
     expect(response.json().meta).toMatchObject({ page: 1, limit: 20, total: 1, totalPages: 1 });
   });
@@ -394,7 +394,8 @@ describe("listing a course's resources", () => {
 
     const response = await get(`/courses/${world.courseA}/resources`, world.teacherB.token);
 
-    // policy.ts:194 is or(isPublic, ownsCourse, isAuthor). Teacher B owns neither the
+    // `resourceVisibleToTeacher` is or(publicAndLive, ownsCourse, isAuthor). Teacher B owns
+    // neither the
     // course nor either row, so only the public one survives — a blanket TEACHER branch
     // would hand a colleague's unpublished material to anyone holding the role.
     expect(response.statusCode).toBe(200);
@@ -451,8 +452,8 @@ describe("listing a course's resources", () => {
   /**
    * 200 and the public shelf, unconditionally — this is settled, not a judgement call.
    * resources.routes.ts:47-59 passes `request.actor` and deliberately does NOT call
-   * `requireActor`, because the anonymous row of `resource:read` is `isPublic` and not
-   * `deny` (policy.ts:192). A 401 here would be the route regressing to a session
+   * `requireActor`, because the anonymous cell of `resource:read` is `publicAndLive` and not
+   * `deny` (`POLICY`). A 401 here would be the route regressing to a session
    * requirement the policy does not ask for, and an `expect([200, 401])` cannot tell
    * that apart from the intended behaviour.
    */
@@ -481,7 +482,7 @@ describe("listing a course's resources", () => {
 
     const flat = await get('/resources', world.teacherB.token);
     expect(flat.statusCode).toBe(200);
-    // resources.service.ts:235 mirrors policy.ts:194 term for term.
+    // `visibleResourcesWhere` mirrors `resourceVisibleToTeacher` term for term.
     expect(idsOf(flat)).toContain(authoredByB);
     expect(idsOf(flat)).not.toContain(world.privateA);
     expect(idsOf(flat).sort()).toEqual(
@@ -806,7 +807,8 @@ describe('creating a resource', () => {
 
     expect(response.statusCode).toBe(403);
     expect(response.json().code).toBe('FORBIDDEN');
-    // policy.ts:198-205, verbatim: "without this a teacher could file a resource into a
+    // The `resource:create` TEACHER cell, verbatim: "without this a teacher could file a
+    // resource into a
     // colleague's course by guessing a courseId". The subject has to be built from the
     // BODY's course for this to fire — a subject-free gate reports the same rule name
     // while denying everyone, the owner included, which is the failure mode
@@ -942,7 +944,7 @@ describe('creating a resource', () => {
    * already said yes in every case below — the caller owns the course — so these three
    * branches are the whole of what stands between a guessed upload id and a colleague's
    * private file, and there is no `upload:attach` action in the policy table to express
-   * it (policy.ts:68-69 stops at presign and commit).
+   * it (the `Action` union stops at `upload:presign` and `upload:commit`).
    */
   it("refuses an uploadId owned by another teacher, at path 'uploadId'", async () => {
     const owner = await signIn('teacher-upload-owner@example.com', 'TEACHER');
@@ -1063,7 +1065,7 @@ describe('updating and deleting', () => {
     );
     expect(refused.statusCode).toBe(403);
     expect(refused.json().code).toBe('FORBIDDEN');
-    // policy.ts:206-211 — TEACHER:ownsCourse, not isAuthor. Authorship does not travel
+    // `POLICY` — TEACHER:ownsCourse, not isAuthor. Authorship does not travel
     // with a row into someone else's course.
     expect(refused.json().detail).toContain('TEACHER:ownsCourse');
 

@@ -362,7 +362,7 @@ describe('GET /conversations/:conversationId/messages', () => {
     const response = await get(`/${conversation.id}/messages`, intruder.cookie);
     expect(response.statusCode).toBe(403);
     expect(response.json().code).toBe('FORBIDDEN');
-    // policy.ts:397-404 — `conversation:read` is isParticipant for every role.
+    // `conversation:read` is isParticipant for every role (`POLICY`).
     expect(response.json().detail).toContain('rule: STUDENT:isParticipant');
   });
 
@@ -376,7 +376,8 @@ describe('GET /conversations/:conversationId/messages', () => {
 
     const response = await get(`/${conversation.id}/messages`, admin.cookie);
     expect(response.statusCode).toBe(403);
-    // policy.ts:401-403 — "Admins moderate threads they were seated in"; there is no
+    // The `conversation:read` ADMIN cell — "Admins moderate threads they were seated in";
+    // there is no
     // bypass row, and the service must not invent one.
     expect(response.json().detail).toContain('rule: ADMIN:isParticipant');
   });
@@ -440,7 +441,7 @@ describe('POST /conversations/:conversationId/messages', () => {
       intruder.cookie,
     );
     expect(response.statusCode).toBe(403);
-    // policy.ts:411-416.
+    // `conversation:send` in `POLICY`.
     expect(response.json().detail).toContain('rule: TEACHER:isParticipant');
     expect(await prisma.message.count({ where: { conversationId: conversation.id } })).toBe(0);
   });
@@ -535,7 +536,7 @@ describe('POST /conversations/:conversationId/participants', () => {
       student.cookie,
     );
     expect(response.statusCode).toBe(403);
-    // policy.ts:417-424 — "Self-joining an arbitrary thread is the whole attack."
+    // `conversation:join` in `POLICY` — "Self-joining an arbitrary thread is the whole attack."
     expect(response.json().detail).toContain('rule: STUDENT:deny');
   });
 
@@ -596,7 +597,7 @@ describe('POST /conversations/:conversationId/participants', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json().participants).toHaveLength(3);
     // `conversation:join` is ADMIN-allow, but `conversation:read` is still
-    // isParticipant for ADMIN (policy.ts:397-404): seating someone does not earn the
+    // isParticipant for ADMIN (`POLICY`): seating someone does not earn the
     // right to read the thread.
     expect(response.json().lastMessage).toBeNull();
   });
@@ -611,8 +612,9 @@ describe('POST /conversations/:conversationId/participants', () => {
       { userId: someone },
       admin.cookie,
     );
-    // The gate is role-only, so the existence check is the service's — policy.ts:421
-    // says "only to a thread that already exists" and nothing else could enforce it.
+    // The gate is role-only, so the existence check is the service's — the
+    // `conversation:join` comment in `POLICY` says "only to a thread that already
+    // exists" and nothing else could enforce it.
     expect(response.statusCode).toBe(404);
   });
 });

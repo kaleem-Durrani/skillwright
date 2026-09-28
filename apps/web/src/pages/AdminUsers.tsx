@@ -42,7 +42,7 @@ import { Route } from '@/routes/_app/admin.users';
 
 /**
  * There is no top-level department on a person. `User` has no `departmentId`
- * column (users.service.ts:31-36) — membership hangs off whichever profile the
+ * column (`model User` in schema.prisma) — membership hangs off whichever profile the
  * account has, and an ADMIN has neither — so `userDetailSchema` nests it as
  * `teacherProfile.departmentName` / `studentProfile.departmentName`, both nullable
  * (user.ts:30-45, :64-65). The old `entry.departmentName` read a field no endpoint
@@ -60,7 +60,7 @@ function departmentNameOf(user: UserDetail): string | null {
  * when it is absent rather than defaulting to the actor (combinators.ts:46-49). A
  * user DTO carries `id`, never `userId`, so a spread left `userId` undefined,
  * `isSelf` false and — because `user:suspend` for ADMIN is `not(isSelf)`
- * (policy.ts:312-318) — the check came back TRUE for an admin acting on their own
+ * (`POLICY`) — the check came back TRUE for an admin acting on their own
  * account. The SPA offered "Suspend account" against yourself and the API refused
  * it. The spread also drags `teacherProfile` / `studentProfile` into a Subject that
  * has no such fields.
@@ -176,7 +176,7 @@ export function AdminUsersPage() {
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             {/*
               `user:create` is subject-free — every cell is a terminal allow/deny
-              decided by role alone (policy.ts:338-347), which is what makes it safe to
+              decided by role alone (`POLICY`), which is what makes it safe to
               gate an affordance with no target on it. A teacher or student never sees
               the button; the API would refuse them anyway.
             */}

@@ -170,7 +170,7 @@ async function detailById(id: string): Promise<UserDetail> {
 // ---------------------------------------------------------------------------
 
 /**
- * `user:list` is role-only (policy.ts:355-360: anonymous/STUDENT/TEACHER deny, ADMIN
+ * `user:list` is role-only (`POLICY`: anonymous/STUDENT/TEACHER deny, ADMIN
  * allow), so — unlike `GET /enrollments` or `GET /courses` — this list has NO
  * `visibilityWhere`. There is no row scoping to mirror, because the only role that
  * reaches the handler may see every row. The clause below is caller FILTERS plus the
@@ -770,7 +770,7 @@ function describeFailure(error: unknown): {
  * `auditExtension` in audit.ts). Wrapping that
  * in `prisma.$transaction(async tx => …)` next to a second statement is the shape that
  * deadlocks the pool under concurrency and surfaces as P2024 reading like slowness —
- * the trap enrollments.service.ts:41-50 pays a 15s budget to survive. Nothing here
+ * the trap `TX_OPTIONS` in enrollments.service.ts pays a 15s budget to survive. Nothing here
  * needs atomicity: a suspension whose session sweep failed is re-run by
  * auth.plugin.ts:63-67 the moment any surviving cookie is presented.
  *
@@ -786,7 +786,7 @@ export async function suspend(id: string, input?: SuspendUserInput): Promise<Use
 
   if (current.status === 'SUSPENDED') {
     // Idempotent: a double click returns the row unchanged rather than writing a
-    // second SUSPEND audit row, the enrollments.service.ts:389-398 pattern. The
+    // second SUSPEND audit row, the `approve` pattern in enrollments.service.ts. The
     // extension derives its action from a TRANSITION, so a no-op update would be
     // recorded as a plain UPDATE and muddy the trail rather than repeat it.
     return detailById(id);

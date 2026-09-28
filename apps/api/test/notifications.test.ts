@@ -276,7 +276,8 @@ describe('the rule these routes rest on', () => {
     } as const;
 
     expect(can(actor, 'notification:read', { userId: 'me' })).toEqual({ allowed: true });
-    // policy.ts:461-463 — isSelf for all three roles. The gate can only answer yes/no
+    // The `notification:read` role cells in `POLICY` are isSelf for all three roles. The
+    // gate can only answer yes/no
     // for the caller's own subject, so `scopedWhere` is what stops the list serving
     // another user's rows; this assertion names the rule that makes that necessary.
     expect(can(actor, 'notification:read', { userId: 'someone-else' })).toMatchObject({
@@ -365,7 +366,7 @@ describe('GET /notifications', () => {
     await seedNotification(studentId, { title: 'Not for the admin' });
 
     const body = await get('', admin).then((response) => response.json());
-    // policy.ts:463 — ADMIN is `isSelf` here, not `allow`. An admin reads their own
+    // The `notification:read` ADMIN cell is `isSelf` here, not `allow`. An admin reads their own
     // bell like everyone else.
     expect(body.data).toHaveLength(0);
     expect(body.meta.total).toBe(0);

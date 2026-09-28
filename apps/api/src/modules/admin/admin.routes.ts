@@ -21,11 +21,11 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
 
   /*
    * `authorize('user:list')` IS A STAND-IN. There is no `admin:*` entry in the `Action`
-   * union (policy.ts:26-82) at all, and inventing one here is not this change's to make.
+   * union at all, and inventing one here is not this change's to make.
    *
    * Why this stand-in is correct rather than a near-miss:
    *
-   *   - `user:list` (policy.ts:319-324) is anonymous deny / STUDENT deny / TEACHER deny
+   *   - `user:list` (`POLICY`) is anonymous deny / STUDENT deny / TEACHER deny
    *     / ADMIN allow. EVERY cell is a terminal `allow` or `deny` that reads no Subject
    *     field, so a BARE `authorize()` with no subject loader is a COMPLETE gate — the
    *     same argument departments.routes.ts:15-29 makes for its whole module. This is
@@ -38,7 +38,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
    *     admitted.
    *   - The name is not a lie about what is read: three of the four counters
    *     (`users`, `suspendedUsers`, `departments`) are the user and department tables.
-   *     `audit:read` (policy.ts:452-457) has the identical role cells and would also
+   *     `audit:read` (`POLICY`) has the identical role cells and would also
    *     work; it is the weaker fit because only ONE of the four counters touches
    *     AuditEvent.
    *   - It is absent from DEMO_DENIED (can.ts:24-31), so a demo admin still sees the

@@ -121,16 +121,17 @@ function orderFor(query: ListNotificationsQuery): Prisma.NotificationOrderByWith
 }
 
 /**
- * The `notification:read` policy row (policy.ts:458-464) expressed as a WHERE clause.
+ * The `notification:read` policy row (`POLICY`) expressed as a WHERE clause.
  *
  * All three roles are `isSelf` and anonymous is denied, so `authorize()` at the route
  * DOES answer this action completely — unlike the cross-collection lists in
- * enrollments.service.ts:199-215 and courses.service.ts:158-184, which have no
+ * `list` in enrollments.service.ts and courses.service.ts, which have no
  * `authorize()` at all. The gate here is real; what a yes/no gate cannot do is scope
  * ROWS. That is what this clause is for.
  *
  * `userId: actor.id` is therefore NOT a filter and NOT optional: it is the whole
- * row-level authorization. policy.ts:460 states the contract in the policy table
+ * row-level authorization. The `notification:read` STUDENT cell states the contract in the
+ * policy table
  * itself — "Notification rows are per-user". Dropping this term serves every user's
  * notifications to every caller, and no test of the gate would notice.
  *
@@ -201,7 +202,7 @@ export async function unreadCount(actor: Actor): Promise<UnreadCountResponse> {
  * Notification is NOT in `AUDITED_MODELS` (audit.ts — the set omits Notification by
  * name), so this write puts nothing on
  * the audit extension's second pool — no interactive transaction and none of
- * enrollments.service.ts:41-50's enlarged budget is needed here.
+ * `TX_OPTIONS` in enrollments.service.ts's enlarged budget is needed here.
  */
 export async function markRead(
   actor: Actor,
