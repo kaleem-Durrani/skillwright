@@ -29,19 +29,88 @@ updates:
         update-types:
           - patch
           - minor
-      # Majors are grouped only so the list is readable; each still needs review.
-      major:
-        applies-to: version-updates
-        update-types:
-          - major
       security:
         applies-to: security-updates
         patterns:
           - '*'
+    # There is deliberately NO `major` group here.
+    #
+    # It used to say "Majors are grouped only so the list is readable; each still
+    # needs review", and that was the mistake. On 2026-09-21 it produced one pull
+    # request carrying 31 unrelated major bumps across all five workspaces, and the
+    # only signal it emitted was a red X. Nobody can review 31 majors, so nobody
+    # reviewed it, so it sat — and a red PR nobody reads is worse than no PR, because
+    # it reads as "dependency maintenance is in progress" while nothing is.
+    #
+    # With no matching group, Dependabot opens ONE pull request per major, capped at
+    # `open-pull-requests-limit` above. Five at a time is the most this repository
+    # can genuinely absorb, and a single-major diff is small enough that the reason
+    # it is hard stops being a reason.
+    #
+    # The majors below are held back explicitly rather than left to fail. Each entry
+    # names what would unblock it, because an ignore rule with no exit condition is
+    # just a dependency that silently stopped being maintained.
     ignore:
       # Node's own types track the runtime, which is pinned by .nvmrc and the
       # Dockerfile. Bumping them independently only produces noise.
       - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
+
+      # --- Blocked on UPSTREAM. No version of these can pass CI today. ---
+
+      # typescript 7 is a Go binary, not a JS library: it installs a matrix of
+      # platform binaries and there is no musl build, so it cannot work in the
+      # Alpine image the Dockerfile builds. It also has no compatible linter —
+      # typescript-eslint 8 peers `typescript <6.1.0`, and 8.70.1 is still the
+      # latest. Unblocked when typescript-eslint ships a 7-compatible major.
+      - dependency-name: 'typescript'
+        update-types: ['version-update:semver-major']
+
+      # eslint 10 is blocked by a package Dependabot cannot move:
+      # eslint-plugin-jsx-a11y@6.10.2 peers `eslint ^3…^9` and is still `latest` on
+      # npm, so there is no v10-compatible release to move to. That plugin supplies
+      # 17 of the 25 hand-written rules in apps/web/eslint.config.js, including the
+      # mobile-first `label-has-associated-control` gate. Unblocked when jsx-a11y
+      # declares eslint 10 support.
+      - dependency-name: 'eslint'
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@eslint/js'
+        update-types: ['version-update:semver-major']
+
+      # --- Blocked on WORK, not upstream. Each is a project, not a bump. ---
+
+      # prisma 7 requires a driver adapter, a `prisma.config.ts`, and a mandatory
+      # `output` in the generator block that packages/db/prisma/schema.prisma does
+      # not have. It also replaces the Rust query engine with node-pg, which would
+      # silently discard the `connection_limit`/`pool_timeout` parameters at
+      # packages/db/src/client.ts that reserve the audit extension its own pool —
+      # the deadlock documented in the comment directly above that code.
+      - dependency-name: 'prisma'
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@prisma/client'
+        update-types: ['version-update:semver-major']
+
+      # vite 8 replaces Rollup with Rolldown, so `manualChunks` stops being the
+      # primitive and becomes `codeSplitting.groups` with different semantics. This
+      # repository shipped a white screen on 2026-08-30 because a chunk predicate
+      # misclassified a package; the same class of bug under a different bundler is
+      # invisible to typecheck, to `vite build`, to the dev server and to every unit
+      # test. Unblocked when the migration is done deliberately, with the built
+      # bundle inspected.
+      - dependency-name: 'vite'
+        update-types: ['version-update:semver-major']
+
+      # zod 4 and fastify-type-provider-zod 7 are one unit, not two: the provider
+      # requires zod >= 4.2, so neither is independently landable. v7 also flips
+      # response serialization from `z.input<T>` to `z.output<T>`, and the
+      # `.transform()`-based date/bigint normalisation in
+      # packages/shared/src/schema/common.ts is what the whole API depends on at
+      # roughly forty field sites. @hookform/resolvers 5 requires the same zod major.
+      - dependency-name: 'zod'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'fastify-type-provider-zod'
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@hookform/resolvers'
         update-types: ['version-update:semver-major']
 
   - package-ecosystem: github-actions
