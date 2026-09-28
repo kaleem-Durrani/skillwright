@@ -37,7 +37,19 @@ test-results
 blob-report
 **/*.test.ts
 **/*.spec.ts
-**/e2e
+# The e2e TREE is deliberately NOT excluded here.
+#
+# It used to be (`**/e2e`), and that broke the image build on 2026-09-28 with
+#   playwright.config.ts:7:8 - error TS2307:
+#   Cannot find module './e2e/real/stack.js'
+# because playwright.config.ts is typechecked by the same `tsc -b` as the app, and
+# it imports that module at the top level. On a working tree the file is right
+# there, so `pnpm build` passed; inside the image `COPY . .` had skipped it, so the
+# identical command failed. `**/*.spec.ts` below already excludes every actual test
+# file, and what is left — fixtures.ts, e2e/real/stack.ts, auth.setup.ts,
+# setup-db.ts — is about 25 kB of helper module that the config cannot compile
+# without. None of it reaches the shipped image: the runtime stage copies only
+# /prod/api and /app/apps/web/dist.
 
 # Docs and planning
 docs
