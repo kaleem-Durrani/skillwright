@@ -245,7 +245,15 @@ describe('AttendanceRegister — marking and saving', () => {
 
     const save = await screen.findByRole('button', { name: /save register/i });
     // Ben arrived pre-marked in the fixture: the loaded register IS the baseline.
-    expect(screen.getByText(/1 of 3 marked/)).toBeInTheDocument();
+    //
+    // `findByText`, not `getByText`. The Save button and this counter are siblings,
+    // but they do not settle together: the draft is seeded from the server in an
+    // effect (AttendanceRegister.tsx:199-211), so the button's first render already
+    // carries the roster while the count still reads "0 of 3". Awaiting the button
+    // is therefore not awaiting the seeded count. The gap is one commit wide and
+    // closes before the next line runs on an idle machine, which is why this read as
+    // a pass in isolation and failed once under the full suite's load.
+    expect(await screen.findByText(/1 of 3 marked/)).toBeInTheDocument();
     expect(save).toBeEnabled();
 
     const ada = screen.getByRole('group', { name: 'Attendance for Ada Okafor' });
