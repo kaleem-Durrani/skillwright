@@ -11,9 +11,9 @@ calling `can()`. Nothing here was written by hand, which is why it cannot
 disagree with the code — and if it ever did, the `permissions-doc` job in CI
 would fail before the change could merge.
 
-- **49** actions, derived from the policy object's own keys
-- **196** cells in the role matrix
-- **245** cells in the state matrix
+- **51** actions, derived from the policy object's own keys
+- **204** cells in the role matrix
+- **255** cells in the state matrix
 - Asserted independently in `packages/shared/test/policy-matrix.test.ts`
 
 ## Reading a cell
@@ -63,9 +63,11 @@ rule reads named fields off `Subject` and denies when they are absent.
 | `department:read` | ✗ deny | ✓ allow | ✓ allow | ✓ allow |
 | `department:update` | ✗ deny | ✗ deny | ✗ deny | ✓ allow |
 | `enrollment:approve` | ✗ deny | ✗ deny | `ownsCourse` | ✓ allow |
+| `enrollment:complete` | ✗ deny | ✗ deny | `ownsCourse` | ✓ allow |
 | `enrollment:read` | ✗ deny | `isEnrolledStudent` | `ownsCourse` | ✓ allow |
 | `enrollment:reject` | ✗ deny | ✗ deny | `ownsCourse` | ✓ allow |
 | `enrollment:request` | ✗ deny | `and(isPublished, hasCompletedPrerequisite)` | ✗ deny | ✓ allow |
+| `enrollment:uncomplete` | ✗ deny | ✗ deny | `ownsCourse` | ✓ allow |
 | `enrollment:withdraw` | ✗ deny | `isEnrolledStudent` | ✗ deny | ✓ allow |
 | `mfa:disable` | ✗ deny | ✓ allow | ✓ allow | ✓ allow |
 | `mfa:enroll` | ✗ deny | ✓ allow | ✓ allow | ✓ allow |
@@ -136,9 +138,11 @@ demo: reads and ordinary mutations pass, deletions and suspensions do not.
 | `department:read` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `department:update` | ✗ `TEACHER:deny` | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✗ `TEACHER:deny` |
 | `enrollment:approve` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
+| `enrollment:complete` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `enrollment:read` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `enrollment:reject` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `enrollment:request` | ✗ `TEACHER:deny` | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✗ `TEACHER:deny` |
+| `enrollment:uncomplete` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `enrollment:withdraw` | ✗ `TEACHER:deny` | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✗ `TEACHER:deny` |
 | `mfa:disable` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `mfa:enroll` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |

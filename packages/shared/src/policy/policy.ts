@@ -38,6 +38,8 @@ export type Action =
   | 'enrollment:approve'
   | 'enrollment:reject'
   | 'enrollment:withdraw'
+  | 'enrollment:complete'
+  | 'enrollment:uncomplete'
   // attendance
   | 'attendance:mark'
   | 'attendance:read'
@@ -228,6 +230,37 @@ export const POLICY: PolicyTable = definePolicy({
     // A teacher removing a student is a rejection, not a withdrawal; separate verb,
     // separate audit action, separate notification.
     TEACHER: deny,
+    ADMIN: allow,
+  },
+  /*
+   * Recording a completion, and taking it back.
+   *
+   * Both cells are `enrollment:approve` verbatim, and deliberately so: a teacher who
+   * may seat a student may record that the seat was filled, and an admin who may seat
+   * one by hand is the registrar of last resort for exactly the same reason. A
+   * separate pair of rules would have been a place to write down who signs off a
+   * qualification, and nothing in this repository answers that better than the rule
+   * that already answers who may approve the seat it hangs on.
+   *
+   * `uncomplete` is a SEPARATE verb rather than a PATCH back to APPROVED, on the rule
+   * quoted one cell above — "separate verb, separate audit action, separate
+   * notification" — and the correction path is exactly where that rule earns its
+   * keep. A status column written by two different URLs carries one audit action, so
+   * the trail cannot distinguish "recorded a completion" from "erased one" and the
+   * reader is left diffing two JSON blobs. A verb of its own writes its own row, and
+   * a terminal state that cannot be corrected is a data-entry trap rather than a
+   * safety property.
+   */
+  'enrollment:complete': {
+    anonymous: deny,
+    STUDENT: deny,
+    TEACHER: ownsCourse,
+    ADMIN: allow,
+  },
+  'enrollment:uncomplete': {
+    anonymous: deny,
+    STUDENT: deny,
+    TEACHER: ownsCourse,
     ADMIN: allow,
   },
 

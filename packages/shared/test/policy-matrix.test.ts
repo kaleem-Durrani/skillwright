@@ -500,6 +500,58 @@ const ENROLLMENT_CELLS: readonly Cell[] = [
     ENROLLMENT_S1_IN_A,
   ),
   ok('admin withdraws any enrollment', ADMIN, 'enrollment:withdraw', ENROLLMENT_S1_IN_A),
+
+  /*
+   * Completion and its reversal. The four cells per action are the same four the
+   * approval block above asserts, and that is the claim: recording a qualification
+   * is exactly the authority to seat the student, and taking it back is exactly the
+   * same authority. Restating them per action is what proves the two rules cannot
+   * drift apart silently — a future edit that opens `enrollment:uncomplete` to a
+   * student would turn one of these red with the rule name in the failure.
+   */
+  ok(
+    'teacher completes an enrollment in their course',
+    TEACHER_A,
+    'enrollment:complete',
+    ENROLLMENT_S1_IN_A,
+  ),
+  no(
+    "teacher completes an enrollment in another teacher's course",
+    TEACHER_A,
+    'enrollment:complete',
+    'TEACHER:ownsCourse',
+    ENROLLMENT_S2_IN_B,
+  ),
+  no(
+    'student completes their own enrollment',
+    STUDENT_IN,
+    'enrollment:complete',
+    'STUDENT:deny',
+    ENROLLMENT_S1_IN_A,
+  ),
+  ok('admin completes any enrollment', ADMIN, 'enrollment:complete', ENROLLMENT_S2_IN_B),
+
+  ok(
+    'teacher reverses a completion in their course',
+    TEACHER_A,
+    'enrollment:uncomplete',
+    ENROLLMENT_S1_IN_A,
+  ),
+  no(
+    "teacher reverses a completion in another teacher's course",
+    TEACHER_A,
+    'enrollment:uncomplete',
+    'TEACHER:ownsCourse',
+    ENROLLMENT_S2_IN_B,
+  ),
+  no(
+    'student reverses their own completion',
+    STUDENT_IN,
+    'enrollment:uncomplete',
+    'STUDENT:deny',
+    ENROLLMENT_S1_IN_A,
+  ),
+  ok('admin reverses any completion', ADMIN, 'enrollment:uncomplete', ENROLLMENT_S2_IN_B),
 ];
 
 const ATTENDANCE_CELLS: readonly Cell[] = [

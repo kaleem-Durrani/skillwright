@@ -29,6 +29,13 @@ export const enrollmentSchema = z.object({
   decidedAt: nullableIsoDateTimeSchema,
   decidedBy: userSummarySchema.nullable(),
   decisionNote: z.string().nullable(),
+  /**
+   * When the qualification was recorded, and by whom. Null on every row that is not
+   * COMPLETED, and cleared again by `uncomplete` — which is what makes the pair
+   * honest rather than two independently-editable fields that can disagree.
+   */
+  completedAt: nullableIsoDateTimeSchema,
+  completedBy: userSummarySchema.nullable(),
 });
 export type EnrollmentDto = z.infer<typeof enrollmentSchema>;
 
@@ -61,6 +68,20 @@ export const withdrawEnrollmentSchema = z.object({
   reason: z.string().trim().max(500).optional(),
 });
 export type WithdrawEnrollmentInput = z.infer<typeof withdrawEnrollmentSchema>;
+
+/**
+ * Completion carries no body beyond an optional note, for the same reason approval
+ * does: the decision the server can make alone is that the seat existed and the term
+ * is over, and everything a teacher wants to say about it is a note.
+ *
+ * Unlike a rejection, the note is not shown to the student as THE reason — there is no
+ * reason a student failed to finish, only a fact that they did — so it lands in
+ * `decisionNote` the way an approval's does, and `uncomplete` takes it with it.
+ */
+export const completeEnrollmentSchema = z.object({
+  note: z.string().trim().max(500).optional(),
+});
+export type CompleteEnrollmentInput = z.infer<typeof completeEnrollmentSchema>;
 
 export const listEnrollmentsQuerySchema = paginationQuerySchema.extend({
   courseId: idSchema.optional(),

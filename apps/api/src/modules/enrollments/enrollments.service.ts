@@ -18,6 +18,7 @@ import { capacityExceeded, conflict, validationFailed } from '../../lib/errors.j
 import { notify } from '../notifications/notifications.service.js';
 import type {
   ApproveEnrollmentInput,
+  CompleteEnrollmentInput,
   EnrollmentDto,
   EnrollmentStatusValue,
   ExportEnrollmentsQuery,
@@ -41,6 +42,7 @@ import type {
 const ENROLLMENT_INCLUDE = {
   student: true,
   decidedBy: true,
+  completedBy: true,
   offering: { include: { course: { include: COURSE_SUMMARY_INCLUDE } } },
 } as const;
 
@@ -82,6 +84,8 @@ export function toEnrollmentDto(enrollment: EnrollmentWithRelations): Enrollment
     decidedAt: enrollment.decidedAt?.toISOString() ?? null,
     decidedBy: enrollment.decidedBy ? toUserSummary(enrollment.decidedBy) : null,
     decisionNote: enrollment.decisionNote,
+    completedAt: enrollment.completedAt?.toISOString() ?? null,
+    completedBy: enrollment.completedBy ? toUserSummary(enrollment.completedBy) : null,
   };
 }
 
@@ -90,7 +94,8 @@ export function toEnrollmentDto(enrollment: EnrollmentWithRelations): Enrollment
 // ---------------------------------------------------------------------------
 
 /**
- * Subject for `enrollment:read`, `:approve`, `:reject` and `:withdraw`.
+ * Subject for `enrollment:read`, `:approve`, `:reject`, `:withdraw`, `:complete` and
+ * `:uncomplete`.
  *
  * `undefined` for a missing row, a soft-deleted offering or a soft-deleted course, so
  * the policy denies rather than this loader throwing a bare 404 before the gate has
@@ -99,7 +104,7 @@ export function toEnrollmentDto(enrollment: EnrollmentWithRelations): Enrollment
  * `enrollmentStatus` is deliberately ABSENT. actor.ts: that field is the REQUESTING
  * actor's status in the relevant course, not the status of some arbitrary enrollment
  * row — passing this row's status is the one documented way to misuse it, and none of
- * the four rules above read it anyway.
+ * the rules above read it anyway.
  */
 export async function loadEnrollmentSubject(id: string): Promise<Subject | undefined> {
   const enrollment = await prisma.enrollment.findFirst({
@@ -199,17 +204,26 @@ async function completedCourseIds(studentId: string): Promise<string[]> {
 // ---------------------------------------------------------------------------
 
 /**
- * EnrollmentStatus (schema.prisma:59-65) as a graph. COMPLETED is terminal and has
- * no endpoint in this module's contract — it is left unreachable rather than given
- * an unspecified verb. REJECTED and WITHDRAWN return to PENDING only through
- * re-application, which is `requestEnrollment` and not a decision endpoint.
+ * EnrollmentStatus (schema.prisma) as a graph.
+ *
+ * COMPLETED is no longer the dead end this map used to describe. It is still terminal
+ * in the sense that nothing moves PAST it — but it is not terminal in the sense of
+ * unrevisable, because a qualification recorded against the wrong student, or against
+ * a cohort that was rescheduled, has to be correctable by the same person who made the
+ * mistake. `complete()` and `uncomplete()` are therefore one edge, and the correction
+ * is a separate VERB for the reason policy.ts gives rather than a second status write
+ * on the first one: a single endpoint would put "recorded a completion" and "erased
+ * one" under one audit action, and the trail could not tell them apart.
+ *
+ * REJECTED and WITHDRAWN return to PENDING only through re-application, which is
+ * `requestEnrollment` and not a decision endpoint.
  */
 const ALLOWED_TRANSITIONS: Record<EnrollmentStatusValue, readonly EnrollmentStatusValue[]> = {
   PENDING: ['APPROVED', 'REJECTED', 'WITHDRAWN'],
   APPROVED: ['REJECTED', 'WITHDRAWN', 'COMPLETED'],
   REJECTED: ['PENDING'],
   WITHDRAWN: ['PENDING'],
-  COMPLETED: [],
+  COMPLETED: ['APPROVED'],
 };
 
 function assertTransition(from: EnrollmentStatusValue, to: EnrollmentStatusValue): void {
@@ -760,4 +774,107 @@ export function withdraw(
   input?: WithdrawEnrollmentInput,
 ): Promise<EnrollmentDto> {
   return settle(actor, enrollmentId, 'WITHDRAWN', input?.reason ?? null);
+}
+
+// ---------------------------------------------------------------------------
+// Completion — the one decision that does NOT move approvedCount
+// ---------------------------------------------------------------------------
+
+/**
+ * Record that a student finished, and the correction path that takes it back.
+ *
+ * Neither function touches `CourseOffering.approvedCount`, and the absence is the
+ * point rather than an oversight. Every decision above maintains that counter, and
+ * ADR 0006 line 40 makes it "an obligation of every transaction that changes an
+ * enrollment's status" — but the obligation exists because a seat is a SCARCE
+ * RESOURCE: an intake holds so many of them, overselling one is the failure the whole
+ * concurrency design is about, and a counter that drifts from the APPROVED rows is a
+ * capacity lie. A completion is not scarce and has no capacity behind it. The student
+ * held the seat, did the course, and holds it still — the register keeps them on it, a
+ * completed student's record stays visible on the roll, and decrementing here would
+ * hand back a seat for a term that has already been taught. So the counter is left
+ * exactly as APPROVE left it, and `uncomplete` returns to that same number rather
+ * than adjusting anything on the way.
+ *
+ * The public return is the plain DTO, like `approve()` and `settle()`; the
+ * `{ enrollment, changed }` pair is the transaction's own result, and `changed` is
+ * what makes a double click a no-op instead of a second audit row and a second
+ * notification for the same qualification.
+ */
+async function markCompletion(
+  actor: Actor,
+  enrollmentId: string,
+  next: Extract<EnrollmentStatusValue, 'COMPLETED' | 'APPROVED'>,
+  note: string | null,
+): Promise<EnrollmentDto> {
+  const settled = await prisma.$transaction(async (tx) => {
+    const current = await tx.enrollment.findUniqueOrThrow({
+      // P2025 -> 404, errors.plugin.ts:52-53.
+      where: { id: enrollmentId },
+      select: { id: true, status: true },
+    });
+
+    if (current.status === next) {
+      // Same-state repeat, on approve()'s reasoning: a teacher double-clicking
+      // Complete must not produce two audit rows for one qualification, and must not
+      // tell the student they passed twice. The row is returned untouched and
+      // `changed: false` keeps it silent.
+      return {
+        enrollment: await tx.enrollment.findUniqueOrThrow({
+          where: { id: enrollmentId },
+          include: ENROLLMENT_INCLUDE,
+        }),
+        changed: false,
+      };
+    }
+    assertTransition(current.status, next);
+
+    const completing = next === 'COMPLETED';
+    const updated = await tx.enrollment.update({
+      where: { id: enrollmentId },
+      data: {
+        status: next,
+        // The pair is written as one statement so `completedAt` and `completedBy` can
+        // never be half-present. Clearing both on the correction is what stops a
+        // withdrawn-by-attrition user from leaving a dangling "qualified by" on a row
+        // that says APPROVED again.
+        ...(completing
+          ? { completedAt: new Date(), completedById: actor.id }
+          : { completedAt: null, completedById: null }),
+        // The note rides the same column an approval's does, and is taken with it on
+        // the way back — see completeEnrollmentSchema for why it is not a "reason".
+        ...(completing && note ? { decisionNote: note } : {}),
+        ...(completing ? {} : { decisionNote: null }),
+      },
+      include: ENROLLMENT_INCLUDE,
+    });
+    return { enrollment: updated, changed: true };
+  }, TX_OPTIONS);
+
+  // After the transaction has committed, best-effort (notify() never throws), and
+  // only on a REAL completion. A reversal announces nothing to the student: telling
+  // someone they passed and then telling them they had not, both from a click
+  // somewhere in a staff office, is worse than the correction itself being quiet.
+  if (next === 'COMPLETED' && settled.changed) {
+    await notify({
+      userIds: [settled.enrollment.studentId],
+      type: 'ENROLLMENT_COMPLETED',
+      title: 'Course completed',
+      body: `You have completed ${settled.enrollment.offering.course.name}.`,
+      linkPath: `/courses/${settled.enrollment.offering.courseId}`,
+    });
+  }
+  return toEnrollmentDto(settled.enrollment);
+}
+
+export function complete(
+  actor: Actor,
+  enrollmentId: string,
+  input?: CompleteEnrollmentInput,
+): Promise<EnrollmentDto> {
+  return markCompletion(actor, enrollmentId, 'COMPLETED', input?.note ?? null);
+}
+
+export function uncomplete(actor: Actor, enrollmentId: string): Promise<EnrollmentDto> {
+  return markCompletion(actor, enrollmentId, 'APPROVED', null);
 }

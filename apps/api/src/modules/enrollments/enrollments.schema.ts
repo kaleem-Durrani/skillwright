@@ -45,6 +45,7 @@ export type ExportEnrollmentsQuery = z.infer<typeof exportEnrollmentsQuerySchema
 
 export {
   approveEnrollmentSchema,
+  completeEnrollmentSchema,
   enrollmentSchema,
   enrollmentStatusSchema,
   idParamSchema,
@@ -56,6 +57,7 @@ export {
 
 export type {
   ApproveEnrollmentInput,
+  CompleteEnrollmentInput,
   CourseSummary,
   DepartmentSummary,
   EnrollmentDto,

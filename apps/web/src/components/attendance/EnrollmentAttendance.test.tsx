@@ -74,6 +74,8 @@ function enrollment(overrides: Partial<EnrollmentDto> = {}): EnrollmentDto {
     decidedAt: '2026-08-02T09:00:00.000Z',
     decidedBy: null,
     decisionNote: null,
+    completedAt: null,
+    completedBy: null,
     student: { id: STUDENT_ID, name: 'Ada Okafor', role: 'STUDENT', avatarUrl: null },
     course: {
       id: COURSE_ID,

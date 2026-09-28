@@ -173,6 +173,10 @@ function deriveUpdateAction(model: string, before: Row | null, after: Row | null
   if (model === 'Enrollment' && before.status !== after.status) {
     if (after.status === 'APPROVED') return 'APPROVE';
     if (after.status === 'REJECTED') return 'REJECT';
+    // A completion is the one enrollment transition with a qualification attached to
+    // it, so it is recorded under its own verb: a reader asking "who signed this
+    // student's certificate" should not have to find it among the UPDATEs.
+    if (after.status === 'COMPLETED') return 'COMPLETE';
   }
 
   if (!isSet(before.publishedAt) && isSet(after.publishedAt)) return 'PUBLISH';

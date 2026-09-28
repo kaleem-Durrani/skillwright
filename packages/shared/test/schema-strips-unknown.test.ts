@@ -260,6 +260,8 @@ const RESPONSE_CASES: readonly StripCase[] = [
       decidedAt: NOW,
       decidedBy: userSummary,
       decisionNote: null,
+      completedAt: NOW,
+      completedBy: userSummary,
     },
     leaks: { studentEmail: 'ann@example.com' },
   },

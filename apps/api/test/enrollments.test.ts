@@ -809,3 +809,159 @@ describe('listing', () => {
     expect(JSON.stringify(response.json())).toContain('limit');
   });
 });
+
+/**
+ * Phase 1. `EnrollmentStatus.COMPLETED` was in the enum, had a chip colour and had no
+ * writer anywhere in the repository; this block is the writer, and the five tests
+ * below are the properties that make it trustworthy — a qualification recorded, a
+ * mistake corrected, a double click that is not a second qualification, an illegal
+ * transition refused, and a stranger refused.
+ */
+describe('completion', () => {
+  it('records a qualification with its date and the teacher who signed it', async () => {
+    const teacher = await signIn('t30@example.com', 'TEACHER');
+    const student = await signIn('s30@example.com', 'STUDENT');
+    const { courseId, offeringId } = await makeCourse(teacher.id);
+    const requested = await post('/', { courseId, offeringId }, student.token);
+    await post(`/${requested.json().id}/approve`, {}, teacher.token);
+
+    const completed = await post(
+      `/${requested.json().id}/complete`,
+      { note: 'All coursework submitted' },
+      teacher.token,
+    );
+
+    expect(completed.statusCode).toBe(200);
+    const body = completed.json();
+    expect(body.status).toBe('COMPLETED');
+    expect(body.completedBy.id).toBe(teacher.id);
+    // An instant, not a bare truthy: a `Date` serialised through JSON becomes a
+    // string, and a completion nobody can date cannot be printed on a certificate.
+    expect(new Date(body.completedAt).toISOString()).toBe(body.completedAt);
+    expect(body.decisionNote).toBe('All coursework submitted');
+
+    // The seat is still held. Every other decision in this file moves
+    // `approvedCount`, and a completion deliberately does not — the register keeps a
+    // qualified student on the roll, and handing the seat back would oversell an
+    // intake that has already taught.
+    expect(body.offering.approvedCount).toBe(1);
+    expect(await approvedCountOf(offeringId)).toBe(1);
+  });
+
+  it('round trips: a reversal puts the seat back where it was, with the fields cleared', async () => {
+    const teacher = await signIn('t31@example.com', 'TEACHER');
+    const student = await signIn('s31@example.com', 'STUDENT');
+    const { courseId, offeringId } = await makeCourse(teacher.id);
+    const requested = await post('/', { courseId, offeringId }, student.token);
+    const id = requested.json().id;
+    await post(`/${id}/approve`, {}, teacher.token);
+    await post(`/${id}/complete`, { note: 'Recorded in error' }, teacher.token);
+
+    const reverted = await post(`/${id}/uncomplete`, {}, teacher.token);
+
+    expect(reverted.statusCode).toBe(200);
+    expect(reverted.json().status).toBe('APPROVED');
+    // Cleared as a pair. A row that says APPROVED while still naming the teacher who
+    // "qualified" it is the exact inconsistency the pair write exists to prevent.
+    expect(reverted.json().completedAt).toBeNull();
+    expect(reverted.json().completedBy).toBeNull();
+    expect(reverted.json().decisionNote).toBeNull();
+
+    // And the counter is back to where the seat was, not one lower than it.
+    expect(await approvedCountOf(offeringId)).toBe(1);
+  });
+
+  it('is idempotent: a second click is not a second qualification', async () => {
+    const teacher = await signIn('t32@example.com', 'TEACHER');
+    const student = await signIn('s32@example.com', 'STUDENT');
+    const { courseId, offeringId } = await makeCourse(teacher.id);
+    const requested = await post('/', { courseId, offeringId }, student.token);
+    const id = requested.json().id;
+    await post(`/${id}/approve`, {}, teacher.token);
+
+    const first = await post(`/${id}/complete`, { note: 'Finished' }, teacher.token);
+    const second = await post(`/${id}/complete`, { note: 'Finished again' }, teacher.token);
+    expect(first.statusCode).toBe(200);
+    expect(second.statusCode).toBe(200);
+    // The timestamp is the tell: a second write would move it, and the note would
+    // change with it.
+    expect(second.json().completedAt).toBe(first.json().completedAt);
+    expect(second.json().decisionNote).toBe('Finished');
+
+    const auditRows = await prisma.auditEvent.count({
+      where: { entityId: id, action: 'COMPLETE' },
+    });
+    expect(auditRows).toBe(1);
+    const notifications = await prisma.notification.count({
+      where: { userId: student.id, type: 'ENROLLMENT_COMPLETED' },
+    });
+    expect(notifications).toBe(1);
+  });
+
+  it('refuses a completion from PENDING — a seat has to be held first', async () => {
+    const teacher = await signIn('t33@example.com', 'TEACHER');
+    const student = await signIn('s33@example.com', 'STUDENT');
+    const { courseId, offeringId } = await makeCourse(teacher.id);
+    const requested = await post('/', { courseId, offeringId }, student.token);
+
+    const early = await post(`/${requested.json().id}/complete`, {}, teacher.token);
+    expect(early.statusCode).toBe(409);
+    expect(early.json().code).toBe('CONFLICT');
+    expect(early.json().detail).toContain('PENDING');
+
+    expect(
+      (await prisma.enrollment.findUniqueOrThrow({ where: { id: requested.json().id } })).status,
+    ).toBe('PENDING');
+  });
+
+  it('refuses a teacher who does not own the course, and a student who owns nothing', async () => {
+    const owner = await signIn('t34@example.com', 'TEACHER');
+    const stranger = await signIn('t34b@example.com', 'TEACHER');
+    const student = await signIn('s34@example.com', 'STUDENT');
+    const { courseId, offeringId } = await makeCourse(owner.id);
+    const requested = await post('/', { courseId, offeringId }, student.token);
+    const id = requested.json().id;
+    await post(`/${id}/approve`, {}, owner.token);
+
+    const refused = await post(`/${id}/complete`, {}, stranger.token);
+    expect(refused.statusCode).toBe(403);
+    expect(refused.json().code).toBe('FORBIDDEN');
+    expect(refused.json().detail).toContain('TEACHER:ownsCourse');
+
+    // The cell the student is refused by is a different one, and the rule name is the
+    // only thing that proves the gate ran the branch it was supposed to.
+    const byStudent = await post(`/${id}/uncomplete`, {}, student.token);
+    expect(byStudent.statusCode).toBe(403);
+    expect(byStudent.json().detail).toContain('STUDENT:deny');
+
+    // Nothing was written by either refusal.
+    expect((await prisma.enrollment.findUniqueOrThrow({ where: { id } })).status).toBe('APPROVED');
+  });
+
+  /**
+   * LESSONS-LEARNED #12 and #24, the third time. The note is optional, so a teacher
+   * completing an enrolment from a keyboard shortcut sends no body; Fastify hands
+   * that to the validator as `null`, and `.optional()` would have answered 422 before
+   * `authorize` ran. The test sends no body deliberately — `{}` passes either way,
+   * which is exactly why the broken spelling has to be what is exercised.
+   */
+  it('answers 403 rather than 422 for a bodyless complete by a stranger', async () => {
+    const owner = await signIn('t35@example.com', 'TEACHER');
+    const stranger = await signIn('t35b@example.com', 'TEACHER');
+    const student = await signIn('s35@example.com', 'STUDENT');
+    const { courseId, offeringId } = await makeCourse(owner.id);
+    const requested = await post('/', { courseId, offeringId }, student.token);
+    const id = requested.json().id;
+    await post(`/${id}/approve`, {}, owner.token);
+
+    const refused = await post(`/${id}/complete`, undefined, stranger.token);
+    expect(refused.statusCode).toBe(403);
+    expect(refused.json().detail).toContain('TEACHER:ownsCourse');
+
+    // The other half of the pair, from the person entitled to it: the owner's
+    // bodyless complete is a 200, not a 422.
+    const accepted = await post(`/${id}/complete`, undefined, owner.token);
+    expect(accepted.statusCode).toBe(200);
+    expect(accepted.json().status).toBe('COMPLETED');
+  });
+});

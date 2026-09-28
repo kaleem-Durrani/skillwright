@@ -4,6 +4,7 @@ import { paginated } from '@skillwright/shared';
 import { authorize, requireActor } from '../../plugins/auth.plugin.js';
 import {
   approveEnrollmentSchema,
+  completeEnrollmentSchema,
   enrollmentSchema,
   exportEnrollmentsQuerySchema,
   idParamSchema,
@@ -170,6 +171,58 @@ const enrollmentsRoutes: FastifyPluginAsync = async (fastify) => {
         request.params.id,
         request.body ?? undefined,
       ),
+  );
+
+  /*
+   * Recording a qualification, and taking it back.
+   *
+   * Two verbs and not a PATCH, on the rule policy.ts states for withdraw: a status
+   * column written by one endpoint carries one audit action, and a reader asking
+   * "which completions were erased" would find them filed as the same rows as the ones
+   * that stand. It is also why the SPA will have two buttons to wire rather than a
+   * status dropdown — and that is the honest shape for an irreversible-looking
+   * correction, because a correction should look like one.
+   */
+  app.post(
+    '/:id/complete',
+    {
+      schema: {
+        params: idParamSchema,
+        // `.nullish()`, never `.optional()` — the note is optional, so the caller
+        // sends no body at all and Fastify hands the validator `null`. Same reason as
+        // approve above, and the same regression it caused there (LESSONS-LEARNED #12
+        // and #24: a 422 would reach the caller before `authorize` ever ran).
+        body: completeEnrollmentSchema.nullish(),
+        response: { 200: enrollmentSchema },
+      },
+      preHandler: authorize('enrollment:complete', (request) =>
+        enrollmentService.loadEnrollmentSubject(idOf(request)),
+      ),
+    },
+    async (request) =>
+      enrollmentService.complete(
+        requireActor(request),
+        request.params.id,
+        request.body ?? undefined,
+      ),
+  );
+
+  app.post(
+    '/:id/uncomplete',
+    {
+      schema: {
+        params: idParamSchema,
+        // Bodyless BY CONTRACT, so `.nullish()` rather than a schema: a reversal has
+        // nothing to say, and a body schema that demanded an object would 422 the
+        // exact caller this route exists to serve.
+        body: completeEnrollmentSchema.nullish(),
+        response: { 200: enrollmentSchema },
+      },
+      preHandler: authorize('enrollment:uncomplete', (request) =>
+        enrollmentService.loadEnrollmentSubject(idOf(request)),
+      ),
+    },
+    async (request) => enrollmentService.uncomplete(requireActor(request), request.params.id),
   );
 };
 

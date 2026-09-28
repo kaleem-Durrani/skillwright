@@ -107,6 +107,7 @@ enum NotificationType {
   ENROLLMENT_APPROVED
   ENROLLMENT_REJECTED
   ENROLLMENT_WITHDRAWN
+  ENROLLMENT_COMPLETED
   COURSE_PUBLISHED
   RESOURCE_PUBLISHED
   ANNOUNCEMENT_PUBLISHED
@@ -127,6 +128,7 @@ enum AuditAction {
   REINSTATE
   APPROVE
   REJECT
+  COMPLETE
   PUBLISH
   MFA_ENABLE
   MFA_DISABLE
@@ -179,6 +181,7 @@ model User {
   coursesTaught     Course[]                  @relation("CourseTeacher")
   enrollments       Enrollment[]              @relation("EnrollmentStudent")
   enrollmentsDecided Enrollment[]             @relation("EnrollmentDecidedBy")
+  enrollmentsCompleted Enrollment[]           @relation("EnrollmentCompletedBy")
   attendanceMarked  AttendanceRecord[]        @relation("AttendanceMarkedBy")
   resourcesAuthored Resource[]                @relation("ResourceAuthor")
   announcements     Announcement[]            @relation("AnnouncementAuthor")
@@ -454,6 +457,17 @@ model Enrollment {
   /// Shown to the student on rejection.
   decisionNote String?
 
+  /// When the qualification was recorded. Null on every other row, and the ONLY
+  /// thing that distinguishes a completed student from one merely approved: a seat is
+  /// a position, a completion is the outcome the school exists to issue. The status
+  /// enum alone says which; this says when, which is what a certificate is dated with.
+  completedAt DateTime?
+  /// Who recorded it. `SetNull` for the same reason as `decidedBy` above — an audit
+  /// trail with an actor is what the whole extension exists to produce, and a teacher
+  /// who later leaves must not take the qualification they signed for with them.
+  completedBy   User?     @relation("EnrollmentCompletedBy", fields: [completedById], references: [id], onDelete: SetNull)
+  completedById String?
+
   updatedAt DateTime @updatedAt
 
   attendanceRecords AttendanceRecord[]
@@ -466,6 +480,7 @@ model Enrollment {
   @@index([offeringId, status])
   @@index([studentId, status])
   @@index([decidedById])
+  @@index([completedById])
 }
 
 /// One row per (enrollment, session date). Marking a register twice for the same

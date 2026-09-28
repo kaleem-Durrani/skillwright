@@ -39,6 +39,7 @@ export const auditActionSchema = z.enum([
   'REINSTATE',
   'APPROVE',
   'REJECT',
+  'COMPLETE',
   'PUBLISH',
   'MFA_ENABLE',
   'MFA_DISABLE',
