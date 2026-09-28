@@ -279,11 +279,14 @@ function TopBar({ onPageSlot }: { onPageSlot: (element: HTMLElement | null) => v
             <DropdownMenuItem
               destructive
               icon={<LogOut className="size-4" />}
-              onSelect={() => {
-                logout.mutate(undefined, {
-                  onSettled: () => void navigate({ to: '/login' }),
-                });
-              }}
+              // No per-call `onSettled` here, and there never should be again.
+              // `useLogout` navigates itself (lib/session.ts), because a
+              // per-call handler is delivered by the mutation's OBSERVER — and
+              // this menu item is inside the shell that signing out tears down,
+              // so the observer unsubscribes before the dispatch arrives and the
+              // handler was silently never called. `useLogout`'s own `onSettled`
+              // is invoked by the mutation and cannot be lost that way.
+              onSelect={() => logout.mutate(undefined)}
             >
               Sign out
             </DropdownMenuItem>

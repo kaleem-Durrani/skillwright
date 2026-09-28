@@ -501,7 +501,11 @@ function SecurityTab() {
   const policy = usePolicy();
   const client = useQueryClient();
   const logout = useLogout();
-  const navigate = useNavigate();
+  // No `navigate` here any more. The Sign out button below used to hand a
+  // per-call `onSettled` to `logout.mutate()`, and that handler rode the
+  // mutation's observer — which this screen unsubscribes from the moment the
+  // session goes null and it renders nothing (Settings.tsx:169). `useLogout`
+  // navigates itself now, from the mutation's own `onSettled`.
 
   /*
    * The enrolment flow, end to end (Phase 5 of the UI roadmap deleted TODO(mfa-ui)):
@@ -827,9 +831,11 @@ function SecurityTab() {
           block
           className="sm:w-auto sm:self-start"
           loading={logout.isPending}
-          onClick={() =>
-            logout.mutate(undefined, { onSettled: () => void navigate({ to: '/login' }) })
-          }
+          // No per-call `onSettled` — see the note on the account menu's Sign out
+          // in AppShell.tsx. `useLogout` navigates itself, from the mutation's own
+          // `onSettled`, because a per-call handler rides the observer and this
+          // screen renders nothing once the session is gone (Settings.tsx:169).
+          onClick={() => logout.mutate(undefined)}
         >
           Sign out
         </Button>
