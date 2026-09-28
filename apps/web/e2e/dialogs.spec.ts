@@ -45,12 +45,36 @@ interface DialogScenario {
   path: string;
   /** A control that exists only once the dialog's body has rendered. */
   bodyProbe: RegExp;
+  /**
+   * How to open it, when the trigger is not a button with a stable name.
+   *
+   * Every dialog so far hangs off a header button, which made the opener one line.
+   * The admin edit dialog does not: `PATCH /users/:id` had a route, a policy gate
+   * and no caller at all, so the "Edit account" item that has been sitting in
+   * AdminUsers' row menu with no `onSelect` behind it is the only way in — a
+   * menuitem behind a per-row trigger. The dialog is audited exactly as the others
+   * are; only the path to it differs, and that difference is the interesting part
+   * (a dialog no test can reach is a dialog nobody has looked at).
+   */
+  openVia?: (page: Page) => Promise<void>;
 }
 
 const SCENARIOS: DialogScenario[] = [
   { name: /new course/i, path: '/dashboard', bodyProbe: /^code/i },
   { name: /add a resource/i, path: '/courses/c-1', bodyProbe: /^title/i },
   { name: /add a user/i, path: '/admin/users', bodyProbe: /^name/i },
+  {
+    name: /edit person 1/i,
+    path: '/admin/users',
+    bodyProbe: /^name/i,
+    openVia: async (page) => {
+      await page
+        .getByRole('button', { name: /actions for person 1/i })
+        .first()
+        .click();
+      await page.getByRole('menuitem', { name: /edit account/i }).click();
+    },
+  },
 ];
 
 /**
@@ -85,7 +109,11 @@ async function settled(page: Page, selector: string): Promise<void> {
 async function openDialog(page: Page, scenario: DialogScenario): Promise<void> {
   await page.goto(scenario.path);
   await page.waitForLoadState('networkidle');
-  await page.getByRole('button', { name: scenario.name }).first().click();
+  if (scenario.openVia) {
+    await scenario.openVia(page);
+  } else {
+    await page.getByRole('button', { name: scenario.name }).first().click();
+  }
   await page.getByRole('dialog').waitFor();
   await settled(page, 'body > [role="dialog"]');
 }

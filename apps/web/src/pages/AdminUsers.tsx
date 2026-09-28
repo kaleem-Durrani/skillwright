@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { MoreVertical, Plus, Search, UserRoundCheck, UserRoundX } from 'lucide-react';
+import { MoreVertical, Pencil, Plus, Search, UserRoundCheck, UserRoundX } from 'lucide-react';
 import { api, type Paginated } from '@/lib/api';
 import { qk } from '@/lib/query';
 import { subject, usePolicy } from '@/lib/policy';
@@ -9,6 +9,7 @@ import { formatRelative } from '@/lib/format';
 import type { UserDetail } from '@/lib/types';
 import { Gate } from '@/components/Gate';
 import { UserCreateDialog } from '@/components/users/UserCreateDialog';
+import { UserEditDialog } from '@/components/users/UserEditDialog';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Avatar } from '@/components/ui/Avatar';
 import { Badge } from '@/components/ui/Badge';
@@ -67,6 +68,15 @@ export function AdminUsersPage() {
   const [term, setTerm] = useState(search.q ?? '');
   const [suspending, setSuspending] = useState<UserDetail | null>(null);
   const [creating, setCreating] = useState(false);
+  /*
+   * The row being edited, held as the WHOLE record rather than an id, because the
+   * dialog seeds its form from the row it was handed and the row already carries
+   * every field the shared update schema accepts. A second `GET /users/:id` would
+   * buy a fresh copy of data this page is already holding, and
+   * `user:read` is self-only for non-admins — the one caller that could be harmed
+   * by the round trip is the one that would 403 on it.
+   */
+  const [editing, setEditing] = useState<UserDetail | null>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -233,6 +243,7 @@ export function AdminUsersPage() {
         actions={(entry) => (
           <RowMenu
             user={entry}
+            onEdit={() => setEditing(entry)}
             onSuspend={() => setSuspending(entry)}
             onReinstate={() => reinstate.mutate(entry.id)}
           />
@@ -261,6 +272,7 @@ export function AdminUsersPage() {
                 </div>
                 <RowMenu
                   user={entry}
+                  onEdit={() => setEditing(entry)}
                   onSuspend={() => setSuspending(entry)}
                   onReinstate={() => reinstate.mutate(entry.id)}
                 />
@@ -304,6 +316,16 @@ export function AdminUsersPage() {
         on screen without any local bookkeeping here.
       */}
       <UserCreateDialog open={creating} onOpenChange={setCreating} />
+
+      {/*
+        The edit surface for `PATCH /users/:id`, which had a route, a policy gate
+        and no caller in the SPA at all — an admin could create, suspend and
+        reinstate, and could not fix a typo in a name. It is a sibling of the
+        create dialog rather than a route, for the same reason: the two share the
+        form layout, and a detail screen for a row this list already holds would
+        be a second place to draw a person.
+      */}
+      <UserEditDialog user={editing} onOpenChange={(open) => !open && setEditing(null)} />
 
       <Dialog open={suspending !== null} onOpenChange={(open) => !open && setSuspending(null)}>
         <DialogContent
@@ -359,10 +381,12 @@ export function AdminUsersPage() {
 
 function RowMenu({
   user,
+  onEdit,
   onSuspend,
   onReinstate,
 }: {
   user: UserDetail;
+  onEdit: () => void;
   onSuspend: () => void;
   onReinstate: () => void;
 }) {
@@ -392,7 +416,20 @@ function RowMenu({
         />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        {canUpdate ? <DropdownMenuItem>Edit account</DropdownMenuItem> : null}
+        {/*
+          This item was rendered with no `onSelect` behind it — a menu entry that
+          looked available and did nothing, which is worse than its absence,
+          because an admin who chose it had been told the correction was possible
+          and then nothing happened. The gate was always right: `user:update` is
+          `isSelf` for STUDENT and TEACHER and `allow` for ADMIN (the `targetSubject`
+          argument in users.routes.ts), so `canUpdate` is true for exactly the rows
+          this dialog can serve — the only thing missing was the handler.
+        */}
+        {canUpdate ? (
+          <DropdownMenuItem icon={<Pencil className="size-4" />} onSelect={onEdit}>
+            Edit account
+          </DropdownMenuItem>
+        ) : null}
         {canSuspend ? (
           <DropdownMenuItem
             destructive

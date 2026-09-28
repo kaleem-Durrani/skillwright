@@ -15,17 +15,19 @@ import type { SessionUser } from '@/lib/session';
 import type { AdminUsersSearch } from '@/routes/_app/admin.users';
 import type { UserDetail } from '@/lib/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { qk } from '@/lib/query';
 
 type ApiFetch = (path: string, options?: unknown) => Promise<unknown>;
 type ApiPost = (path: string, payload?: unknown) => Promise<unknown>;
+type ApiSend = (path: string, body?: unknown, options?: unknown) => Promise<unknown>;
 
-const { apiGet, apiPost, searchMock } = vi.hoisted(() => ({
+const { apiGet, apiPost, apiPatch, searchMock } = vi.hoisted(() => ({
   apiGet: vi.fn<ApiFetch>(),
   apiPost: vi.fn<ApiPost>(),
+  apiPatch: vi.fn<ApiSend>(),
   searchMock: vi.fn<() => AdminUsersSearch>(),
 }));
 
@@ -33,7 +35,7 @@ vi.mock('@/lib/api', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,
-    api: { get: apiGet, post: apiPost, patch: vi.fn(), put: vi.fn(), del: vi.fn() },
+    api: { get: apiGet, post: apiPost, patch: apiPatch, put: vi.fn(), del: vi.fn() },
   };
 });
 
@@ -203,5 +205,85 @@ describe('AdminUsersPage — the Reinstate affordance', () => {
 
     expect(await screen.findAllByText(/walt withdrew/i)).not.toHaveLength(0);
     expect(screen.queryByRole('button', { name: /actions for walt/i })).toBeNull();
+  });
+});
+
+describe('AdminUsersPage — the Edit affordance', () => {
+  const TARGET_ID = '01JGXDFAM0K2Z1GYCSNM5F5RCW';
+
+  /** One teacher, so the dialog's role-conditional fields have something to show. */
+  function mockDirectory(): void {
+    apiGet.mockImplementation((path) => {
+      if (path.includes('/users')) {
+        return Promise.resolve({
+          data: [
+            {
+              id: TARGET_ID,
+              name: 'Dana Okafor',
+              email: 'dana@example.edu',
+              role: 'TEACHER',
+              status: 'ACTIVE',
+              avatarUrl: null,
+              phoneNumber: null,
+              bio: null,
+              mfaEnabled: false,
+              lastLoginAt: null,
+              createdAt: '2026-08-01T00:00:00.000Z',
+              studentProfile: null,
+              teacherProfile: {
+                departmentId: DEPARTMENT_ID,
+                departmentName: 'Welding',
+                qualification: 'City & Guilds Level 3',
+                specialization: null,
+                staffNo: null,
+              },
+            } satisfies UserDetail,
+          ],
+          meta: { page: 1, limit: 20, total: 1, totalPages: 1 },
+        });
+      }
+      return Promise.resolve({ data: [], meta: {} });
+    });
+  }
+
+  it('wires the previously inert Edit item to a dialog seeded from the row it was opened on', async () => {
+    const user = userEvent.setup();
+    mockDirectory();
+    apiPatch.mockResolvedValue({});
+    renderAdminUsers(viewer({ role: 'ADMIN', name: 'Sam Admin' }));
+
+    await user.click((await screen.findAllByRole('button', { name: /actions for dana/i }))[0]!);
+    await user.click(await screen.findByRole('menuitem', { name: /edit account/i }));
+
+    const dialog = await screen.findByRole('dialog');
+    // Seeded from the row, not blank: a second form on the page with a second
+    // fetch of a record this list is already holding is a second place for the
+    // two to disagree.
+    expect(within(dialog).getByRole('textbox', { name: /^name/i })).toHaveValue('Dana Okafor');
+    expect(within(dialog).getByRole('textbox', { name: /qualification/i })).toHaveValue(
+      'City & Guilds Level 3',
+    );
+  });
+
+  it('saves through PATCH /users/:id, the admin route, not the self route', async () => {
+    const user = userEvent.setup();
+    mockDirectory();
+    apiPatch.mockResolvedValue({});
+    renderAdminUsers(viewer({ role: 'ADMIN', name: 'Sam Admin' }));
+
+    await user.click((await screen.findAllByRole('button', { name: /actions for dana/i }))[0]!);
+    await user.click(await screen.findByRole('menuitem', { name: /edit account/i }));
+    const dialog = await screen.findByRole('dialog');
+
+    await user.clear(within(dialog).getByRole('textbox', { name: /^name/i }));
+    await user.type(within(dialog).getByRole('textbox', { name: /^name/i }), 'Dana Reid');
+    await user.click(within(dialog).getByRole('button', { name: /save changes/i }));
+
+    await waitFor(() => {
+      expect(apiPatch).toHaveBeenCalledWith(`/users/${TARGET_ID}`, { name: 'Dana Reid' });
+    });
+    // `PATCH /users/me` carries the same action and the same body schema and
+    // edits the SIGNED-IN admin, so this is asserted literally.
+    expect(apiPatch.mock.calls.map(([path]) => path)).not.toContain('/users/me');
   });
 });
