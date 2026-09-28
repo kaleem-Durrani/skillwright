@@ -54,7 +54,9 @@ type EnrollmentWithRelations = Prisma.EnrollmentGetPayload<{
  * Interactive-transaction budget for the three status writes.
  *
  * Generous rather than default because the audit extension writes its AuditEvent on
- * a SEPARATE connection from inside the callback (audit.ts:243), so a burst of
+ * a SEPARATE connection from inside the callback (`record()` in audit.ts calls
+ * `base.auditEvent.create` on the un-extended client, so the row does not join the
+ * enclosing transaction), so a burst of
  * concurrent approvals — ADR 0006's 200-at-once test is the deliberate example —
  * queues on the pool before it queues on the row lock. The transaction body itself
  * is three statements.
@@ -612,7 +614,9 @@ export async function approve(
      * parameter rather than interpolated text. It returns the affected row count.
      *
      * This statement bypasses the Prisma audit extension, which intercepts model
-     * operations and not raw SQL (audit.ts:243). That is intended: the counter is
+     * operations and not raw SQL (`auditExtension` registers its `query` hooks for
+     * `create`/`update`/&c., and `$executeRaw` is none of them). That is intended: the
+     * counter is
      * bookkeeping, and the `tx.enrollment.update` below writes the AuditEvent that
      * matters. No manual audit row is written for it.
      */

@@ -34,7 +34,7 @@ let sequence = 0;
  * that order, before Resource/Enrollment/Course/User/Department — so it alone is FK-
  * safe for everything this file creates. This local helper exists only for `afterAll`:
  * it clears the two Restrict-adjacent rows (Announcement.authorId is
- * `onDelete: Restrict`, schema.prisma:473) without also deleting Department and User,
+ * `onDelete: Restrict` in schema.prisma) without also deleting Department and User,
  * which is `resetDatabase()`'s job at the START of the NEXT file's `beforeEach` — the
  * same division of labour resources.test.ts:50-56 uses for its own tables.
  */

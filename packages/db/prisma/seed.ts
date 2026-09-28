@@ -392,6 +392,77 @@ const QUALIFICATIONS = [
   'F-Gas Category I Certification',
 ] as const;
 
+/**
+ * The modelled catalogue those six free-text strings were always describing.
+ *
+ * `QUALIFICATIONS` above feeds `TeacherProfile.qualification` — a teacher's own record
+ * of their own training, which migration 0013 deliberately left as prose. This list is
+ * the OTHER thing: a row an AWARD is issued against, which is what `POST /certificates`
+ * requires a `qualificationId` for. With this step absent the `Qualification` table is
+ * empty, `GET /qualifications` returns `[]`, and the issue dialog has nothing to offer —
+ * so the whole certificate feature, which migration 0013 built and the tests exercise,
+ * cannot be reached in the demo. That is the gap this closes.
+ *
+ * The names are the six strings verbatim, so a reader holding the old seed in one hand
+ * and this in the other can match them line for line; `code`, `level` and
+ * `awardingBody` are the halves the single free-text column could not carry, and the
+ * reason each is a separate column is the argument schema.prisma makes on
+ * `Qualification`:
+ *
+ *   - `code` is the number an employer looks the standard up BY ("CSWIP 3.1"), which is
+ *     why it is the @unique natural key this seed upserts on.
+ *   - `level` is a string, not a number, because these six are not one scale — C&G runs
+ *     to 5, NVQ to 8, F-Gas has categories, and a BEng sits on a national framework at
+ *     Level 6. A numeric level would be a lie about four of the six.
+ *   - `awardingBody` is the second thing a fraudulent certificate is checked against,
+ *     after the reference. Every entry names a real body that runs that standard in the
+ *     UK, because a catalogue row that names a body nobody recognises is not a
+ *     verification aid, it is decoration.
+ */
+const QUALIFICATION_CATALOGUE: ReadonlyArray<{
+  code: string;
+  name: string;
+  level: string;
+  awardingBody: string;
+}> = [
+  {
+    code: 'C&G-L3-DIP',
+    name: 'City & Guilds Level 3 Diploma',
+    level: 'Level 3',
+    awardingBody: 'City & Guilds',
+  },
+  {
+    code: 'NVQ-L4-ENG-MAINT',
+    name: 'NVQ Level 4 in Engineering Maintenance',
+    level: 'Level 4',
+    awardingBody: 'City & Guilds',
+  },
+  {
+    code: 'BENG-MECH-HONS',
+    name: 'BEng (Hons) Mechanical Engineering',
+    level: 'Level 6',
+    awardingBody: 'Engineering Council',
+  },
+  {
+    code: 'CSWIP-3-1',
+    name: 'CSWIP 3.1 Welding Inspector',
+    level: 'Grade 3.1',
+    awardingBody: 'BSI',
+  },
+  {
+    code: 'HND-EEE',
+    name: 'HND Electrical & Electronic Engineering',
+    level: 'Level 4',
+    awardingBody: 'Pearson',
+  },
+  {
+    code: 'FGAS-CAT-I',
+    name: 'F-Gas Category I Certification',
+    level: 'Category I',
+    awardingBody: 'BSI',
+  },
+];
+
 const MESSAGE_OPENERS = [
   'Quick question about the Thursday practical',
   'I have uploaded the revised bench layout',
@@ -423,6 +494,44 @@ async function seedDepartments() {
     );
   }
   logger.info('seed.departments', { count: rows.length });
+  return rows;
+}
+
+/**
+ * The `Qualification` catalogue, keyed on `code`.
+ *
+ * An upsert on the `@unique` natural key rather than a bare `create`, because the seed's
+ * second property is idempotency and a certificate issue dialog is a thing a developer
+ * opens after a `db:seed` that has already run once. The id is derived from the code
+ * with `did`, so two developers on two machines get the same row id and a screenshot in
+ * a bug report still refers to the same qualification.
+ *
+ * `createdAt` is written on create only — the `update` deliberately does NOT touch it,
+ * so a re-seed leaves the original creation date alone. That is the whole difference
+ * between an idempotent catalogue and one that rewrites its own history every run.
+ */
+async function seedQualifications() {
+  const rows = [];
+  for (const spec of QUALIFICATION_CATALOGUE) {
+    const data = {
+      name: spec.name,
+      level: spec.level,
+      awardingBody: spec.awardingBody,
+    };
+    rows.push(
+      await prisma.qualification.upsert({
+        where: { code: spec.code },
+        create: {
+          id: did('qualification', spec.code),
+          code: spec.code,
+          ...data,
+          createdAt: at(-180),
+        },
+        update: data,
+      }),
+    );
+  }
+  logger.info('seed.qualifications', { count: rows.length });
   return rows;
 }
 
@@ -1177,6 +1286,12 @@ export async function seed(): Promise<void> {
   const departments = await seedDepartments();
   const departmentIds = departments.map((d) => d.id);
 
+  // The award catalogue. Seeded before users because it depends on nothing and a
+  // certificate cannot be issued without it — the demo's "issue a certificate" path
+  // starts at a COMPLETED seat and a `qualificationId`, and this step is what supplies
+  // the second of those two.
+  const qualifications = await seedQualifications();
+
   const { teachers, students, admins } = await seedUsers(departmentIds);
   const courses = await seedCourses(departmentIds, teachers);
   await seedEnrollments(courses, students, admins);
@@ -1210,6 +1325,10 @@ export async function seed(): Promise<void> {
       `${COURSE_CATALOGUE[TWO_INTAKE_COURSE_INDEX]!.name}`,
       `  has TWO intakes: one running now, one starting in ${SPRING_START_OFFSET} days —`,
       '  the spring cohort "applications now open" points at.',
+      null,
+      'AWARD CATALOGUE — what a certificate can be issued against:',
+      ...qualifications.map((q) => `  ${q.code}  ${q.name}  (${q.awardingBody})`),
+      '  a COMPLETED seat + any of these is the demo path to a certificate.',
       null,
       'Avatars are derived, not stored. Example:',
       `  ${avatarUrlFor(demoStudent.id).slice(0, 72)}…`,

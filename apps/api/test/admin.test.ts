@@ -35,7 +35,8 @@ afterAll(async () => {
 
 beforeEach(async () => {
   // Same first line as courses.test.ts:32-35: `Course.teacher` is onDelete: Restrict
-  // (schema.prisma:321), so the user delete inside resetDatabase() fails while any
+  // (`Course.teacher`, declared `onDelete: Restrict` on `model Course`), so the user
+  // delete inside resetDatabase() fails while any
   // course from an earlier suite still points at a teacher.
   await prisma.course.deleteMany({});
   await resetDatabase();
@@ -162,7 +163,7 @@ describe('GET /admin/stats', () => {
 
     /*
      * Cleared AFTER the fixtures above, because User is in AUDITED_MODELS
-     * (packages/db/src/audit.ts:51-59) and every `createAccount` above therefore wrote
+     * (packages/db/src/audit.ts) and every `createAccount` above therefore wrote
      * a row of its own. Since migration 0012 the table really IS append-only — a
      * trigger refuses DELETE — so this goes through the one escape hatch the trigger
      * accepts rather than a plain `deleteMany` that now raises. The previous version of
@@ -194,7 +195,8 @@ describe('GET /admin/stats', () => {
     await clearAuditEvents();
 
     // Department is in AUDITED_MODELS, so this single create produces exactly one
-    // audit row — written by the extension on its own pool (audit.ts:234-428), never
+    // audit row — written by the extension on its own pool (`record()` in audit.ts),
+    // never
     // by a service. A module that wrote its own would show 2 here.
     await prisma.department.create({ data: { name: 'Department masonry', slug: 'masonry' } });
 

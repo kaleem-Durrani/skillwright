@@ -54,7 +54,7 @@ let sequence = 0;
 /**
  * setup.ts:110-119 clears most of these too, but a suite that leaves a course, a resource
  * or an upload behind breaks the NEXT file's reset: `Course.teacherId` and
- * `Resource.authorId` are `onDelete: Restrict` (schema.prisma:321, :430), so the user
+ * `Resource.authorId` are `onDelete: Restrict` in schema.prisma, so the user
  * delete inside `resetDatabase()` fails while either row survives — in someone else's
  * suite, not this one.
  *
@@ -410,7 +410,8 @@ describe('POST /uploads/presign', () => {
     const a: PresignBody = first.json();
     const b: PresignBody = second.json();
 
-    // upload.ts:49-50 and schema.prisma:394-396, both in writing: "Server-generated ...
+    // upload.ts:49-50 and `Upload.originalName`'s doc comment, both in writing:
+    // "Server-generated ...
     // Never the client's filename." A key built from user input is a path-traversal and a
     // privacy leak at once — the key travels inside every signed URL, so `payroll` in the
     // key is `payroll` in a link somebody forwards.
@@ -527,7 +528,8 @@ describe('POST /uploads/presign', () => {
     expect(row.committedAt).toBeNull();
     expect(row.key).toBe(signed.key);
     expect(row.bucket).toBe(S3_BUCKET);
-    // Kept for display, never used to build the key (schema.prisma:402-403).
+    // Kept for display, never used to build the key (the schema.prisma doc comment on
+    // `Upload.originalName` says so in those words).
     expect(row.originalName).toBe('notes.pdf');
   });
 
@@ -689,7 +691,8 @@ describe('POST /uploads/presign', () => {
       }
 
       // The name the user typed is kept verbatim on the ROW, because display and key are
-      // two different things (schema.prisma:407-408) — which is why discarding the
+      // two different things (`Upload.originalName` vs the key) — which is why discarding
+      // the
       // traversal from the key costs the user nothing.
       const row = await prisma.upload.findUniqueOrThrow({ where: { id: signed.uploadId } });
       expect(row.originalName).toBe(testCase.originalName);
@@ -699,7 +702,7 @@ describe('POST /uploads/presign', () => {
 
   /**
    * `PURPOSE_FOLDER` (storage.ts:56-60) is the ONLY trace a purpose leaves behind:
-   * `Upload` has no `purpose` column (schema.prisma:392-424), so the prefix is what makes
+   * `Upload` has no `purpose` column (none on `model Upload`), so the prefix is what makes
    * a bucket listing legible and what keeps the seed's layout and the live one identical
    * rather than two conventions in one bucket.
    *

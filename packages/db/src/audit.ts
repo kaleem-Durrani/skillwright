@@ -61,6 +61,43 @@ export const AUDITED_MODELS: ReadonlySet<string> = new Set([
   'Resource',
   'Announcement',
   'Comment',
+  /*
+   * The assessment chain, which arrived complete and unlisted.
+   *
+   * `Assignment` and `Submission` were missing because the assessment module was
+   * written as the second link in a chain whose first link — Enrollment — was already
+   * audited, and the reader of the trail already had the vocabulary: a mark is
+   * `COMPLETE` on an enrollment and `UPDATE` on a hand-in, and the two rows are joined
+   * by the enrollment id the hand-in carries. That join is exactly what a reviewer
+   * cannot do in SQL, because the audit table has no foreign keys — `entityId` is
+   * bare text, deliberately, so a row survives the deletion of the thing it describes.
+   * The cost of that durability is that the trail is only as good as its contents, and
+   * the single most questioned event in a vocational school is somebody's grade. Who
+   * set it, when, and what it displaced is the question a registrar is asked in a
+   * dispute, and `deriveUpdateAction` has no verb for a mark: it is an `UPDATE` on
+   * `Submission` with `score` and `feedback` in the diff, which is recorded now and was
+   * previously not recorded at all.
+   *
+   * `StudentQualification` is the same argument one step further out, and it is the one
+   * that decides the direction of travel. A certificate is designed to outlive every
+   * account involved in it — `issuedById` and `revokedById` are both `SetNull` for
+   * exactly that reason — so the one table that must never lose its provenance is the
+   * one whose provenance was absent. A revocation with no actor and no reason beside it
+   * is a withdrawn qualification that nobody can be asked about, and the public verify
+   * route will still say it was withdrawn.
+   *
+   * What is deliberately still absent is worth naming, because the obvious next
+   * candidates are the two models immediately above this paragraph. `Message` is
+   * excluded as churn, and `ConversationParticipant` is excluded for the same reason
+   * `Upload` is: a seat and a message are the mechanics of a conversation, not acts of
+   * governance. That argument has a shelf life, and this comment is where it expires —
+   * `AddParticipantDialog` records that no leave route exists, so the roster currently
+   * cannot be left or removed by anybody, and the day one exists the roster becomes a
+   * governance record and `ConversationParticipant` belongs in this set with them.
+   */
+  'Assignment',
+  'Submission',
+  'StudentQualification',
 ]);
 
 /**

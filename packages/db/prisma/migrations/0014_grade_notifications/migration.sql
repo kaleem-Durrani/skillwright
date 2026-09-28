@@ -1,0 +1,71 @@
+-- The last of the assessment phase's recorded omissions, paid.
+--
+-- Commit 95b0913 closed Phase 2 of `docs/roadmap/10-FEATURE-PLAN.md` and wrote down
+-- what it had left, in the only place the reader would look for it:
+--
+--     a graded hand-in sends no notification, which needs a NotificationType
+--     member and therefore a migration nobody asked for.
+--
+-- That is the whole of it, and it is still true in two files. `grade` and
+-- `returnWork` in `assignments.service.ts` each write the Submission row, the
+-- `gradedById`, the `gradedAt` and the audit trail, and then return the DTO with
+-- nothing else in the request. A student who hands in work has no way of learning
+-- that it came back marked except by opening the course page themselves.
+--
+-- WHY 0013 DID NOT PAY THIS, since its own header claims to.
+--
+-- Migration 0013 ends with a sentence that reads as though this file exists:
+--
+--     `NotificationType` gains `CERTIFICATE_ISSUED` and `CERTIFICATE_REVOKED`,
+--     which close the one thing Phase 2 recorded as deliberately unfinished: a
+--     graded hand-in sends no notification because adding a member needs a
+--     migration nobody asked for. This is that migration.
+--
+-- The two members it added are about certificates. The sentence names the wrong
+-- debt — or, read charitably, the writer meant the certificate debt and reached
+-- for the sentence about the one that was most recently written down. Either way
+-- the debt named was not paid, and the comment is now the reason a reader
+-- believes the opposite. This file is the actual paying of it, and the schema's
+-- two doc comments on the members added below are the correction.
+--
+-- TWO MEMBERS AND NOT ONE, for the same reason 0013 gave CERTIFICATE_ISSUED and
+-- CERTIFICATE_REVOKED rather than one member with a body field: the notifications
+-- page filters by type (`listNotificationsQuerySchema.type`), and a hand-in sent
+-- back for another attempt filed under "graded" would show a student a mark they
+-- were not given, which is the one sentence on this screen that must never be a
+-- lie. The two events are opposite verdicts on the same object, reached by two
+-- different URLs (`/submissions/:id/grade` and `/submissions/:id/return`), and
+-- `returnWork` documents the separation as a policy — "separate verb, separate
+-- audit action" — at `enrollment:withdraw`. The notifications carry the same
+-- distinction for the same reason.
+--
+-- `ADD VALUE` is metadata-only in Postgres: no table rewrite, no row touched, and
+-- every previously-written notification keeps the type it was written with. This
+-- runs instantly on a populated database.
+--
+-- WHAT THIS MIGRATION DOES NOT DO, deliberately.
+--
+-- It does not backfill. A `Notification` row cannot be synthesised for a hand-in
+-- graded before this migration, because the row that would point at it is being
+-- added now and the graded submissions that exist have no record of who read them
+-- afterwards. Writing history that did not happen is how a notifications list
+-- starts lying about itself.
+--
+-- It does not add a per-grader or per-teacher notification. The event here is
+-- between a grader and one student, the same shape as `MESSAGE_RECEIVED`, and
+-- notifying a teacher of a mark they themselves gave would be noise.
+--
+-- It does not touch the score arithmetic. A RETURNED row carries no score
+-- (`returnWork` sets it to null rather than leaving it, because the certificate
+-- arithmetic in Phase 3 divides by `maxScore` and would count a RETURNED row
+-- twice), and the body copy below reflects that — a return announces a reason, not
+-- a mark, and there is no score in the sentence to misreport.
+--
+-- Migrations are APPLIED, never pushed: `prisma migrate deploy` replays this file, so
+-- the SQL above is the only description of the change that has to stay true.
+
+-- AlterEnum
+ALTER TYPE "NotificationType" ADD VALUE 'SUBMISSION_GRADED';
+
+-- AlterEnum
+ALTER TYPE "NotificationType" ADD VALUE 'SUBMISSION_RETURNED';

@@ -20,6 +20,7 @@ import { conflict, notFound, validationFailed } from '../../lib/errors.js';
 // module — which owns the presign -> PUT -> commit path every hand-in arrives through.
 // The same import resources.service.ts makes for its own `uploadId`.
 import { assertUploadClaimable } from '../uploads/uploads.service.js';
+import { notify } from '../notifications/notifications.service.js';
 import type { AssignmentSubmissionRow, ListAssignmentsQuery } from './assignments.schema.js';
 
 // ---------------------------------------------------------------------------
@@ -797,7 +798,41 @@ export async function grade(
     include: SUBMISSION_INCLUDE,
   });
 
+  // After the write and best-effort: `notify()` never throws, and a failed
+  // notification must not undo a mark that has already been recorded. This is the
+  // `SUBMISSION_GRADED` member migration 0014 added, paying the debt commit 95b0913
+  // recorded when it shipped this function. It is the only way a student learns their
+  // work came back marked without opening the course themselves.
+  await notify({
+    userIds: [target.studentId],
+    type: 'SUBMISSION_GRADED',
+    title: 'Your work has been marked',
+    body: gradeNotificationBody(target.assignmentTitle, score, target.maxScore),
+    linkPath: `/courses/${target.courseId}`,
+  });
+
   return toSubmissionDto(row);
+}
+
+/**
+ * The sentence, which is two sentences depending on whether there is a mark in it.
+ *
+ * `grade` accepts a null score WITH mandatory feedback — a comment on its own is a
+ * legitimate outcome and `gradeSubmissionSchema` says so — so a body that always named
+ * a mark would print "out of 100" for a verdict that carried no number. The two are
+ * therefore separate strings rather than one template with a hole, and the second says
+ * nothing about a score because there is none: the notifications page filters by type,
+ * so this row is the permanent record of what the student was told, and "marked" with
+ * no number is the truth while "scored" would not be.
+ */
+function gradeNotificationBody(
+  assignmentTitle: string,
+  score: number | null,
+  maxScore: Prisma.Decimal,
+): string {
+  return score === null
+    ? `Your teacher has left feedback on ${assignmentTitle}.`
+    : `${score} out of ${maxScore.toNumber()} for ${assignmentTitle}.`;
 }
 
 /**
@@ -830,6 +865,19 @@ export async function returnWork(
     include: SUBMISSION_INCLUDE,
   });
 
+  // The same trade as `grade`, and the same migration. A SEPARATE member rather than a
+  // second row under SUBMISSION_GRADED, for the reason the two certificate members are
+  // separate: the notifications page filters by type, and a hand-in sent back for
+  // another attempt filed under "graded" would show a student a mark they were not
+  // given. This verb is a refusal to mark, and the sentence must read like one.
+  await notify({
+    userIds: [target.studentId],
+    type: 'SUBMISSION_RETURNED',
+    title: 'Your work needs another attempt',
+    body: `Your teacher has asked you to try ${target.assignmentTitle} again.`,
+    linkPath: `/courses/${target.courseId}`,
+  });
+
   return toSubmissionDto(row);
 }
 
@@ -842,19 +890,46 @@ export async function returnWork(
  * reachable path here and not merely a race — and it has to answer 404 rather than a
  * null-dereference 500. The same reasoning `getById` in resources.service.ts states.
  */
-async function loadGradeableSubmission(
-  id: string,
-): Promise<{ id: string; maxScore: Prisma.Decimal }> {
+async function loadGradeableSubmission(id: string): Promise<{
+  id: string;
+  maxScore: Prisma.Decimal;
+  studentId: string;
+  assignmentTitle: string;
+  courseId: string;
+}> {
   const submission = await prisma.submission.findFirst({
     where: {
       id,
       deletedAt: null,
       assignment: { deletedAt: null, offering: { deletedAt: null, course: { deletedAt: null } } },
     },
-    select: { id: true, assignment: { select: { maxScore: true } } },
+    select: {
+      id: true,
+      // The three columns the verdict notification is written from. They are read HERE
+      // rather than in `grade` and `returnWork` because this is the one query that
+      // already walks submission -> assignment -> offering -> course, and a second read
+      // to produce a side effect would be a second place for the copy to be wrong about
+      // which task or whose seat it is describing.
+      //
+      // `studentId` is off the ENROLLMENT, not off a User on the row, for the reason
+      // schema.prisma states on `Submission`: a seat is required before a hand-in and
+      // Enrollment is already "this student holds this seat in this intake". Reading it
+      // from here rather than from `row` is what keeps the notification's recipient the
+      // same person the hand-in was made on.
+      enrollment: { select: { studentId: true } },
+      assignment: {
+        select: { title: true, maxScore: true, offering: { select: { courseId: true } } },
+      },
+    },
   });
   if (!submission) throw notFound('Submission');
-  return { id: submission.id, maxScore: submission.assignment.maxScore };
+  return {
+    id: submission.id,
+    maxScore: submission.assignment.maxScore,
+    studentId: submission.enrollment.studentId,
+    assignmentTitle: submission.assignment.title,
+    courseId: submission.assignment.offering.courseId,
+  };
 }
 
 /**

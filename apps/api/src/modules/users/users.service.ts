@@ -47,7 +47,8 @@ const log = baseLogger.child({ module: 'users' });
 
 /**
  * The relations `toUserDetail` reads. There is NO `User.departmentId` column
- * (schema.prisma:128-184) — a person's department hangs off whichever profile they
+ * (`model User` in schema.prisma carries no such field) — a person's department hangs off
+ * whichever profile they
  * have, so the department name the console renders arrives through two joins and not
  * one field.
  *
@@ -106,8 +107,9 @@ async function withAvatarUrl(
  * `suspendUserSchema.nullish()` and an absent reason becomes this.
  *
  * The reason has nowhere to be STORED: `User` has no suspension-reason column
- * (schema.prisma:128-184) and the audit row is written by the Prisma extension, which
- * snapshots columns and cannot be handed free text (audit.ts:288-427). Writing an
+ * (`model User` in schema.prisma) and the audit row is written by the Prisma extension,
+ * which snapshots columns and cannot be handed free text (`record()` in audit.ts, whose
+ * `params` carry no free-text field). Writing an
  * AuditEvent by hand to carry it would double the row the extension already writes.
  * So it is logged, where an operator can still find it, and the honest fix is either a
  * `User.suspensionReason` column or a `metadata` field on AuditEvent — both schema
@@ -179,7 +181,7 @@ function listWhere(query: ListUsersQuery): Prisma.UserWhereInput {
 
   if (query.q !== undefined) {
     // v1 substring match over the two columns the admin console searches by.
-    // `email` is `@db.Citext` (schema.prisma:132), so it is already case-insensitive
+    // `email` is `@db.Citext` (declared on `model User`), so it is already case-insensitive
     // at the type level; `mode: 'insensitive'` is stated anyway so the two branches
     // read the same and `name`, a plain String, behaves identically.
     filters.push({
@@ -192,7 +194,8 @@ function listWhere(query: ListUsersQuery): Prisma.UserWhereInput {
 
   if (query.departmentId !== undefined) {
     // There is no `User.departmentId`. A person belongs to a department through
-    // whichever profile they have (schema.prisma:186-221), and an ADMIN has neither —
+    // whichever profile they have (`model TeacherProfile` / `model StudentProfile` in
+    // schema.prisma), and an ADMIN has neither —
     // so this filter deliberately excludes admins rather than pretending they are
     // departmentless members of the one asked for.
     filters.push({
@@ -222,7 +225,7 @@ function listWhere(query: ListUsersQuery): Prisma.UserWhereInput {
  * (AdminUsers.tsx:51-64) and a typo in a URL is not worth an error page.
  *
  * Every branch is an indexed column: @@index([role, status]), @@index([status]),
- * @@index([createdAt]) (schema.prisma:180-183).
+ * @@index([createdAt]) — all three declared on `model User` in schema.prisma.
  */
 function orderFor(query: ListUsersQuery): Prisma.UserOrderByWithRelationInput {
   switch (query.sort) {
@@ -287,7 +290,8 @@ export function getSelf(actor: Actor): Promise<UserDetail> {
  */
 export async function updateSelf(actor: Actor, input: UpdateUserInput): Promise<UserDetail> {
   /*
-   * `avatarUploadId` is a client-chosen foreign key (schema.prisma:143-144), so it is
+   * `avatarUploadId` is a client-chosen foreign key (declared on `model User` in
+   * schema.prisma, `onDelete: SetNull`), so it is
    * checked FIRST — left to Prisma it would be a P2003 rendered as a bare 409, and the
    * courses.service.ts:296-315 rule turns that into a field-level 422.
    *
@@ -373,8 +377,8 @@ async function applyUserUpdate(userId: string, role: Role, input: UpdateUserInpu
         ...(input.avatarUploadId !== undefined ? { avatarUploadId: input.avatarUploadId } : {}),
       },
     });
-    // The audit row is written by the Prisma extension (User is in AUDITED_MODELS,
-    // audit.ts:51-59); writing one here too would double every edit.
+    // The audit row is written by the Prisma extension (User is in `AUDITED_MODELS`,
+    // packages/db/src/audit.ts); writing one here too would double every edit.
   }
 
   await applyProfileUpdate(userId, role, input);
@@ -423,8 +427,9 @@ function rejectMismatchedProfileFields(role: Role, fields: ProfileFieldSource): 
  * repair (every provisioned, registered and seeded teacher/student gets one), so the
  * honest answer is a 409 naming the gap rather than an invented department.
  *
- * Profile rows are not in AUDITED_MODELS (audit.ts:51-59): they are satellites of the
- * User, whose own UPDATE row carries the request when any scalar moved alongside.
+ * Profile rows are not in `AUDITED_MODELS` (packages/db/src/audit.ts): they are
+ * satellites of the User, whose own UPDATE row carries the request when any scalar
+ * moved alongside.
  */
 async function applyProfileUpdate(
   userId: string,
@@ -492,7 +497,8 @@ async function assertEmailAvailable(email: string): Promise<void> {
  * are needed — `authorize` has thrown for a null actor before the handler runs.
  *
  * Password bootstrap invents nothing: the row is created WITHOUT a credential
- * (`passwordHash` stays null — schema.prisma:133-135 documents exactly this state),
+ * (`passwordHash` stays null — the nullable `passwordHash` on `model User` in
+ * schema.prisma documents exactly this state),
  * and the person sets their own password through the existing forgot/reset-password
  * flow (auth.service.ts resetPassword, delivered over Mailpit in dev). That flow also
  * flips PENDING_VERIFICATION -> ACTIVE on reset, which is why the row is created in
@@ -501,7 +507,7 @@ async function assertEmailAvailable(email: string): Promise<void> {
  * The audit CREATE row is written by the Prisma extension off `prisma.user.create`
  * (before: null, after: the row) — no manual audit call, like every other write. The
  * profile satellite rides inside the same nested write; profile rows are not audited
- * models of their own (audit.ts:51-59).
+ * models of their own.
  */
 export async function create(input: CreateUserInput): Promise<UserDetail> {
   const plan = await planCreate(input);
@@ -760,7 +766,8 @@ function describeFailure(error: unknown): {
  *
  * Two writes, SEQUENTIALLY and deliberately not in one interactive transaction. `User`
  * is an AUDITED model, so `prisma.user.update` makes the audit extension write an
- * AuditEvent on a SECOND pool from inside the call (audit.ts:225-232). Wrapping that
+ * AuditEvent on a SECOND pool from inside the call (the "Two consequences" note on
+ * `auditExtension` in audit.ts). Wrapping that
  * in `prisma.$transaction(async tx => …)` next to a second statement is the shape that
  * deadlocks the pool under concurrency and surfaces as P2024 reading like slowness —
  * the trap enrollments.service.ts:41-50 pays a 15s budget to survive. Nothing here
@@ -768,7 +775,7 @@ function describeFailure(error: unknown): {
  * auth.plugin.ts:63-67 the moment any surviving cookie is presented.
  *
  * The status transition ACTIVE -> SUSPENDED is what makes the extension derive the
- * SUSPEND action (audit.ts:161-163). NO manual audit row is written.
+ * SUSPEND action (`deriveUpdateAction` in audit.ts). NO manual audit row is written.
  */
 export async function suspend(id: string, input?: SuspendUserInput): Promise<UserDetail> {
   const current = await prisma.user.findFirst({

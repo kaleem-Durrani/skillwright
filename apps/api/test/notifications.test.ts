@@ -54,7 +54,8 @@ afterAll(async () => {
 
 beforeEach(async () => {
   // `resetDatabase()` never mentions Notification, and does not need to:
-  // `Notification.user` is onDelete: Cascade (schema.prisma:598), so deleting every
+  // `Notification.user` is onDelete: Cascade (declared so in schema.prisma), so deleting
+  // every
   // user takes the notifications with it. Adding a delete here would be a second,
   // drifting teardown for a table the shared fixture already handles.
   await clearAcademicRows();
@@ -458,7 +459,8 @@ describe('GET /notifications', () => {
   it('renders a payload that does not match the schema blank rather than 500ing the page', async () => {
     const userId = await createAccount('malformed@example.com', 'STUDENT');
     const cookie = await login('malformed@example.com');
-    // A `Json` column guarantees nothing about its shape (schema.prisma:604), which is
+    // A `Json` column (`Notification.payload`) guarantees nothing about its shape, which
+    // is
     // the whole reason the mapper re-parses.
     await seedNotification(userId, { payload: { nope: true } });
     await seedNotification(userId, { title: 'Intact' });

@@ -570,6 +570,45 @@ describe('handing work in', () => {
     expect(response.json().errors[0].path).toBe('uploadId');
   });
 
+  it('refuses a hand-in reusing a file that already backs another one', async () => {
+    const teacher = await signIn('as-t24@example.com', 'TEACHER');
+    const alice = await signIn('as-s14@example.com', 'STUDENT');
+    const { offeringId } = await makeCourse(teacher.id);
+    await enroll(alice, offeringId);
+    const firstAssignment = await makeAssignment(offeringId, { title: 'First task' });
+    const secondAssignment = await makeAssignment(offeringId, { title: 'Second task' });
+    const uploadId = await committedUpload(alice, 'shared.pdf');
+
+    const first = await post(handInUrl(firstAssignment), alice.token, { uploadId });
+    expect(first.statusCode).toBe(201);
+
+    /*
+     * THE FOURTH `@unique` CLAIM POINT. `Submission.uploadId` is unique for the same
+     * reason `Resource.uploadId` is — one upload backs exactly one hand-in, and the file
+     * IS the hand-in — and `assertUploadClaimable` read the first three of them
+     * (resource, courseSyllabus, userAvatar) to turn the collision into a 422 naming
+     * `uploadId`. Left out of that read, this one is the database's problem instead of
+     * the service's: a P2002 becomes a pathless 409 (errors.plugin.ts's P2002 branch),
+     * which the SPA cannot render against a form field and which does not tell the
+     * student what they did. The student did nothing wrong that they can name: they
+     * picked a file, twice, on two tasks that legitimately both want it.
+     */
+    const second = await post(handInUrl(secondAssignment), alice.token, { uploadId });
+
+    expect(second.statusCode).toBe(422);
+    expect(second.json().code).toBe('VALIDATION_FAILED');
+    expect(second.json().errors[0].path).toBe('uploadId');
+    expect(second.json().errors[0].message).toContain('already attached');
+
+    // And nothing was written on the refused attempt. `@@unique([assignmentId,
+    // enrollmentId, attempt])` would have made the second row attempt 2 on the SECOND
+    // assignment, which is legal — so the only thing standing between this and a
+    // hand-in that exists and a file that backs two things is the check above.
+    const rows = await prisma.submission.findMany({ where: { uploadId } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.assignmentId).toBe(firstAssignment);
+  });
+
   it('records a resubmission as a NEW row, and keeps the first', async () => {
     const teacher = await signIn('as-t23@example.com', 'TEACHER');
     const alice = await signIn('as-s13@example.com', 'STUDENT');
@@ -772,6 +811,129 @@ describe('returning work', () => {
   });
 });
 
+/*
+ * The debt commit 95b0913 wrote down when it shipped grading: "a graded hand-in sends
+ * no notification, which needs a NotificationType member and therefore a migration
+ * nobody asked for." Migration 0014 adds the members; this is the half that is a
+ * service change, and it is the half a comment in a migration file cannot make true.
+ */
+describe('announcing a verdict', () => {
+  it('tells the student their work was marked, with a payload that renders', async () => {
+    const teacher = await signIn('as-t40@example.com', 'TEACHER');
+    const alice = await signIn('as-s30@example.com', 'STUDENT');
+    const { courseId, offeringId } = await makeCourse(teacher.id);
+    await enroll(alice, offeringId);
+    const assignmentId = await makeAssignment(offeringId, { title: 'Weld the fillet' });
+    await post(handInUrl(assignmentId), alice.token, { uploadId: await committedUpload(alice) });
+    const submissionId = (await prisma.submission.findFirstOrThrow()).id;
+
+    await post(`/api/v1/submissions/${submissionId}/grade`, teacher.token, {
+      score: 62.5,
+      feedback: 'Good root, a little proud on the third leg.',
+    });
+
+    const notification = await prisma.notification.findFirstOrThrow({
+      where: { userId: alice.id, type: 'SUBMISSION_GRADED' },
+    });
+    // LESSONS-LEARNED #17 again, and for the same reason: a payload missing either key
+    // is served as `{title: '', body: ''}` and renders blank with no error anywhere.
+    // Asserted against the round trip, against the real writer.
+    const payload = notification.payload as { title?: string; body?: string };
+    expect(payload.title).toBe('Your work has been marked');
+    expect(payload.body).toContain('62.5');
+    expect(payload.body).toContain('Weld the fillet');
+    // The bell navigates straight to the course the task hangs off, which is the
+    // Assignments panel the student reads the mark in.
+    expect(notification.linkPath).toBe(`/courses/${courseId}`);
+  });
+
+  it('tells the student their work came back, and says no mark was given', async () => {
+    const teacher = await signIn('as-t41@example.com', 'TEACHER');
+    const alice = await signIn('as-s31@example.com', 'STUDENT');
+    const { courseId, offeringId } = await makeCourse(teacher.id);
+    await enroll(alice, offeringId);
+    const assignmentId = await makeAssignment(offeringId, { title: 'Weld the fillet' });
+    await post(handInUrl(assignmentId), alice.token, { uploadId: await committedUpload(alice) });
+    const submissionId = (await prisma.submission.findFirstOrThrow()).id;
+
+    await post(`/api/v1/submissions/${submissionId}/return`, teacher.token, {
+      feedback: 'Undercut on two passes — run it again with the guide rail.',
+    });
+
+    const notification = await prisma.notification.findFirstOrThrow({
+      where: { userId: alice.id, type: 'SUBMISSION_RETURNED' },
+    });
+    const payload = notification.payload as { title?: string; body?: string };
+    expect(payload.title).toBe('Your work needs another attempt');
+    expect(payload.body).toContain('Weld the fillet');
+    // A return carries no score by design, and the sentence must not imply one.
+    expect(payload.body).not.toMatch(/\d+\s*(out of|\/)\s*\d+/);
+    expect(notification.linkPath).toBe(`/courses/${courseId}`);
+  });
+
+  it('keeps the two types apart, because the notifications page filters by type', async () => {
+    const teacher = await signIn('as-t42@example.com', 'TEACHER');
+    const alice = await signIn('as-s32@example.com', 'STUDENT');
+    const { offeringId } = await makeCourse(teacher.id);
+    await enroll(alice, offeringId);
+    const assignmentId = await makeAssignment(offeringId);
+    await post(handInUrl(assignmentId), alice.token, { uploadId: await committedUpload(alice) });
+    const submissionId = (await prisma.submission.findFirstOrThrow()).id;
+
+    await post(`/api/v1/submissions/${submissionId}/return`, teacher.token, {
+      feedback: 'Another go, please.',
+    });
+    await post(`/api/v1/submissions/${submissionId}/grade`, teacher.token, { score: 80 });
+
+    expect(
+      await prisma.notification.count({ where: { userId: alice.id, type: 'SUBMISSION_RETURNED' } }),
+    ).toBe(1);
+    expect(
+      await prisma.notification.count({ where: { userId: alice.id, type: 'SUBMISSION_GRADED' } }),
+    ).toBe(1);
+  });
+
+  it('says nothing when the mark was refused, because nothing was marked', async () => {
+    const teacher = await signIn('as-t43@example.com', 'TEACHER');
+    const alice = await signIn('as-s33@example.com', 'STUDENT');
+    const { offeringId } = await makeCourse(teacher.id);
+    await enroll(alice, offeringId);
+    const assignmentId = await makeAssignment(offeringId, { maxScore: 50 });
+    await post(handInUrl(assignmentId), alice.token, { uploadId: await committedUpload(alice) });
+    const submissionId = (await prisma.submission.findFirstOrThrow()).id;
+
+    const refused = await post(`/api/v1/submissions/${submissionId}/grade`, teacher.token, {
+      score: 80,
+    });
+    expect(refused.statusCode).toBe(422);
+
+    // A notification written for a mark that was never stored is the one failure mode
+    // this whole feature exists to prevent, so the negative is asserted rather than
+    // assumed: the count is compared against 0 and not against undefined.
+    expect(
+      await prisma.notification.count({ where: { userId: alice.id, type: 'SUBMISSION_GRADED' } }),
+    ).toBe(0);
+  });
+
+  it('says nothing to the grader, who is the one who already knows', async () => {
+    const teacher = await signIn('as-t44@example.com', 'TEACHER');
+    const alice = await signIn('as-s34@example.com', 'STUDENT');
+    const { offeringId } = await makeCourse(teacher.id);
+    await enroll(alice, offeringId);
+    const assignmentId = await makeAssignment(offeringId);
+    await post(handInUrl(assignmentId), alice.token, { uploadId: await committedUpload(alice) });
+    const submissionId = (await prisma.submission.findFirstOrThrow()).id;
+
+    await post(`/api/v1/submissions/${submissionId}/grade`, teacher.token, { score: 90 });
+
+    expect(
+      await prisma.notification.count({
+        where: { userId: teacher.id, type: { in: ['SUBMISSION_GRADED', 'SUBMISSION_RETURNED'] } },
+      }),
+    ).toBe(0);
+  });
+});
+
 describe('the student’s own list', () => {
   it('joins every task they hold a seat for to whether they have handed in', async () => {
     const teacher = await signIn('as-t33@example.com', 'TEACHER');
@@ -862,5 +1024,84 @@ describe('the student’s own list', () => {
 
   it('refuses an anonymous caller', async () => {
     expect((await get('/api/v1/assignments/mine')).statusCode).toBe(401);
+  });
+});
+
+/**
+ * The assessment chain in `AUDITED_MODELS` (packages/db/src/audit.ts), asserted through
+ * the routes rather than through a direct Prisma write.
+ *
+ * The reason it has to be a test and not a line in a comment is the shape of the
+ * failure. Adding a model to that set is not an error anywhere if it is wrong: the
+ * interceptors return early for a model they do not recognise, no query throws, no log
+ * line is written, and every functional assertion in this file still passes. What
+ * disappears is the RECORD — so the only honest check is that the row exists, with the
+ * right action, carrying the field that changed.
+ *
+ * Driving it through `POST /offerings/:id/assignments` and `POST /submissions/:id/grade`
+ * is what makes it a test of the product rather than of the extension: the fixture
+ * helpers `makeAssignment` and `committedUpload` write straight through Prisma, and a
+ * mark is a route.
+ */
+describe('what the assessment chain leaves in the audit trail', () => {
+  it('records the task, the hand-in, and the mark as a diffed UPDATE', async () => {
+    const teacher = await signIn('as-t36@example.com', 'TEACHER');
+    const alice = await signIn('as-s25@example.com', 'STUDENT');
+    const { offeringId } = await makeCourse(teacher.id);
+    await enroll(alice, offeringId);
+
+    const created = await post(
+      listUrl(offeringId),
+      teacher.token,
+      createAssignmentBody(offeringId),
+    );
+    expect(created.statusCode).toBe(201);
+    const assignmentId = created.json().id as string;
+
+    const assignmentEvents = await prisma.auditEvent.findMany({
+      where: { entityType: 'Assignment', entityId: assignmentId },
+      orderBy: { createdAt: 'asc' },
+    });
+    // One row, from the extension, with the whole after-image rather than a diff: a
+    // CREATE has no before side, so the body of the task — the brief, the deadline,
+    // the maximum — is what an appeal is read against.
+    expect(assignmentEvents.map((event) => event.action)).toEqual(['CREATE']);
+    expect(assignmentEvents[0]?.before).toBeNull();
+    expect(Object.keys(assignmentEvents[0]?.after as object)).toEqual(
+      expect.arrayContaining(['title', 'brief', 'dueAt', 'maxScore', 'offeringId']),
+    );
+
+    const handedIn = await post(handInUrl(assignmentId), alice.token, {
+      uploadId: await committedUpload(alice),
+    });
+    expect(handedIn.statusCode).toBe(201);
+    const submissionId = handedIn.json().id as string;
+
+    const graded = await post(`/api/v1/submissions/${submissionId}/grade`, teacher.token, {
+      score: 62.5,
+      feedback: 'Good root, a little proud on the third leg.',
+    });
+    expect(graded.statusCode).toBe(200);
+
+    const submissionEvents = await prisma.auditEvent.findMany({
+      where: { entityType: 'Submission', entityId: submissionId },
+      orderBy: { createdAt: 'asc' },
+    });
+    // CREATE, then the mark as an UPDATE — the same CREATE -> diffed-UPDATE pair
+    // `AttendanceRecord` earns from the attendance bulk-mark, because a correction
+    // that left no trail would be indistinguishable from a mark nobody ever gave.
+    expect(submissionEvents.map((event) => event.action)).toEqual(['CREATE', 'UPDATE']);
+
+    // The DIFF, not the whole row, and the assertion is on the field a registrar
+    // disputes. `score` is a Prisma Decimal, so `diff()`'s JSON comparison sees it as
+    // a string in both images and it is the feedback that has to be present to prove
+    // the update was recorded at all.
+    const mark = submissionEvents[1];
+    const changed = mark?.after as Record<string, unknown> | null;
+    expect(Object.keys(changed ?? {})).toContain('feedback');
+    expect(changed?.feedback).toBe('Good root, a little proud on the third leg.');
+    // And the actor is on it, which is the whole point: `withAuditContext` supplies the
+    // session, so a trail row is attributable without the service naming anyone.
+    expect(submissionEvents.map((event) => event.actorId)).toEqual([alice.id, teacher.id]);
   });
 });

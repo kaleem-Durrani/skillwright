@@ -35,7 +35,8 @@ beforeEach(async () => {
   await resetDatabase();
   await resetRateLimits(app.redis);
   // resetDatabase() does NOT touch AuditEvent — the table has no `deletedAt` and is
-  // append-only (schema.prisma:616-619), and its own `deleteMany` calls on User,
+  // append-only (the "Append-only" comment on `model AuditEvent`), and its own
+  // `deleteMany` calls on User,
   // Course and Department are audited models, so unwinding the previous suite writes
   // rows of its own. Clearing has to come afterwards or this suite reads them.
   await clearAudit();
@@ -76,7 +77,8 @@ async function signedIn(email: string, role: TestRole, name?: string): Promise<s
  * asserts on the CONTENTS of the feed clears it once its fixtures exist and seeds the
  * rows it means to observe afterwards. Reading the feed writes nothing: the only write
  * a GET performs is the session slide, and Session is deliberately unaudited
- * (audit.ts:43-59).
+ * (`AUDITED_MODELS` in audit.ts names no Session row — the doc comment on that set
+ * calls the exclusion out by name).
  */
 async function clearAudit(): Promise<void> {
   await clearAuditEvents();
@@ -105,8 +107,8 @@ interface SeedEvent {
  * Rows are inserted directly rather than provoked through a mutation, because the
  * assertions below are about shapes the extension writes in production — a null actor,
  * an empty `entityId`, a seeded ULID id — that no fixture-driven mutation produces.
- * `AuditEvent` is not in AUDITED_MODELS (audit.ts:51-59), so inserting one here does
- * not cascade into a second row.
+ * `AuditEvent` is not in `AUDITED_MODELS` (packages/db/src/audit.ts), so inserting one
+ * here does not cascade into a second row.
  */
 async function seedEvent(event: SeedEvent = {}): Promise<string> {
   const row = await prisma.auditEvent.create({
@@ -218,7 +220,7 @@ describe('GET /audit-events', () => {
 
     // The redacted diff and the request metadata exist on the row and must not reach
     // the wire: AdminOverview.tsx:141-148 renders none of them, and an audit trail is
-    // read by more people than the users table is (audit.ts:61-66).
+    // read by more people than the users table is (`REDACTED_FIELDS` in audit.ts).
     await seedEvent({
       action: 'UPDATE',
       entityType: 'User',
@@ -260,7 +262,8 @@ describe('GET /audit-events', () => {
     const admin = await signedIn('system@example.com', 'ADMIN');
     await clearAudit();
 
-    // schema.prisma:623 — null is the documented shape for cron and queue workers, and
+    // `AuditEvent.actorId` — null is the documented shape for cron and queue workers,
+    // and
     // `onDelete: SetNull` produces it again whenever an actor's row is hard-deleted.
     // The SPA renders it as 'system' (AdminOverview.tsx:148).
     await seedEvent({ actorId: null });
@@ -306,7 +309,7 @@ describe('GET /audit-events', () => {
     const admin = await signedIn('legacy@example.com', 'ADMIN');
     await clearAudit();
 
-    // audit.ts:203-206 writes '' when a createMany row carried no id. `entityId` is
+    // `idOf()` in audit.ts writes '' when a createMany row carried no id. `entityId` is
     // `z.string()` on the response for exactly this row, and `idSchema` on the query.
     await seedEvent({ entityId: '' });
 
@@ -458,7 +461,8 @@ describe('GET /audit-events — who may read it', () => {
 
     // Same-origin, so the CSRF guard (csrf.plugin.ts) passes and the 404 is the router
     // saying this module declares one route. Migration 0002:107-108 revokes UPDATE and
-    // DELETE on the table from the application role; INSERT belongs to audit.ts:288-427.
+    // DELETE on the table from the application role; INSERT belongs to `record()` in
+    // audit.ts, the only `base.auditEvent.create` in the repository.
     const response = await app.inject({
       method: 'POST',
       url: '/api/v1/audit-events',

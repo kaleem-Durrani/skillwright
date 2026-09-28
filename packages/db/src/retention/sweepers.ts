@@ -33,8 +33,8 @@ import { logger } from '../logger.js';
  *
  * Two reasons, and the second is the one that bites. The index barrel re-exports this
  * module, so importing `prisma` from there is a cycle; and none of the four models below
- * is in `AUDITED_MODELS` (audit.ts:51-64), so the extension's interceptors return
- * immediately for them and carrying the extension buys nothing. Taking the un-extended
+ * is in `AUDITED_MODELS` (packages/db/src/audit.ts), so the extension's interceptors
+ * return immediately for them and carrying the extension buys nothing. Taking the un-extended
  * client is the accurate description of what this code does.
  */
 const db = basePrisma;

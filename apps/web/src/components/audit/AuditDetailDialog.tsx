@@ -57,7 +57,8 @@ export interface AuditDetailDialogProps {
 
 /**
  * One audit event's forensics: who acted, what changed on each side of it, and the
- * request metadata the extension recorded (packages/db/src/audit.ts:259-269).
+ * request metadata the extension recorded (the `base.auditEvent.create` in
+ * `auditExtension`'s `record()`).
  *
  * A DIALOG rather than a route, per house patterns — the feed is an admin overview,
  * not a destination of its own, so detail is a layer over it that Escape dismisses

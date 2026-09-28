@@ -14,7 +14,8 @@
  * `notificationPayloadSchema` is bound by no route directly — it is the `payload` field
  * inside `notificationSchema`. It is named here anyway because the service PARSES with
  * it at runtime (`toPayload` in notifications.service.ts): `Notification.payload` is
- * Prisma `Json` (schema.prisma:604), so the column type carries no guarantee that
+ * Prisma `Json` (declared on `model Notification`), so the column type carries no
+ * guarantee that
  * `{ title, body }` is present.
  *
  * There is NO local zod declaration in this file, unlike courses.schema.ts:49-55 and

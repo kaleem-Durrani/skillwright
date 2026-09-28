@@ -1509,10 +1509,12 @@ function RejectDialog({
  *
  * What an administrator CAN see is the deletion itself: `Resource` is in AUDITED_MODELS,
  * and the Prisma extension classifies a write that sets `deletedAt` as action `DELETE`
- * with the actor against it (packages/db/src/audit.ts:51-58, :158), which is what the
+ * with the actor against it (`AUDITED_MODELS` and `deriveUpdateAction`,
+ * packages/db/src/audit.ts), which is what the
  * admin overview lists (AdminOverview.tsx:119-155).
  *
- * The audit extension also knows a `RESTORE` (audit.ts:159) — but no endpoint exposes
+ * The audit extension also knows a `RESTORE` (`deriveUpdateAction` in audit.ts returns it
+ * when `deletedAt` clears) — but no endpoint exposes
  * one, so putting the row back is a database change and the copy says so instead of
  * implying a button somewhere. Same call as the suspend dialog's, which used to promise
  * a reinstatement nothing could perform (AdminUsers.tsx:292-300).

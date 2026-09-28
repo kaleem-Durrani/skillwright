@@ -38,7 +38,8 @@ const UNRENDERABLE_PAYLOAD: NotificationPayload = { title: '', body: '' };
 // ---------------------------------------------------------------------------
 
 /**
- * `Notification.payload` is Prisma `Json` (schema.prisma:604), which types as
+ * `Notification.payload` is Prisma `Json` (declared on `model Notification` in
+ * schema.prisma), which types as
  * `Prisma.JsonValue` — genuinely unstructured, since Postgres will store whatever
  * jsonb the writer handed it. `notificationSchema.payload` is
  * `notificationPayloadSchema`, which REQUIRES `{ title, body }` (notification.ts:22-27).
@@ -98,7 +99,8 @@ type SortDirection = ListNotificationsQuery['order'];
  * to the default rather than 422ing — a stale bookmark should still render a list.
  *
  * Only the two columns the index covers are offered: @@index([userId, readAt, createdAt])
- * (schema.prisma:612). Sorting by `type` would be a sequential scan on a table that
+ * (declared on `model Notification`). Sorting by `type` would be a sequential scan on a
+ * table that
  * grows per user per event.
  */
 const ORDER_BY: Record<
@@ -132,7 +134,8 @@ function orderFor(query: ListNotificationsQuery): Prisma.NotificationOrderByWith
  * itself — "Notification rows are per-user". Dropping this term serves every user's
  * notifications to every caller, and no test of the gate would notice.
  *
- * Notification has NO `deletedAt` column (schema.prisma:596-614), so — unlike every
+ * Notification has NO `deletedAt` column (`model Notification` in schema.prisma has no
+ * such field), so — unlike every
  * other read in this codebase — there is deliberately no soft-delete term here.
  */
 function scopedWhere(actor: Actor, query: ListNotificationsQuery): Prisma.NotificationWhereInput {
@@ -164,7 +167,8 @@ export async function list(
  * The badge number behind the bell (AppShell.tsx:103-108).
  *
  * `{ userId, readAt: null }` is covered exactly by @@index([userId, readAt, createdAt])
- * (schema.prisma:612), so this stays an index-only count however many rows a long-lived
+ * (declared on `model Notification`), so this stays an index-only count however many rows
+ * a long-lived
  * account accumulates.
  */
 export async function unreadCount(actor: Actor): Promise<UnreadCountResponse> {
@@ -194,7 +198,8 @@ export async function unreadCount(actor: Actor): Promise<UnreadCountResponse> {
  * row that did not match, which is exactly the behaviour that makes the intersection
  * silent rather than an information leak about which ids exist.
  *
- * Notification is NOT in AUDITED_MODELS (audit.ts:51-59), so this write puts nothing on
+ * Notification is NOT in `AUDITED_MODELS` (audit.ts — the set omits Notification by
+ * name), so this write puts nothing on
  * the audit extension's second pool — no interactive transaction and none of
  * enrollments.service.ts:41-50's enlarged budget is needed here.
  */
@@ -264,8 +269,9 @@ export interface NotifyInput {
  * suggest the failure could escape, and it cannot.
  *
  * `createMany` rather than N inserts: Notification carries no unique constraint to
- * conflict on (schema.prisma:606-624), so one round trip is all a fan-out costs. It is
- * not in AUDITED_MODELS (audit.ts:51-59), so nothing here touches the audit extension's
+ * conflict on (`model Notification` in schema.prisma declares none — every `@@index` on
+ * it is a plain one), so one round trip is all a fan-out costs. It is
+ * not in `AUDITED_MODELS`, so nothing here touches the audit extension's
  * second pool.
  */
 export async function notify(input: NotifyInput): Promise<void> {

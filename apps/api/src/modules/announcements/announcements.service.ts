@@ -401,7 +401,8 @@ function resolveSlug(candidate: string | undefined, title: string): string {
 /**
  * ANNOUNCEMENT_PUBLISHED's audience, shared by the two paths that can flip a row live
  * (`create` with `publish: true` and `publish`). An Announcement has no course to scope
- * it (schema.prisma:465-490) — it speaks to the whole school — so "approved enrolled
+ * it (`model Announcement` carries no course field) — it speaks to the whole school — so
+ * "approved enrolled
  * students" is read school-wide: every student seated in a live course except the actor.
  * The Phase 1 plan's parenthetical named a course the schema does not give announcements;
  * this is that sentence adapted to the rows that exist.
@@ -551,7 +552,8 @@ export async function publish(
 /**
  * Soft delete only — schema.prisma rule 3, which is why every read in this file
  * filters `deletedAt`. A hard delete would also cascade the row's comments away
- * (schema.prisma:508), and removing a post does not mean erasing the discussion under
+ * (`Announcement.comments`, declared `onDelete: Cascade` in schema.prisma), and removing
+ * a post does not mean erasing the discussion under
  * it.
  */
 export async function remove(id: string): Promise<void> {

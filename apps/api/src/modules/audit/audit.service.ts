@@ -16,13 +16,13 @@ import type {
  * `include: { actor: true }` would pull `passwordHash` and `totpSecret` into memory for
  * every row of every page of an endpoint whose entire purpose is to be read by humans.
  * The audit extension redacts exactly those columns before they reach an audit row
- * (audit.ts:61-73) for the same reason, so widening them back out here would undo that
- * on the read side.
+ * (`REDACTED_FIELDS`) for the same reason, so widening them back out here would undo
+ * that on the read side.
  *
  * `deletedAt` is deliberately NOT filtered on this relation, against the house rule
  * that every read filters it by hand: an audit row records WHO acted, and blanking a
  * soft-deleted user's name would render the row as 'system' (AdminOverview.tsx:148),
- * where schema.prisma:623 reserves that meaning for genuinely system-initiated work.
+ * where `AuditEvent.actorId`'s null reserves that meaning for system-initiated work.
  * A trail that lies about attribution is worse than one that names a departed user.
  */
 const AUDIT_EVENT_INCLUDE = { actor: { select: { name: true } } } as const;
@@ -39,12 +39,12 @@ type AuditEventWithActor = Prisma.AuditEventGetPayload<{ include: typeof AUDIT_E
  * The return type is the shared-style inferred DTO rather than a hand-written mirror,
  * so a renamed field is a compile error here instead of a response-validation 500
  * (lib/dto.ts:15-19). `event.action` is Prisma's `AuditAction`; assigning it into
- * `AuditEventDto['action']` is what pins `auditActionSchema` to schema.prisma:108-122
+ * `AuditEventDto['action']` is what pins `auditActionSchema` to the `AuditAction` enum
  * at build time.
  *
- * A null actor is normal, not an error: the relation is `onDelete: SetNull`
- * (schema.prisma:624) and system-initiated work carries no actor at all
- * (schema.prisma:623). The SPA already renders that case as 'system'.
+ * A null actor is normal, not an error: the relation is `onDelete: SetNull` and
+ * system-initiated work carries no actor at all (`AuditEvent.actorId` is documented
+ * nullable for exactly that reason). The SPA already renders that case as 'system'.
  */
 export function toAuditEvent(event: AuditEventWithActor): AuditEventDto {
   return {
@@ -63,7 +63,8 @@ export function toAuditEvent(event: AuditEventWithActor): AuditEventDto {
 /**
  * The detail shape: the list mapper PLUS the stored forensics, and nothing else.
  *
- * `before` / `after` arrive from the Json column already redacted (audit.ts:61-73) —
+ * `before` / `after` arrive from the Json column already redacted (`REDACTED_FIELDS` in
+ * audit.ts) —
  * the denylist ran at write time — so this cast only restores what Prisma's loose
  * `JsonValue` typing erased, it does not filter. A row whose diff was empty stores
  * `{}` rather than DbNull on that side; both are legal and both pass through.
@@ -126,8 +127,8 @@ function listWhere(query: AuditFilters): Prisma.AuditEventWhereInput {
  * `sort` arrives as free-form text (pagination.ts:16), so it never reaches an `orderBy`
  * key. `createdAt` is the only column this endpoint will ever order by, so the
  * whitelist collapses to a constant: the other four columns are low-cardinality and
- * none of the table's indexes (schema.prisma:641-644) leads with one, which makes
- * sorting by them a full scan of a table that only ever grows.
+ * none of the table's indexes (every `@@index` on `AuditEvent`) leads with one, which
+ * makes sorting by them a full scan of a table that only ever grows.
  *
  * An unrecognised `sort` therefore falls back rather than 422ing, exactly as
  * departments.service.ts:81-97 does, so a stale bookmark still renders a page.
@@ -141,7 +142,8 @@ function orderFor(query: AuditSort): Prisma.AuditEventOrderByWithRelationInput {
 
 /**
  * The list is this module's whole surface. There is deliberately no create, update or
- * delete: rows are written by the Prisma extension (audit.ts:288-427), which reads the
+ * delete: rows are written by the Prisma extension (`auditExtension`'s inner `record()`,
+ * the only `base.auditEvent.create` in the file), which reads the
  * actor from the AsyncLocalStorage seeded in logger.plugin.ts:26-28, and writing one
  * by hand from a service would double-count every mutation it accompanies.
  *

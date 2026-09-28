@@ -122,7 +122,8 @@ export async function clearAuditEvents(): Promise<void> {
  * Deleting users cascades to sessions, verifications, recovery codes, profiles,
  * enrollments, uploads, conversations and messages — but NOT through the three
  * `Restrict` edges that point at a User: `Course.teacherId`, `Resource.authorId` and
- * `Announcement.authorId` (schema.prisma:321, :430, :463). Restrict is deliberate —
+ * `Announcement.authorId` (all three declared `onDelete: Restrict` in schema.prisma).
+ * Restrict is deliberate —
  * losing a teacher must not silently delete their courses — so the fixture has to
  * unwind those three itself, deepest first, or the first suite that creates a course
  * makes every later suite fail on a foreign-key error rather than its own assertion.

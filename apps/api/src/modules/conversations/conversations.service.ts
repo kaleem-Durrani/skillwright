@@ -144,7 +144,8 @@ export function toConversationDto(
 // ---------------------------------------------------------------------------
 
 /**
- * schema.prisma:553 — "Unread count is a range query". It is `COUNT(*)` over the live
+ * `ConversationParticipant.lastReadSeq` — "Unread count is a range query". It is
+ * `COUNT(*)` over the live
  * messages above the viewer's own high-water mark, and NOT `nextSeq - 1 - lastReadSeq`:
  * that arithmetic counts soft-deleted messages, so a moderated thread would show a
  * badge that no amount of reading can clear.
@@ -152,7 +153,8 @@ export function toConversationDto(
  * ONE `groupBy` for the whole page rather than N+1 counts. The threshold differs per
  * conversation, which `groupBy` cannot express as a single predicate — so the per-row
  * thresholds are sent as an `OR` of `(conversationId, seq > mark)` pairs, which is one
- * statement and lets Postgres use `Message_conversationId_seq_idx` (schema.prisma:588)
+ * statement and lets Postgres use `Message_conversationId_seq_idx` (declared as
+ * `@@index([conversationId, seq])` on `model Message`)
  * for each arm. The alternative was `$queryRaw`; this keeps the soft-delete filter in
  * the same language as every other read.
  *
@@ -191,7 +193,8 @@ async function unreadCounts(
 
 /** One conversation, loaded and mapped for one viewer. Used by every write path. */
 async function conversationDto(actor: Actor, conversationId: string): Promise<ConversationDto> {
-  // Conversation has NO `deletedAt` column (schema.prisma:524-540), so `findUnique` is
+  // Conversation has NO `deletedAt` column (`model Conversation` in schema.prisma
+  // declares none), so `findUnique` is
   // correct here — unlike Course, where a soft-deleted row must read as absent.
   const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
@@ -347,7 +350,7 @@ const ORDER_BY: Record<
   title: (order) => ({ title: order }),
 };
 
-/** `@@index([lastMessageAt])` exists for exactly this default (schema.prisma:539). */
+/** `@@index([lastMessageAt])` on `model Conversation` exists for exactly this default. */
 const DEFAULT_ORDER = (order: SortDirection): Prisma.ConversationOrderByWithRelationInput => ({
   lastMessageAt: order,
 });
@@ -414,7 +417,7 @@ async function findDirectConversation(participantIds: string[]): Promise<string 
 /**
  * One nested create, so the thread and its seats are a single statement and a
  * half-seated conversation is not a reachable state. Conversation and
- * ConversationParticipant are NOT in AUDITED_MODELS (audit.ts:51-59), so this write
+ * ConversationParticipant are NOT in `AUDITED_MODELS` (packages/db/src/audit.ts), so this write
  * does not touch the audit extension's second pool.
  */
 async function seatNewConversation(
@@ -497,7 +500,8 @@ export async function listMessages(
   const rows = await prisma.message.findMany({
     where: {
       conversationId,
-      // Message HAS `deletedAt` (schema.prisma:584) and the ORM does not enforce soft
+      // Message HAS `deletedAt` (declared on `model Message`) and the ORM does not
+      // enforce soft
       // delete, so the tombstone filter is written by hand.
       deletedAt: null,
       ...(query.cursor !== undefined ? { seq: { lt: BigInt(query.cursor) } } : {}),
@@ -537,7 +541,7 @@ export async function sendMessage(
     include: MESSAGE_INCLUDE,
   });
   if (replayed) {
-    // @@unique([senderId, clientMsgId]) (schema.prisma:587) is global to the sender,
+    // @@unique([senderId, clientMsgId]) (on `model Message`) is global to the sender,
     // not scoped to a thread. A key reused across threads is a client bug, and
     // answering it with the OTHER thread's message would have the SPA render a reply
     // in the wrong conversation. 409 says so out loud.
@@ -550,7 +554,7 @@ export async function sendMessage(
   /*
    * DEFAULT transaction budget on purpose — do NOT add `TX_OPTIONS` here by cargo cult
    * from enrollments.service.ts:41-50. Conversation, ConversationParticipant and
-   * Message are all absent from AUDITED_MODELS (audit.ts:51-59), so nothing inside this
+   * Message are all absent from `AUDITED_MODELS` (packages/db/src/audit.ts), so nothing inside this
    * callback writes on the audit extension's SECOND pool. The generous budget exists to
    * absorb that second connection; there is none to absorb here, and three statements
    * against one row do not need fifteen seconds.
@@ -562,7 +566,7 @@ export async function sendMessage(
     /*
      * ADR-0006 style: THE UPDATE IS THE ALLOCATION. There is no `SELECT nextSeq`
      * followed by a write — the read-then-write shape loses the race every time under
-     * load, and `@@unique([conversationId, seq])` (schema.prisma:586) turns the loss
+     * load, and `@@unique([conversationId, seq])` (on `model Message`) turns the loss
      * into a 409 for a message the user did nothing wrong to send.
      *
      * A tagged template, never $executeRawUnsafe, and `conversationId` is a bound
@@ -570,7 +574,8 @@ export async function sendMessage(
      * just claimed is `nextSeq - 1`.
      *
      * `lastMessageAt` moves in the same statement because the list orders on it
-     * (schema.prisma:539) and a separate UPDATE would let a thread sort stale between
+     * (`@@index([lastMessageAt])` on `model Conversation`) and a separate UPDATE would let
+     * a thread sort stale between
      * the two writes.
      */
     const claimed = await tx.$queryRaw<Array<{ seq: bigint }>>`
@@ -651,7 +656,8 @@ export async function markRead(
   });
   if (!conversation) throw notFound('Conversation');
 
-  // `nextSeq` is the NEXT seq to hand out (schema.prisma:528-531), so live messages
+  // `nextSeq` is the NEXT seq to hand out (declared on `model Conversation` with a
+  // `@default(1)`), so live messages
   // occupy 1 .. nextSeq-1. Clamping stops a client that posts a seq from the future
   // from permanently suppressing its own unread count for messages not yet written.
   const requested = BigInt(input.seq);
@@ -706,7 +712,8 @@ export async function addParticipant(
     where: { conversationId_userId: { conversationId, userId: input.userId } },
     create: { conversationId, userId: input.userId },
     // Re-adding someone who left CLEARS `leftAt` rather than colliding on
-    // @@unique([conversationId, userId]) (schema.prisma:559). `lastReadSeq` is left
+    // @@unique([conversationId, userId]) (on `model ConversationParticipant`).
+    // `lastReadSeq` is left
     // where they abandoned it, so they come back to the messages they missed rather
     // than to a thread that claims it is fully read.
     update: { leftAt: null },
@@ -726,3 +733,98 @@ export async function addParticipant(
   );
   return seated ? dto : { ...dto, lastMessage: null };
 }
+
+/*
+ * THERE IS NO LEAVE ROUTE, AND THIS IS THE DESIGN NOTE SAYING WHY.
+ *
+ * Recorded here rather than in a report because the module that owns
+ * `ConversationParticipant` is the only place a reader can check the claim, and the claim
+ * is checkable: `leftAt` is written in exactly one place in the whole API, and it is
+ * written to `null`. Nothing in this repository ever stamps it. So a participant cannot
+ * leave a thread and an admin cannot remove one, and the only undo for a mis-seated
+ * person is an action that does not exist.
+ *
+ * What makes it a note and not a missing handler is that the column is otherwise fully
+ * wired. `ConversationParticipant` declares `leftAt` and an index on `[userId, leftAt]`;
+ * `actor.ts`'s `participantIds` means "active participants" and every list scoped to the
+ * caller inherits that; the dashboard's raw count carries `p."leftAt" IS NULL` beside
+ * the literal comment that a seat you gave up is not a seat; `conversationDto` puts the
+ * value on the wire; and `AddParticipantDialog` accepts the WHOLE roster rather than the
+ * active subset for one reason — a person who left is restorable, because
+ * `addParticipant` above is an upsert whose update clears the timestamp. A half-wired
+ * invariant like that is the shape that reads as finished in review, because every read
+ * of the column does the right thing with a value nobody writes.
+ *
+ * THE OBVIOUS ROUTE IS WRONG, in three separate ways, and each is a reason the absence
+ * is a decision rather than an oversight.
+ *
+ * 1. The subject is the thing being changed. `conversation:read` is `isParticipant`, and
+ *    `isParticipant` reads the LIVE participant set — `leftAt: null` (the same predicate
+ *    `findDirectConversation` and `conversationDto` use above). So a `conversation:leave`
+ *    gated on the existing rule would evaluate its authorisation against the exact
+ *    condition the request destroys, and the policy layer has no vocabulary for "was a
+ *    participant": every rule in the table reads a live fact, because every rule in the
+ *    table so far describes access to something that still exists. The shortcut —
+ *    `updateMany({ where: { userId: actor.id, leftAt: null }, data: { leftAt: new Date() } })`
+ *    with a hand-rolled membership test in the service — is precisely what lesson 14 is
+ *    about: a guard that lives in a helper most routes call, rather than in the hook
+ *    every route runs, inheriting no provenance and checking nothing else.
+ *
+ * 2. A new action is not a row in a table. `conversation:leave` needs hand-written cells
+ *    for all four roles, the generated `docs/permissions.md` regenerated, and the
+ *    matrix test's hand-written-versus-generated split reconciled. That is the cost, and
+ *    it is worth paying — but it is worth paying once, deliberately, and not as a
+ *    by-product of somebody adding a button.
+ *
+ * 3. The direct thread is the hard case, and the product is mostly direct threads.
+ *    `findDirectConversation` identifies a one-to-one by `title: null` plus a live
+ *    participant count equal to the pair's size. If one of two people leaves, the
+ *    survivor is seated in a thread with ONE live participant, and the next message to
+ *    that same person matches no thread and creates a second one. Both are now direct
+ *    threads between the same two accounts, and the survivor's history is split across
+ *    them with nothing to say which is which. The two ways out are both larger than the
+ *    feature: delete the `Conversation`, which cascades the `Message` rows and destroys
+ *    the history the survivor is the only remaining holder of; or give the thread a
+ *    column that makes `findDirectConversation` skip it, which is a schema change, a
+ *    migration, and a product decision about what a survivor is shown when the thread
+ *    they never left has stopped existing. Neither is a `leftAt` write. That asymmetry —
+ *    the easy case is easy and the ordinary case is not — is the whole reason this is a
+ *    note.
+ *
+ * WHAT A LEAVE MUST NOT BE, so that whoever builds it does not have to rediscover it.
+ *
+ * It is not a delete of the participant row. `participantSchema` carries `leftAt` and
+ * the SPA renders a thread's membership history from it (Messages.tsx filters its own
+ * row list on it); deleting the row makes that field permanently null, makes the roster
+ * `AddParticipantDialog` deliberately shows the wrong, and removes the restore that the
+ * upsert above already implements. A soft write is the only shape the current read
+ * paths can survive.
+ *
+ * It does not retract anything. `Message` rows are not deleted and `nextSeq` is not
+ * renumbered, so a leave cannot unsay what a participant has already read, and a school
+ * communications product that implied otherwise would be promising something the storage
+ * cannot keep. If a future requirement needs messages to disappear from a leaver's
+ * history, that is a different model with a different cost, and it should be argued as
+ * one rather than smuggled in behind the word "leave".
+ *
+ * It must not touch `lastReadSeq`. The upsert above deliberately leaves it where the
+ * departing participant abandoned it, so a re-seated person comes back to the messages
+ * they missed rather than to a thread claiming it is fully read. A leave that reset the
+ * marker, or a restore that reset it, would mark unread mail read as a side effect of
+ * somebody clicking a button — and nothing anywhere would report it.
+ *
+ * AND THE AUDIT CONSEQUENCE, because it is the reason the column's half-wiring is
+ * defensible today. `ConversationParticipant` is not in `AUDITED_MODELS`, and the
+ * argument for its absence is the one `Upload` is excluded on: a seat is the mechanics
+ * of a conversation, not an act of governance. That argument has a shelf life, and this
+ * note is where it expires. The day a leave exists, the roster becomes a governance
+ * record — who was in a thread, who was removed, when — and the roster is the ONLY place
+ * that is written, because `Message` records what was said and not who was entitled to
+ * hear it. `ConversationParticipant` should join `AUDITED_MODELS` in the same change as
+ * the first leave, not after it.
+ *
+ * Until then the honest state is the one the SPA already renders: `AddParticipantDialog`
+ * disables its confirm control rather than seating on a first tap, and says why in its
+ * own header. That is a mitigation for a different gap on a different route, and neither
+ * is an argument for the other.
+ */

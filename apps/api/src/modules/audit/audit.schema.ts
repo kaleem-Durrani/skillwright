@@ -20,7 +20,7 @@ import { z } from 'zod';
 import { idSchema, isoDateTimeSchema, paginationQuerySchema } from '@skillwright/shared';
 
 /**
- * Mirrors the `AuditAction` enum in schema.prisma:108-122, value for value.
+ * Mirrors the `AuditAction` enum in schema.prisma, value for value.
  *
  * Restating it is unavoidable — the Prisma enum is a database type, not a wire type,
  * and the SPA needs the wire type. The mirror is checked at compile time for free:
@@ -51,17 +51,17 @@ export type AuditActionValue = z.infer<typeof auditActionSchema>;
  * `actorId` so a caller can pivot the feed onto one actor without a second lookup.
  *
  * `before` / `after` / `ip` / `userAgent` / `requestId` are deliberately absent. The
- * diffs are redacted (audit.ts:61-66) but redaction is a denylist, and an audit trail
+ * diffs are redacted (`REDACTED_FIELDS`) but redaction is a denylist, and an audit trail
  * is read by more people than the users table is — shipping them to a page that draws
  * none of them widens the blast radius for nothing.
  *
- * `entityId` is `z.string()` here and NOT `idSchema`: audit.ts:203-206 writes the
+ * `entityId` is `z.string()` here and NOT `idSchema`: `idOf()` in audit.ts writes the
  * empty string when a `createMany` row carried no id, so a stricter response rule
  * would turn one historical row into a 500 for the whole page. On the QUERY below it
  * IS `idSchema`, because a caller filtering by id is filtering by a real one.
  *
  * `actorId` is nullable because the relation is `onDelete: SetNull` and null is the
- * documented shape for system-initiated work (schema.prisma:623-625).
+ * documented shape for system-initiated work (`AuditEvent.actorId`).
  */
 export const auditEventSchema = z.object({
   id: idSchema,
@@ -77,14 +77,15 @@ export type AuditEventDto = z.infer<typeof auditEventSchema>;
 /**
  * The SINGLE-EVENT shape, extended in place (Phase 8) — the same seven fields plus
  * the stored forensics the extension has written all along
- * (packages/db/src/audit.ts:259-269): the redacted before/after diffs and the request
+ * (the `base.auditEvent.create` in `auditExtension`'s `record()`): the redacted
+ * before/after diffs and the request
  * metadata. The LIST schema above stays narrow on purpose; this shape exists only for
  * `GET /audit-events/:id`, where an admin who has already chosen one row asks what it
  * changed.
  *
  * `before` / `after` are object snapshots or a diff — or null when there was nothing
- * on that side to record (`Prisma.DbNull`, audit.ts:260-267). They are redacted at
- * WRITE time (audit.ts:61-73), so serving them here re-exposes nothing: the denylist
+ * on that side to record (`Prisma.DbNull`, in that same `record()`). They are redacted at
+ * WRITE time (`REDACTED_FIELDS`), so serving them here re-exposes nothing: the denylist
  * ran before the row ever existed.
  */
 export const auditEventDetailSchema = auditEventSchema.extend({
@@ -99,12 +100,12 @@ export type AuditEventDetailDto = z.infer<typeof auditEventDetailSchema>;
 /**
  * Offset paging plus the four filters the table's indexes actually support:
  * `[actorId, createdAt]`, `[entityType, entityId, createdAt]` and `[action, createdAt]`
- * (schema.prisma:641-644). Every one of them is optional, so the SPA's bare
+ * (every `@@index` on `AuditEvent`). Every one of them is optional, so the SPA's bare
  * `?limit=8` (AdminOverview.tsx:36-40) is a valid request.
  *
  * `entityType` is free text rather than an enum because the extension writes it
- * straight from the Prisma model name (audit.ts:255); pinning it to today's
- * AUDITED_MODELS (audit.ts:51-59) would 422 a filter on a model added tomorrow.
+ * straight from the Prisma model name (`entityType: params.model` in `record()`);
+ * pinning it to today's `AUDITED_MODELS` would 422 a filter on a model added tomorrow.
  */
 export const listAuditEventsQuerySchema = paginationQuerySchema.extend({
   action: auditActionSchema.optional(),

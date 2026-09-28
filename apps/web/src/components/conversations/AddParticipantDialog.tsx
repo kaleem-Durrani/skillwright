@@ -240,11 +240,17 @@ export function AddParticipantDialog({
             The confirm button is DISABLED rather than absent when nobody is chosen,
             and the reason is the destructive direction: a mis-tap that seats the
             wrong person in a thread is a data change with no undo anywhere in this
-            app — there is no leave route and no remove route (see the report on the
-            fifth gap), so the only recovery is another admin action that does not
-            exist. A dialog that cannot be completed by accident is the whole value
-            of putting this behind a two-step pick-then-confirm instead of seating on
-            the first tap.
+            app. There is no leave route and no remove route — `leftAt` is written in
+            exactly one place in the whole API and that place writes `null` — and
+            conversations.service.ts's design note beside `addParticipant` is where
+            that is argued rather than left as folklore. The only recovery from a
+            mis-seat today is another admin action, and none exists.
+
+            A dialog that cannot be completed by accident is the whole value of
+            putting this behind a two-step pick-then-confirm instead of seating on
+            the first tap. Note what this is NOT: a mitigation for the missing leave
+            route. It is a mitigation for a missing guard on the ADD path, and the
+            leave route would not have supplied that guard either.
           */}
         </div>
       </DialogContent>

@@ -30,7 +30,8 @@ import type {
  * `as const` matters: Prisma derives the payload type from the literal shape.
  *
  * `courses` is filtered because soft delete is not enforced by the ORM — `deletedAt`
- * is a plain nullable column (schema.prisma:344), so a removed course would otherwise
+ * is a plain nullable column (declared on `model Course` in schema.prisma), so a removed
+ * course would otherwise
  * inflate `courseCount` for as long as the row survives.
  */
 const DETAIL_INCLUDE = {
@@ -156,7 +157,8 @@ export async function create(input: CreateDepartmentInput): Promise<DepartmentDe
     ]);
   }
 
-  // `name` and `slug` are both @unique (schema.prisma:296-297); a collision arrives
+  // `name` and `slug` are both @unique (both declared so on `model Department`); a
+  // collision arrives
   // as P2002, which errors.plugin.ts:47-51 already turns into a 409.
   const department = await prisma.department.create({
     data: {
@@ -192,8 +194,8 @@ export async function update(id: string, input: UpdateDepartmentInput): Promise<
 export async function remove(id: string): Promise<void> {
   const department = await loadDepartmentDetail(id);
 
-  // Course.departmentId (schema.prisma:318), TeacherProfile.departmentId (:191) and
-  // StudentProfile.departmentId (:211) are all `onDelete: Restrict`, and a soft delete
+  // `Course.departmentId`, `TeacherProfile.departmentId` and `StudentProfile.departmentId`
+  // are all `onDelete: Restrict`, and a soft delete
   // trips none of them — which is exactly the trap. Without this guard the rows survive
   // pointing at a department that no longer appears in any list or lookup.
   const attached =

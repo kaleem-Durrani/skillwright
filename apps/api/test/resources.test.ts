@@ -35,17 +35,29 @@ let sequence = 0;
 /**
  * setup.ts:110-119 clears these tables too, but a suite that leaves a course or a
  * resource behind breaks the NEXT file's reset: `Course.teacherId` and
- * `Resource.authorId` are both `onDelete: Restrict` (schema.prisma:321,430), so the
+ * `Resource.authorId` are both `onDelete: Restrict` in schema.prisma, so the
  * user delete inside `resetDatabase()` fails while either row survives — and it fails
  * in someone else's suite, not this one.
  *
- * The order is load-bearing at both ends. Comments cascade off a resource but are
- * deleted first so the dependency is written down rather than relied upon; uploads go
- * AFTER resources, because `Resource.uploadId` is `onDelete: SetNull` (schema.prisma:434)
- * while migration 0002 CHECKs that exactly one of `uploadId` / `externalUrl` is set —
- * nulling that column under a live DOCUMENT row raises a constraint violation instead
- * of deleting anything. That is the same SetNull-vs-CHECK conflict NEXT.md records
- * against the deferred download endpoint.
+ * The order is load-bearing at both ends, and for DIFFERENT reasons at each, which is
+ * why it is written down rather than trusted to read off the code.
+ *
+ * Comments cascade off a resource, so deleting them first is belt-and-braces: the
+ * dependency is stated rather than relied upon.
+ *
+ * Uploads go AFTER resources because `Resource.uploadId` is `onDelete: Restrict`, so
+ * the database REFUSES the delete while any resource row still points at the object.
+ * That is the whole reason. This comment previously said `SetNull` and argued that
+ * nulling the column under a live DOCUMENT row would trip migration 0002's CHECK that
+ * exactly one of `uploadId` / `externalUrl` is set — an argument about a nulling that
+ * cannot happen, and one that described a real SetNull-vs-CHECK conflict that has not
+ * existed since migration 0003 made the relation `Restrict`. The Restrict is also the
+ * same choice `Submission.uploadId` and `StudentQualification.artifactUploadId` make,
+ * and for the same reason: the bytes ARE the thing, and clearing the pointer would
+ * degrade quietly to a row that has lost its content.
+ *
+ * A stale anchor is a nuisance. A stale CLAIM is a trap: the next person reads it,
+ * believes deletion order is negotiable, and discovers otherwise at 2am.
  */
 async function clearAcademicRows(): Promise<void> {
   await prisma.comment.deleteMany({});
@@ -227,7 +239,8 @@ interface ResourceFixture {
 
 /**
  * `type: 'LINK'` with an `externalUrl` and no upload unless one is named: migration 0002
- * CHECKs that exactly one of the two columns is set (schema.prisma:433), so a fixture
+ * CHECKs that exactly one of the two columns is set (migration 0002, over
+ * `Resource.uploadId` / `Resource.externalUrl`), so a fixture
  * that sets both — or neither — fails in the database rather than in an assertion.
  */
 async function makeResource(fixture: ResourceFixture): Promise<string> {
@@ -908,7 +921,8 @@ describe('creating a resource', () => {
       type: 'DOCUMENT',
       uploadId,
       externalUrl: null,
-      // Upload columns (schema.prisma:400-401) that `toResourceDto` flattens onto the
+      // Upload columns (`sizeBytes`/`contentType` on `model Upload`) that `toResourceDto`
+      // flattens onto the
       // resource (resources.service.ts:69-70). The DTO test above reaches them through a
       // fixture written straight to the table; this is the only case that proves the
       // CREATE path returns them, `include: RESOURCE_INCLUDE` and all.
@@ -987,7 +1001,7 @@ describe('creating a resource', () => {
       teacher.token,
     );
 
-    // `Resource.uploadId` is @unique (schema.prisma:435). Left to the database this is a
+    // `Resource.uploadId` is @unique. Left to the database this is a
     // P2002 → 409 with no field path (errors.plugin.ts:46-50), which the SPA cannot
     // render against a form field.
     expect(response.statusCode).toBe(422);
@@ -1067,7 +1081,8 @@ describe('updating and deleting', () => {
     expect(response.statusCode).toBe(204);
 
     // Soft, not hard: the audit trail and every comment hanging off this row stay
-    // meaningful only while the row itself is still there (schema.prisma:445,495).
+    // meaningful only while the row itself is still there (`deletedAt` is a plain
+    // nullable column on `model Resource`, and `Comment.resource` cascades off it).
     const row = await prisma.resource.findUniqueOrThrow({ where: { id: doomed } });
     expect(row.deletedAt).not.toBeNull();
 

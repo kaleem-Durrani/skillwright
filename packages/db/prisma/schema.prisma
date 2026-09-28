@@ -144,6 +144,16 @@ enum NotificationType {
   /// notifications page filters by type and a withdrawal filed as "issued" answers the
   /// question "what has been awarded to me" with the opposite sentence.
   CERTIFICATE_REVOKED
+  /// The assessment half of the chain, and the debt commit 95b0913 wrote down when it
+  /// shipped grading: "a graded hand-in sends no notification, which needs a
+  /// NotificationType member and therefore a migration nobody asked for." Migration
+  /// 0013's own header claims to have paid this sentence, but the members it added are
+  /// certificates; the two here are the actual payment, in migration 0014.
+  SUBMISSION_GRADED
+  /// Separate from the member above, on the same argument as CERTIFICATE_REVOKED: a hand-in
+  /// sent back for another attempt filed under "graded" would show a student a mark they
+  /// were not given. `returnWork` keeps the two as separate verbs for the same reason.
+  SUBMISSION_RETURNED
 }
 
 enum AuditAction {

@@ -40,7 +40,8 @@ afterAll(async () => {
  * Conversation is the one table this suite writes that it does NOT cover: Conversation
  * holds no foreign key to User, so deleting users cascades the participants and the
  * messages away and leaves the empty thread behind. Deleting the conversation cascades
- * both children (schema.prisma:545,566), which is why this is one statement.
+ * both children (`ConversationParticipant` and `Message` are both `onDelete: Cascade`
+ * off `Conversation`), which is why this is one statement.
  */
 async function clearFixtures(): Promise<void> {
   await prisma.conversation.deleteMany({});
@@ -156,7 +157,7 @@ async function enrol(
 
 /**
  * `type: 'LINK'` with an `externalUrl` and no upload: migration 0002 CHECKs that
- * exactly one of `uploadId` / `externalUrl` is set (schema.prisma:433).
+ * exactly one of `uploadId` / `externalUrl` is set (migration 0002's CHECK).
  *
  * Returns the id so a caller can soft-delete the exact row it made; every existing
  * caller ignores it.
@@ -270,7 +271,7 @@ async function conversationOf(
   return conversation.id;
 }
 
-/** `@@unique([senderId, clientMsgId])` (schema.prisma:587), hence the counter. */
+/** `@@unique([senderId, clientMsgId])` on `model Message`, hence the counter. */
 async function message(
   conversationId: string,
   senderId: string,
@@ -398,7 +399,8 @@ describe('the counters', () => {
 
     await prisma.course.update({ where: { id: world.courseA1 }, data: { deletedAt: new Date() } });
 
-    // Soft delete is not enforced by the ORM (schema.prisma:344), so this is asserting
+    // Soft delete is not enforced by the ORM (a plain nullable `deletedAt` on
+    // `model Course`), so this is asserting
     // the hand-written `deletedAt: null` in each clause rather than an ORM behaviour.
     //
     // Whole objects, not three of the four keys: this test's NAME says every counter,

@@ -175,7 +175,8 @@ async function makeSeat(
       status,
       // `completedAt` and `completedById` are written as one statement by Phase 1 and
       // the fixture mirrors that: a COMPLETED row with no actor is exactly the shape
-      // schema.prisma:505 refuses to model.
+      // the nullable `completedById` on `model Enrollment` (`SetNull`, so a hard-deleted
+      // teacher is a tolerated shape) does not let the database require one.
       ...(status === 'COMPLETED'
         ? { completedAt: new Date(), completedById: offeringTeacher(offeringId) }
         : {}),
@@ -963,5 +964,75 @@ describe('the generated PDF', () => {
     expect(stream).toContain('Reference ');
     // A vector QR: filled rectangles, not an embedded image.
     expect(stream).toContain(' re f');
+  });
+});
+
+/**
+ * `StudentQualification` in `AUDITED_MODELS` (packages/db/src/audit.ts), and this is
+ * the one of the three where the absence was a real hole rather than an untidy gap.
+ *
+ * The model is built to outlive everybody involved in it — `issuedById` and
+ * `revokedById` are both `SetNull` precisely so that a teacher or registrar who leaves
+ * does not take the certificates they signed with them, and the public verify route
+ * keeps answering from the row alone. A record designed to be permanent, whose authors
+ * are designed to disappear, and which recorded nothing about either, is the shape of a
+ * question with no answer: a revoked certificate that says it was revoked and cannot say
+ * who revoked it or why.
+ *
+ * `revokedReason` is deliberately NOT on the public verify response, so the trail is
+ * the only place the grounds are written down at all — which is what makes an audit row
+ * for this model load-bearing rather than a second copy of information held elsewhere.
+ */
+describe('what a certificate leaves in the audit trail', () => {
+  it('records the conferral, and the revocation as a diffed UPDATE naming the actor', async () => {
+    const admin = await signIn('aud-r1@example.com', 'ADMIN');
+    const teacher = await signIn('aud-r2@example.com', 'TEACHER');
+    const student = await signIn('aud-r3@example.com', 'STUDENT');
+    const { offeringId } = await makeCourse(teacher.id);
+    const enrollmentId = await makeSeat(student.id, offeringId);
+    const qualification = await makeQualification();
+
+    const issued = await post(
+      '/certificates',
+      { enrollmentId, qualificationId: qualification.id },
+      teacher.token,
+    );
+    expect(issued.statusCode).toBe(201);
+    const id = issued.json().id as string;
+
+    const revokedResponse = await post(
+      `/certificates/${id}/revoke`,
+      { reason: 'Issued against the wrong intake record by the registrar.' },
+      admin.token,
+    );
+    expect(revokedResponse.statusCode).toBe(200);
+
+    const events = await prisma.auditEvent.findMany({
+      where: { entityType: 'StudentQualification', entityId: id },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(events.map((event) => event.action)).toEqual(['CREATE', 'UPDATE']);
+    // Attributed, in order: the teacher who conferred, the admin who withdrew. The
+    // revocation's `revokedById` survives the account that made it, and so does the
+    // answer to "who did this".
+    expect(events.map((event) => event.actorId)).toEqual([teacher.id, admin.id]);
+
+    // The grounds are in the diff. `revokedReason` is withheld from the public verify
+    // response on purpose, so this row is the only place the sentence exists, and a
+    // revocation recorded without it would be an unfalsifiable claim.
+    const revoked = events[1]?.after as Record<string, unknown> | null;
+    expect(Object.keys(revoked ?? {})).toEqual(
+      expect.arrayContaining(['revokedAt', 'revokedById', 'revokedReason']),
+    );
+    expect(revoked?.revokedById).toBe(admin.id);
+    expect(revoked?.revokedReason).toContain('registrar');
+
+    // And the conferral carried the seat it came from, which is what makes
+    // `seat -> … -> qualify` an audit trail rather than a coincidence. Two columns
+    // that could have drifted apart and did not is the assertion worth making here.
+    const created = events[0]?.after as Record<string, unknown> | null;
+    expect(created?.enrollmentId).toBe(enrollmentId);
+    expect(created?.qualificationId).toBe(qualification.id);
+    expect(created?.issuedById).toBe(teacher.id);
   });
 });

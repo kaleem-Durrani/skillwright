@@ -34,7 +34,7 @@ afterAll(async () => {
 beforeEach(async () => {
   /*
    * resetDatabase() deletes every user, which cascades ConversationParticipant and
-   * Message (schema.prisma:548,569 are both onDelete: Cascade) — but Conversation holds
+   * Message (both are `onDelete: Cascade` off `Conversation`) — but Conversation holds
    * no foreign key to a User, so it survives as an orphan row with no participants and
    * leaks into the next suite's counts. Messaging tables are not in resetDatabase()'s
    * FK-safe list, so this suite unwinds its own, deepest first.
@@ -173,7 +173,7 @@ describe('POST /conversations', () => {
     // `lastMessagePreview` field anywhere in shared.
     expect(body.lastMessage).toMatchObject({ content: 'Is there a seat left?' });
     // Message.seq is a Postgres bigint shipped as a string, and the first seq is 1
-    // because Conversation.nextSeq starts at 1 (schema.prisma:531).
+    // because `Conversation.nextSeq` is declared `@default(1)`.
     expect(body.lastMessage.seq).toBe('1');
     expect(body.lastMessage.sender).toMatchObject({ id: student.id, name: 'Sam Student' });
     // Sending is reading: the author's own opening line is not unread to them.

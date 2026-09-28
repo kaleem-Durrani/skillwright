@@ -26,7 +26,7 @@ let sequence = 0;
  * Enrollment, Course, User and Department in FK-safe order, so it alone is enough for
  * every table this file writes to. This local helper exists only for `afterAll`: it
  * clears the Restrict-adjacent rows — `Course.teacherId`, `Resource.authorId` and
- * `Announcement.authorId` are all `onDelete: Restrict` (schema.prisma:321,435,473) —
+ * `Announcement.authorId` are all `onDelete: Restrict` in schema.prisma —
  * without also deleting Department and User, which is `resetDatabase()`'s job at the
  * START of the next file's `beforeEach`. Same division of labour resources.test.ts's
  * `clearAcademicRows` uses; no Upload fixtures here, so there is nothing of the kind

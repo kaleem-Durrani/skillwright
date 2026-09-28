@@ -250,7 +250,7 @@ export async function loadUploadSubject(uploadId: string): Promise<Subject | und
  * A PENDING row left behind by a user who asked for a signature and then closed the dialog
  * is reclaimed by the scheduled sweeper (uploads.sweeper.ts), which deletes rows still
  * PENDING past a configurable age — object first, then row. `@@index([status, createdAt])`
- * (schema.prisma:423) is the index that job reads; it exists for exactly this and has no
+ * (on `model Upload`) is the index that job reads; it exists for exactly this and has no
  * other caller.
  *
  * `ownerId` is the ACTOR and never the body: `presignUploadSchema` has no owner field
@@ -258,7 +258,7 @@ export async function loadUploadSubject(uploadId: string): Promise<Subject | und
  * else's name and then have `isSelf` refuse THEM at commit — an upload nobody can
  * finish, planted by anyone.
  *
- * No manual audit row: `Upload` is not in AUDITED_MODELS (packages/db/src/audit.ts:51-59),
+ * No manual audit row: `Upload` is not in `AUDITED_MODELS` (packages/db/src/audit.ts),
  * because an object-store bookkeeping row is not a governance event. The `Resource` that
  * eventually attaches it IS audited, which is the event a reader actually wants.
  */
@@ -449,9 +449,10 @@ export async function commit(uploadId: string): Promise<UploadDto> {
 /**
  * "May this actor attach this upload to something, right now?"
  *
- * Lives here because the Upload row is this module's, and because three callers need
+ * Lives here because the Upload row is this module's, and because four callers need
  * the identical answer: `resource:create` (resources.service.ts), a course syllabus
- * (courses.service.ts), and an avatar (users.service.ts). Until this existed, resources
+ * (courses.service.ts), an avatar (users.service.ts) and a hand-in
+ * (assignments.service.ts). Until this existed, resources
  * had a private copy and courses had NOTHING — `syllabusUploadId` went from the request
  * body straight into the row, so a teacher could bind a colleague's private file to their
  * own course by guessing an id. That is the upload-shaped version of the hole
@@ -464,9 +465,23 @@ export async function commit(uploadId: string): Promise<UploadDto> {
  *   COMMITTED       - a PENDING row is a signature that was issued and never used; the
  *                     bytes may not be in the bucket at all, and attaching one produces
  *                     a resource whose download answers 409 forever
- *   unclaimed       - `Resource.uploadId`, `Course.syllabusUploadId` and
- *                     `User.avatarUploadId` are each `@unique`, so a second claim is a
- *                     P2002 the caller cannot read. Checked here, it names the field.
+ *   unclaimed       - every `@unique` claim column the schema declares, which is now
+ *                     FOUR of them: `Resource.uploadId`, `Course.syllabusUploadId`,
+ *                     `User.avatarUploadId` and `Submission.uploadId`. Each is unique
+ *                     because one file backs one thing, so a second claim is a P2002
+ *                     the caller cannot read. Checked here, it names the field.
+ *
+ * The fourth of those arrived after the other three, and it is the case that shows why
+ * the clause has to be written as "every claim column" rather than as a list of three.
+ * `Submission.uploadId` carries the same `@unique` and the same `onDelete: Restrict`
+ * that `Resource.uploadId` does, because the bytes ARE the hand-in exactly as they are
+ * the resource — and a hand-in already in place left this read out of the `unclaimed`
+ * clause, so re-submitting the same file to a second task produced a pathless 409 from
+ * the error plugin's P2002 branch. Nothing threw, nothing logged, and the student was
+ * told they had conflicted with themselves by an endpoint whose whole job is to accept
+ * their work. A list of the columns already known to be unique is a list that is wrong
+ * the moment a model is added; the sentence that does not go stale is the one naming
+ * the property being enforced.
  *
  * A fifth question is opt-in via `purpose`: when given, the key prefix must be the
  * folder that purpose mints (PURPOSE_FOLDER). The prefix is the only record of a
@@ -497,6 +512,7 @@ export async function assertUploadClaimable(
       resource: { select: { id: true } },
       courseSyllabus: { select: { id: true } },
       userAvatar: { select: { id: true } },
+      submission: { select: { id: true } },
     },
   });
 
@@ -521,7 +537,12 @@ export async function assertUploadClaimable(
     ]);
   }
 
-  if (upload.resource !== null || upload.courseSyllabus !== null || upload.userAvatar !== null) {
+  if (
+    upload.resource !== null ||
+    upload.courseSyllabus !== null ||
+    upload.userAvatar !== null ||
+    upload.submission !== null
+  ) {
     throw validationFailed([{ path, message: 'That upload is already attached to something' }]);
   }
 }

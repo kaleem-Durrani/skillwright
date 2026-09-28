@@ -22,6 +22,13 @@ export const notificationTypeSchema = z.enum([
   // a second row under this one because the notifications page filters by type.
   'CERTIFICATE_ISSUED',
   'CERTIFICATE_REVOKED',
+  // The assessment half of the chain. Commit 95b0913 shipped grading and recorded that
+  // "a graded hand-in sends no notification, which needs a NotificationType member and
+  // therefore a migration nobody asked for"; migration 0014 is that migration. The
+  // return is a separate member on the same argument as the pair above — a hand-in sent
+  // back for another attempt is not a mark, and the type filter would show it as one.
+  'SUBMISSION_GRADED',
+  'SUBMISSION_RETURNED',
 ]);
 export type NotificationTypeValue = z.infer<typeof notificationTypeSchema>;
 

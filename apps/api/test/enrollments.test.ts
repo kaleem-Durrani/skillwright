@@ -196,7 +196,8 @@ describe('requesting a seat', () => {
 
     const again = await post('/', { courseId, offeringId }, student.token);
     expect(again.statusCode).toBe(201);
-    // schema.prisma:377-379 — one row per (student, course), forever.
+    // `@@unique([studentId, offeringId])` on `model Enrollment` — one row per
+    // (student, intake), forever.
     expect(again.json().id).toBe(first.json().id);
     expect(again.json().status).toBe('PENDING');
     expect(again.json().decidedAt).toBeNull();

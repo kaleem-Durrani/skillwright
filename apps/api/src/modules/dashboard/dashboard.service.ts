@@ -53,7 +53,8 @@ interface CountRow {
  * "412 courses" above a list of their own three. If the two ever disagree, this
  * function is the bug.
  *
- * Soft delete is not enforced by the ORM (schema.prisma:344), so `deletedAt` is
+ * Soft delete is not enforced by the ORM (`deletedAt` is a plain nullable column, the
+ * schema.prisma header's rule 3), so `deletedAt` is
  * filtered by hand in every branch, exactly like every other read in the codebase.
  */
 function ownCoursesWhere(actor: Actor): Prisma.CourseWhereInput {
@@ -186,9 +187,10 @@ function unreadMessagesQuery(actor: Actor): Prisma.PrismaPromise<CountRow[]> {
  * also makes the four numbers a consistent snapshot rather than four reads spread
  * across an approval landing between them.
  *
- * TRAP 3 does NOT apply: this is read-only and touches no AUDITED model (audit.ts:51-59),
- * so nothing here makes the audit extension reach for its second pool while this
- * transaction holds a connection, and the default budget is correct. The generous
+ * TRAP 3 does NOT apply: this is read-only and touches no model in `AUDITED_MODELS`
+ * (packages/db/src/audit.ts), so nothing here makes the audit extension reach for its
+ * second pool while this transaction holds a connection, and the default budget is
+ * correct. The generous
  * `TX_OPTIONS` (enrollments.service.ts:41-50) belongs to interactive transactions that
  * MUTATE an audited model; borrowing it here would be cargo cult.
  *

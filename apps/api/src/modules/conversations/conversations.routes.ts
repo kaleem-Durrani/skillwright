@@ -95,7 +95,7 @@ const conversationsRoutes: FastifyPluginAsync = async (fastify) => {
         params: conversationIdParamSchema,
         // `sendMessageSchema` is bound UNCHANGED. `clientMsgId` must be a 26-character
         // ULID (message.ts:33-36) because it is an idempotency key backed by
-        // @@unique([senderId, clientMsgId]) (schema.prisma:587); loosening it to accept
+        // @@unique([senderId, clientMsgId]) (on `model Message`); loosening it to accept
         // the SPA's 16-character base36 string (Messages.tsx:164) would weaken that
         // guarantee to buy a client-side bug. The SPA emits a real ULID instead — the
         // repository already depends on `ulid` (app.ts:13).

@@ -1,5 +1,6 @@
 import { deflateSync } from 'node:zlib';
 import QRCode from 'qrcode';
+import { BRAND } from '@skillwright/shared/brand';
 
 /**
  * The certificate PDF, generated in-process with no dependency and no font file.
@@ -490,7 +491,7 @@ export function renderCertificatePdf(doc: CertificateDocument): Buffer {
   });
 
   content.centred(
-    'Issued by Skillwright. Its validity is established by its reference, not by this page.',
+    `Issued by ${BRAND.name}. Its validity is established by its reference, not by this page.`,
     52,
     8,
     'regular',

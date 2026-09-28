@@ -47,7 +47,7 @@ import type {
 const RESOURCE_INCLUDE = {
   course: { select: { name: true } },
   author: { select: USER_SUMMARY_SELECT },
-  // `sizeBytes`/`contentType` are Upload columns (schema.prisma:400-401) that
+  // `sizeBytes`/`contentType` are Upload columns (both on `model Upload`) that
   // `resourceSchema` flattens onto the resource (resource.ts:26-27). A LINK resource
   // has no upload row at all, and both fields answer null.
   upload: { select: { contentType: true, sizeBytes: true } },
@@ -333,8 +333,8 @@ type SortDirection = ListResourcesQuery['order'];
  * `sort` arrives as free-form text (pagination.ts:16), so it is matched against this
  * whitelist and never interpolated into an `orderBy` key.
  *
- * `createdAt` is the default because `@@index([courseId, createdAt])`
- * (schema.prisma:449) is the index the course-nested list reads, and that is the call
+ * `createdAt` is the default because `@@index([courseId, createdAt])` (on
+ * `model Resource`) is the index the course-nested list reads, and that is the call
  * the SPA makes on every course-detail view (CourseDetail.tsx:141).
  */
 const ORDER_BY: Record<string, (order: SortDirection) => Prisma.ResourceOrderByWithRelationInput> =
@@ -545,7 +545,8 @@ export async function buildDownloadUrl(id: string): Promise<DownloadUrlResponse>
   }
 
   // `originalName` is display only and deliberately never went into the key
-  // (schema.prisma:402-403); storage.ts puts it in the response's Content-Disposition so
+  // (`Upload.originalName`, "Display only; never used to build the key");
+  // storage.ts puts it in the response's Content-Disposition so
   // the browser saves the file under the name its uploader chose rather than under a ULID.
   // The same cleaning the disposition header gets. `Upload.originalName` is whatever
   // the uploader typed, and this field used to come back RAW in the JSON while the
@@ -713,7 +714,8 @@ export async function update(id: string, input: UpdateResourceInput): Promise<Re
 /**
  * Soft delete only — schema.prisma:5-7 rule 3, which is why every read in this file
  * filters `deletedAt`. A hard delete would also cascade the row's comments away
- * (schema.prisma:495), and "remove this file from the course" does not mean "erase the
+ * (`Resource.comments`, declared `onDelete: Cascade` in schema.prisma), and "remove this
+ * file from the course" does not mean "erase the
  * discussion about it".
  *
  * The upload behind it is deliberately left alone. `Resource.uploadId` is

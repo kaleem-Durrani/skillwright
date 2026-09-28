@@ -14,7 +14,7 @@ import * as auditService from './audit.service.js';
  * The audit feed, and nothing else.
  *
  * This module performs NO writes, and must not grow any. Audit rows are written by the
- * Prisma client extension in packages/db (audit.ts:288-427), which is the whole reason
+ * Prisma client extension in packages/db (`auditExtension`), which is the whole reason
  * no service can forget to write one; and a trigger in migration 0012 refuses UPDATE,
  * DELETE and TRUNCATE on the table, so the append-only property is enforced by Postgres
  * rather than by this file's restraint. (It was previously described here as a REVOKE in
@@ -74,7 +74,8 @@ const auditRoutes: FastifyPluginAsync = async (fastify) => {
 
   /*
    * Phase 8: one event with its stored forensics — `before`/`after`/`ip`/
-   * `userAgent`/`requestId` (packages/db/src/audit.ts:259-269), which the LIST DTO
+   * `userAgent`/`requestId` (the `base.auditEvent.create` in `auditExtension`'s
+   * `record()`), which the LIST DTO
    * deliberately drops. Same bare gate as the feed, so the wider shape reaches admins
    * only. This module still performs no writes of any kind.
    */

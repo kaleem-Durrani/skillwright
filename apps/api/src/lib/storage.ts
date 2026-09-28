@@ -53,7 +53,8 @@ const GET_URL_TTL_SECONDS = 5 * 60;
  * and live uploads has one layout rather than two.
  *
  * The prefix is the only record of an upload's purpose: `Upload` has no `purpose` column
- * (schema.prisma:392-419), which is deliberate — the purpose is spent at presign time,
+ * (`model Upload` in schema.prisma declares none), which is deliberate — the purpose is
+ * spent at presign time,
  * where it selects the size and MIME limits (upload.ts:35-44). EXPORTED for the same
  * reason it exists: the avatar attachment point (`users.service.ts`) must confirm a
  * claimed upload was minted as an AVATAR, and the key prefix is the only evidence there
@@ -101,7 +102,8 @@ function extensionOf(originalName: string): string {
 /**
  * The object key, chosen by the SERVER on every single upload.
  *
- * upload.ts:49-50 and schema.prisma:394-395 both say it: the client's filename is
+ * upload.ts:49-50 and `Upload.originalName`'s schema.prisma doc comment both say it: the
+ * client's filename is
  * display text and never the key. If the caller picked the key they would pick
  * `avatars/../resources/<someone-else's-file>.pdf` on the first afternoon, and a
  * presigned PUT would then overwrite an object its owner never consented to lose.

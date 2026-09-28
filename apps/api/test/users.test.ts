@@ -50,7 +50,8 @@ type TestProfile = 'none' | 'student' | 'teacher';
  * Provisioned directly: only students self-register, and this suite needs all three
  * roles. The profile is created inline because there is no `User.departmentId` — the
  * department name `userDetailSchema` carries comes through one of these two satellites
- * (schema.prisma:186-221), so a fixture without one cannot exercise that field.
+ * (`model TeacherProfile` / `model StudentProfile` in schema.prisma), so a fixture
+ * without one cannot exercise that field.
  */
 async function createAccount(
   email: string,
@@ -259,7 +260,7 @@ describe('GET /users', () => {
     const byName = await get('?q=hopp', admin);
     expect(byName.json().data.map((row: { name: string }) => row.name)).toEqual(['Grace Hopper']);
 
-    // And on `email`, which is `@db.Citext` (schema.prisma:132).
+    // And on `email`, which is `@db.Citext` (declared on `model User`).
     const byEmail = await get('?q=LINUS@', admin);
     expect(byEmail.json().data.map((row: { name: string }) => row.name)).toEqual([
       'Linus Torvalds',
@@ -664,7 +665,8 @@ describe('POST /users/:id/suspend', () => {
     expect(second.json().status).toBe('SUSPENDED');
 
     // Written by the Prisma extension from the ACTIVE -> SUSPENDED transition
-    // (audit.ts:161-163), never by hand. Scoped to this fixture's id because
+    // (`deriveUpdateAction` in audit.ts), never by hand. Scoped to this fixture's id
+    // because
     // resetDatabase() does not clear AuditEvent.
     const rows = await prisma.auditEvent.count({
       where: { entityType: 'User', entityId: victimId, action: 'SUSPEND' },
