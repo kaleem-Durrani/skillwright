@@ -1,0 +1,58 @@
+-- The notification a removal owes, and the last of the conversation module's
+-- recorded omissions.
+--
+-- `conversations.service.ts` carried a design note for a phase explaining why no
+-- leave route existed, and it is right that a leave is worth building. It also said
+-- this, which is the part that needed a migration:
+--
+--     It is not a delete of the participant row … a soft write is the only shape the
+--     current read paths can survive.
+--
+-- That much was true without this file. What this file pays is the other half: the
+-- note also said the roster "becomes a governance record — who was in a thread, who
+-- was removed, when", and the person removed is the only one who cannot read that
+-- record. `Message` says what was said; nothing anywhere said that Ada Okafor was
+-- taken out of the thread with Priya Raman at 14:02, and a user who is re-seated
+-- later by an admin is re-seated into a roster they never saw change.
+--
+-- WHY A NEW MEMBER AND NOT A REUSE OF `MESSAGE_RECEIVED`.
+--
+-- Migration 0014 added `SUBMISSION_GRADED` and `SUBMISSION_RETURNED` rather than one
+-- member with a body field, because the notifications page filters by type
+-- (`listNotificationsQuerySchema.type`) and a filter that can say "what was I graded"
+-- must not also be able to say "what was returned to me". The same argument is
+-- stronger here: a person filtering their notifications for messages must not find a
+-- removal filed among them, and a person who was removed from a thread has to be able
+-- to find the one row that explains it. A distinct member is the only way that filter
+-- can be asked the question.
+--
+-- ONE MEMBER, NOT TWO, on the opposite argument. A removal is announced; a self-leave
+-- is not, because the person who pressed the button knows, and the row that records
+-- it — `ConversationParticipant.leftAt` — is already the durable copy. A
+-- `CONVERSATION_LEFT` member would be a notification delivered to its own author.
+--
+-- `ADD VALUE` is metadata-only in Postgres: no table rewrite, no row touched, and
+-- every previously-written notification keeps the type it was written with. This runs
+-- instantly on a populated database.
+--
+-- WHAT THIS MIGRATION DOES NOT DO.
+--
+-- It does not backfill. Nothing is announced for a thread that was already left by
+-- hand — the `leftAt` values in a seeded or imported database were written by a seed
+-- that had no such event behind it, and synthesising a removal for them would be
+-- inventing a moderator's decision.
+--
+-- It does not add `ConversationParticipant` to `AUDITED_MODELS`. The design note asks
+-- for that in the same change as the first leave, and the argument for it is the same
+-- one made here in prose: the roster is the record of who was entitled to hear what.
+-- It is a separate change because auditing that model writes an audit row for EVERY
+-- seat ever created, including the nested creates in `seatNewConversation`, and the
+-- decision deserves its own migration's worth of review rather than riding in on a
+-- feature. Until it lands, `leftAt` on the participant row IS the trail, and this
+-- notification is the announcement.
+--
+-- Migrations are APPLIED, never pushed: `prisma migrate deploy` replays this file, so
+-- the SQL above is the only description of the change that has to stay true.
+
+-- AlterEnum
+ALTER TYPE "NotificationType" ADD VALUE 'CONVERSATION_REMOVED';

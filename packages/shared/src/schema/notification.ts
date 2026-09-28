@@ -29,6 +29,11 @@ export const notificationTypeSchema = z.enum([
   // back for another attempt is not a mark, and the type filter would show it as one.
   'SUBMISSION_GRADED',
   'SUBMISSION_RETURNED',
+  // A participant taken out of a thread by somebody else. One member and not two,
+  // because only the removal notifies — a self-leave is an action the person
+  // themselves took, and a notification sent to yourself is noise the bell has to
+  // be opened to dismiss.
+  'CONVERSATION_REMOVED',
 ]);
 export type NotificationTypeValue = z.infer<typeof notificationTypeSchema>;
 

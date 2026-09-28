@@ -154,6 +154,12 @@ enum NotificationType {
   /// sent back for another attempt filed under "graded" would show a student a mark they
   /// were not given. `returnWork` keeps the two as separate verbs for the same reason.
   SUBMISSION_RETURNED
+  /// Someone else took a seat out of a thread the recipient was in. `leftAt` is the
+  /// only record of who was in a conversation and who is no longer, so a removal that
+  /// passed unannounced would leave the recipient with a badge nothing can clear and a
+  /// roster entry they cannot explain. A SELF leave needs no member: the person who
+  /// pressed the button already knows, and a notification to yourself is noise.
+  CONVERSATION_REMOVED
 }
 
 enum AuditAction {

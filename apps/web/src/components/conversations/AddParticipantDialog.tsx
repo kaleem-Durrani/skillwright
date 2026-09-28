@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { UserRoundPlus } from 'lucide-react';
+import { UserRoundPlus, UserRoundX } from 'lucide-react';
 import { MAX_PAGE_SIZE } from '@skillwright/shared/schema';
 import { api, type Paginated } from '@/lib/api';
 import { qk } from '@/lib/query';
-import type { ConversationDto, UserDetail } from '@/lib/types';
+import { useCan } from '@/lib/policy';
+import type { ConversationDto, ParticipantDto, UserDetail } from '@/lib/types';
 import { Avatar } from '@/components/ui/Avatar';
-import { Button } from '@/components/ui/Button';
+import { Button, IconButton } from '@/components/ui/Button';
 import { Dialog, DialogContent } from '@/components/ui/Dialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
@@ -15,7 +16,8 @@ import { toast } from '@/components/ui/Toast';
 
 /**
  * `POST /conversations/:conversationId/participants` — seating a third person in a
- * thread that already has two.
+ * thread that already has two — and `POST /conversations/:conversationId/participants/remove`,
+ * which is the undo for it.
  *
  * The endpoint existed with a gate and no caller, so a direct thread could only
  * ever be a direct thread: `conversation.ts` declares "N participants, not a
@@ -29,6 +31,11 @@ import { toast } from '@/components/ui/Toast';
  * with a bare `can('conversation:join')` in the page that owns the trigger, which is
  * one of the few actions where a subject-free check IS correct — a rule that reads
  * an absent field must deny, and this one reads none.
+ *
+ * `conversation:remove` is gated the same way and for the same reason, and the two
+ * together are why this dialog shows the ROSTER and not only a search box: an undo
+ * that lives behind "type a name until you find the person you are trying to
+ * unsit" is not an undo.
  */
 export interface AddParticipantDialogProps {
   conversationId: string;
@@ -99,6 +106,9 @@ export function AddParticipantDialog({
     if (!open) {
       setTerm('');
       setChosen(null);
+      // The pending removal goes with them. A dialog that reopens on somebody else's
+      // confirm step is how the wrong person gets taken out of a thread.
+      setRemoving(null);
     }
   }, [open]);
 
@@ -106,6 +116,49 @@ export function AddParticipantDialog({
     () => new Set(participants.map((participant) => participant.user.id)),
     [participants],
   );
+
+  /*
+   * THE ROSTER, and it is a `useMemo` for the same reason `seated` is: the two are
+   * read on every render of a list, and the dialog re-renders on every keystroke.
+   */
+  const [active, gone] = useMemo(
+    (): [ParticipantDto[], ParticipantDto[]] => [
+      participants.filter((participant) => participant.leftAt === null),
+      participants.filter((participant) => participant.leftAt !== null),
+    ],
+    [participants],
+  );
+
+  /*
+   * `conversation:remove` is a bare `allow`/`deny` for all four cells — the exact
+   * inverse of `conversation:join` — so a subject-free `can()` is the complete gate
+   * and not a shortcut, and the dialog needs no subject to ask about.
+   *
+   * It is asked HERE rather than in the page, because the page's own gate is
+   * `conversation:join` on the trigger and this is a different question about a
+   * different thing. Asking one and assuming the other would couple two decisions
+   * that `POLICY` keeps apart.
+   */
+  const canRemove = useCan('conversation:remove');
+
+  const [removing, setRemoving] = useState<ParticipantDto | null>(null);
+  const remove = useMutation({
+    mutationFn: (userId: string) =>
+      api.post<ConversationDto>(`/conversations/${conversationId}/participants/remove`, {
+        userId,
+      }),
+    onSuccess: (updated) => {
+      onUpdated(updated);
+      setRemoving(null);
+      // Stays open: the roster below is now shorter, and the next thing an admin
+      // opens this dialog for is usually the next correction.
+      toast.success('Removed from the conversation');
+    },
+    onError: (error) => {
+      setRemoving(null);
+      toast.fromError(error, 'Could not remove them from the conversation');
+    },
+  });
 
   /*
    * `GET /users` is `user:list` — a bare allow/deny for every role, ADMIN only —
@@ -145,74 +198,110 @@ export function AddParticipantDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        title="Add someone to this conversation"
-        description="They will be able to read everything already in the thread, and to reply to it."
+        title={removing ? `Remove ${removing.user.name}?` : 'Add someone to this conversation'}
+        description={
+          removing
+            ? 'They will stop receiving this conversation’s messages. Nothing they have already written here is deleted, and you can add them back at any time.'
+            : 'They will be able to read everything already in the thread, and to reply to it.'
+        }
         footer={
-          <>
-            <Button variant="ghost" block className="sm:w-auto" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button
-              block
-              className="sm:w-auto"
-              loading={add.isPending}
-              disabled={chosen === null}
-              onClick={() => chosen && add.mutate(chosen.id)}
-            >
-              <UserRoundPlus aria-hidden="true" className="size-4" />
-              Add to conversation
-            </Button>
-          </>
+          removing ? (
+            /*
+             * The second step of the removal, INSIDE this dialog rather than in a
+             * nested one. A mis-tap on a 44px control in a list of names is the
+             * ordinary way an admin takes the wrong person out of a thread, and a
+             * stacked modal is the shape that is hardest to dismiss correctly on a
+             * phone — the scrim behind it, the focus trap, and the back gesture all
+             * have to agree.
+             */
+            <>
+              <Button variant="ghost" block className="sm:w-auto" onClick={() => setRemoving(null)}>
+                Keep them
+              </Button>
+              <Button
+                variant="danger"
+                block
+                className="sm:w-auto"
+                loading={remove.isPending}
+                onClick={() => remove.mutate(removing.user.id)}
+              >
+                <UserRoundX aria-hidden="true" className="size-4" />
+                Remove from conversation
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                variant="ghost"
+                block
+                className="sm:w-auto"
+                onClick={() => onOpenChange(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                block
+                className="sm:w-auto"
+                loading={add.isPending}
+                disabled={chosen === null}
+                onClick={() => chosen && add.mutate(chosen.id)}
+              >
+                <UserRoundPlus aria-hidden="true" className="size-4" />
+                Add to conversation
+              </Button>
+            </>
+          )
         }
       >
-        <div className="flex flex-col gap-3">
-          <Input
-            value={term}
-            onChange={(event) => {
-              setTerm(event.target.value);
-              // A new search invalidates the previous choice: leaving "Ada" selected
-              // while the box says "Grace" is how the wrong person gets seated.
-              setChosen(null);
-            }}
-            placeholder="Search by name or email"
-            aria-label="Search for a person"
-            autoComplete="off"
-          />
-
-          {chosen ? (
-            <div className="flex items-center gap-3 rounded-[var(--control-radius)] border border-line-brand bg-selected p-2">
-              <Avatar name={chosen.name} src={chosen.avatarUrl} size="sm" />
-              <span className="min-w-0 flex-1 truncate text-sm font-medium">{chosen.name}</span>
-              <span className="truncate text-xs text-fg-tertiary">{chosen.email}</span>
-            </div>
-          ) : null}
-
-          {term.trim().length === 0 ? (
-            <p className="text-sm text-fg-secondary">
-              {participants.length === 1
-                ? 'This thread has one person in it. Search for someone to add.'
-                : `${participants.length} people are already in this thread.`}
-            </p>
-          ) : candidates.isPending ? (
-            <div className="flex flex-col gap-2" aria-hidden="true">
-              <Skeleton shape="text" className="h-11 w-full" />
-              <Skeleton shape="text" className="h-11 w-full" />
-            </div>
-          ) : available.length === 0 ? (
-            <EmptyState
-              variant="no-results"
-              compact
-              description={
-                rows.length > 0
-                  ? 'Everyone matching that is already in this thread.'
-                  : 'Nobody matched that search.'
-              }
+        {removing ? null : (
+          <div className="flex flex-col gap-3">
+            <Input
+              value={term}
+              onChange={(event) => {
+                setTerm(event.target.value);
+                // A new search invalidates the previous choice: leaving "Ada" selected
+                // while the box says "Grace" is how the wrong person gets seated.
+                setChosen(null);
+              }}
+              placeholder="Search by name or email"
+              aria-label="Search for a person"
+              autoComplete="off"
             />
-          ) : (
-            <ul className="flex flex-col gap-1">
-              {available.map((row) => (
-                <li key={row.id}>
-                  {/*
+
+            {chosen ? (
+              <div className="flex items-center gap-3 rounded-[var(--control-radius)] border border-line-brand bg-selected p-2">
+                <Avatar name={chosen.name} src={chosen.avatarUrl} size="sm" />
+                <span className="min-w-0 flex-1 truncate text-sm font-medium">{chosen.name}</span>
+                <span className="truncate text-xs text-fg-tertiary">{chosen.email}</span>
+              </div>
+            ) : null}
+
+            {term.trim().length === 0 ? (
+              <p className="text-sm text-fg-secondary">
+                {active.length === 1
+                  ? 'This thread has one person in it. Search for someone to add.'
+                  : `${active.length} ${active.length === 1 ? 'person is' : 'people are'} already in this thread.`}
+              </p>
+            ) : candidates.isPending ? (
+              <div className="flex flex-col gap-2" aria-hidden="true">
+                <Skeleton shape="text" className="h-11 w-full" />
+                <Skeleton shape="text" className="h-11 w-full" />
+              </div>
+            ) : available.length === 0 ? (
+              <EmptyState
+                variant="no-results"
+                compact
+                description={
+                  rows.length > 0
+                    ? 'Everyone matching that is already in this thread.'
+                    : 'Nobody matched that search.'
+                }
+              />
+            ) : (
+              <ul className="flex flex-col gap-1">
+                {available.map((row) => (
+                  <li key={row.id}>
+                    {/*
                     A BUTTON and not a row inside a `<label>` or a `Select`. The
                     mobile-first floor is 44px on the control's own box here, with no
                     label or pseudo-element to union it with (mobile-shell.spec.ts
@@ -220,39 +309,99 @@ export function AddParticipantDialog({
                     use — is what makes this list pass on a phone rather than a
                     hand-written `min-h-11` that the next restyle would remove.
                   */}
-                  <button
-                    type="button"
-                    onClick={() => setChosen(row)}
-                    className="tap flex w-full items-center gap-3 rounded-[var(--control-radius)] border border-line-subtle p-2 text-start hover:bg-hover focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-focus"
-                  >
-                    <Avatar name={row.name} src={row.avatarUrl} size="sm" />
-                    <span className="flex min-w-0 flex-1 flex-col">
-                      <span className="truncate text-sm font-medium">{row.name}</span>
-                      <span className="truncate text-xs text-fg-tertiary">{row.email}</span>
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
+                    <button
+                      type="button"
+                      onClick={() => setChosen(row)}
+                      className="tap flex w-full items-center gap-3 rounded-[var(--control-radius)] border border-line-subtle p-2 text-start hover:bg-hover focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-focus"
+                    >
+                      <Avatar name={row.name} src={row.avatarUrl} size="sm" />
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        <span className="truncate text-sm font-medium">{row.name}</span>
+                        <span className="truncate text-xs text-fg-tertiary">{row.email}</span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
 
-          {/*
+            {/*
             The confirm button is DISABLED rather than absent when nobody is chosen,
             and the reason is the destructive direction: a mis-tap that seats the
-            wrong person in a thread is a data change with no undo anywhere in this
-            app. There is no leave route and no remove route — `leftAt` is written in
-            exactly one place in the whole API and that place writes `null` — and
-            conversations.service.ts's design note beside `addParticipant` is where
-            that is argued rather than left as folklore. The only recovery from a
-            mis-seat today is another admin action, and none exists.
+            wrong person in a thread is a data change. It used to have NO undo anywhere
+            in this app — `leftAt` was written in exactly one place in the whole API
+            and that place wrote `null` — which is why the roster below exists now.
 
             A dialog that cannot be completed by accident is the whole value of
             putting this behind a two-step pick-then-confirm instead of seating on
-            the first tap. Note what this is NOT: a mitigation for the missing leave
-            route. It is a mitigation for a missing guard on the ADD path, and the
-            leave route would not have supplied that guard either.
+            the first tap. Note what it is still NOT: a substitute for the confirm
+            step on the REMOVE half. Two guards on two directions is not
+            redundancy — seating is a mistake an admin makes on a name they did not
+            mean, and unsitting is a mistake an admin makes on a name they did.
           */}
-        </div>
+          </div>
+        )}
+
+        {/*
+          THE ROSTER, which is the undo.
+
+          It shows the ACTIVE members with a remove control each, and the ones who
+          have already left underneath, marked and inert — because `addParticipant`
+          is an upsert whose update clears `leftAt`, so a person who left is one tap
+          away in the SEARCH list above, and a roster that hid them would be the
+          dialog refusing to show a state it can change.
+
+          The remove control is an IconButton with the person's name in its
+          accessible name, so the list stays a list of NAMES on a 375px screen and a
+          screen reader announces which of the eight rows it is about to unsit.
+        */}
+        {!removing && active.length > 0 ? (
+          <div className="flex flex-col gap-1">
+            <h3 className="text-xs font-semibold text-fg-tertiary">In this conversation</h3>
+            <ul className="flex flex-col gap-1">
+              {active.map((participant) => (
+                <li key={participant.user.id}>
+                  <div className="tap flex items-center gap-3 rounded-[var(--control-radius)] border border-line-subtle p-2">
+                    <Avatar
+                      name={participant.user.name}
+                      src={participant.user.avatarUrl}
+                      size="sm"
+                    />
+                    <span className="min-w-0 flex-1 truncate text-sm">{participant.user.name}</span>
+                    {canRemove ? (
+                      <IconButton
+                        variant="ghost"
+                        aria-label={`Remove ${participant.user.name} from this conversation`}
+                        icon={<UserRoundX aria-hidden="true" className="size-5" />}
+                        onClick={() => setRemoving(participant)}
+                      />
+                    ) : null}
+                  </div>
+                </li>
+              ))}
+            </ul>
+            {gone.length > 0 ? (
+              <ul className="flex flex-col gap-1">
+                {gone.map((participant) => (
+                  <li
+                    key={participant.user.id}
+                    className="flex items-center gap-3 rounded-[var(--control-radius)] p-2"
+                  >
+                    <Avatar
+                      name={participant.user.name}
+                      src={participant.user.avatarUrl}
+                      size="sm"
+                    />
+                    <span className="min-w-0 flex-1 truncate text-sm text-fg-tertiary">
+                      {participant.user.name}
+                    </span>
+                    <span className="shrink-0 text-xs text-fg-tertiary">Left</span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
       </DialogContent>
     </Dialog>
   );

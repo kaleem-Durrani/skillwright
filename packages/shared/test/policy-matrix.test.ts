@@ -214,11 +214,48 @@ const OTHER_USER: Subject = { userId: 'u_stranger' };
 const UPLOAD_OF_S1: Subject = { id: 'up_1', userId: STUDENT_IN.id };
 const UPLOAD_OF_STRANGER: Subject = { id: 'up_2', userId: 'u_stranger' };
 
+/*
+ * `memberIds` is on every conversation subject below, and it is the point of the
+ * pair. `participantIds` answers "is this person in the room now"; `memberIds`
+ * answers "has this person ever been in the room", which is the only one of the two
+ * that survives a `leftAt` write. The two are separate fields rather than one field
+ * and a flag because the leave gate must be decidable from a fact the request does
+ * not change — see `isMember` in combinators.ts.
+ */
 const THREAD_WITH_S1_AND_TA: Subject = {
   id: 'cv_1',
   participantIds: [STUDENT_IN.id, TEACHER_A.id],
+  memberIds: [STUDENT_IN.id, TEACHER_A.id],
 };
-const THREAD_WITHOUT_ME: Subject = { id: 'cv_2', participantIds: ['u_x', 'u_y'] };
+const THREAD_WITHOUT_ME: Subject = {
+  id: 'cv_2',
+  participantIds: ['u_x', 'u_y'],
+  memberIds: ['u_x', 'u_y'],
+};
+
+/**
+ * THE SUBJECT THE WHOLE `conversation:leave` DESIGN TURNS ON: the student is in
+ * `memberIds` and NOT in `participantIds` — they have left, or are leaving.
+ *
+ * `isMember` allows it and `isParticipant` would refuse it, and that asymmetry is
+ * the feature rather than an inconsistency: the act of giving a seat up has to be
+ * permitted by the one fact the write does not destroy. The read and send rules
+ * still say `isParticipant`, so this same subject refuses them — the matrix rows
+ * below assert exactly that, because a leave that quietly widened access would be
+ * the real bug.
+ */
+const THREAD_S1_HAS_LEFT: Subject = {
+  id: 'cv_3',
+  participantIds: [TEACHER_A.id],
+  memberIds: [STUDENT_IN.id, TEACHER_A.id],
+};
+
+/** An admin is seated in threads too — `conversation:read` is `isParticipant` for them as well. */
+const THREAD_WITH_ADMIN: Subject = {
+  id: 'cv_4',
+  participantIds: [ADMIN.id, STUDENT_IN.id],
+  memberIds: [ADMIN.id, STUDENT_IN.id],
+};
 
 const NOTIFICATION_OF_S1: Subject = { id: 'n_1', userId: STUDENT_IN.id };
 const NOTIFICATION_OF_STRANGER: Subject = { id: 'n_2', userId: 'u_stranger' };
@@ -1558,6 +1595,93 @@ const CONVERSATION_CELLS: readonly Cell[] = [
     THREAD_WITHOUT_ME,
   ),
   ok('admin seats a participant', ADMIN, 'conversation:join', THREAD_WITHOUT_ME),
+
+  /*
+   * LEAVE. The two rows that carry the design are the third and the fourth: the
+   * same student, the same thread, differing only in whether the subject's live set
+   * still contains them. `isMember` reads the seat that the write does not touch,
+   * so the third is allowed; `isParticipant` — the rule every other conversation
+   * action uses — would refuse it, and refusing it would mean nobody can ever leave
+   * anything.
+   */
+  no(
+    'anonymous leaves a thread',
+    ANON,
+    'conversation:leave',
+    'anonymous:deny',
+    THREAD_WITH_S1_AND_TA,
+  ),
+  ok(
+    'student leaves a thread they are in',
+    STUDENT_IN,
+    'conversation:leave',
+    THREAD_WITH_S1_AND_TA,
+  ),
+  ok(
+    'student leaves a thread they are no longer seated in',
+    STUDENT_IN,
+    'conversation:leave',
+    THREAD_S1_HAS_LEFT,
+  ),
+  no(
+    'student leaves a thread they were never in',
+    STUDENT_IN,
+    'conversation:leave',
+    'STUDENT:isMember',
+    THREAD_WITHOUT_ME,
+  ),
+  ok('teacher leaves a thread they are in', TEACHER_A, 'conversation:leave', THREAD_WITH_S1_AND_TA),
+  ok('admin leaves a thread they are in', ADMIN, 'conversation:leave', THREAD_WITH_ADMIN),
+  no(
+    'admin leaves a thread they were never seated in',
+    ADMIN,
+    'conversation:leave',
+    'ADMIN:isMember',
+    THREAD_WITHOUT_ME,
+  ),
+
+  /*
+   * The counterpart, and the reason `leave` is not simply `remove` with a friendlier
+   * name: a leave confers NOTHING. The subject the third leave row above is
+   * authorised on is refused by every access rule in this group, so the gate that
+   * permits the write cannot be reused to read the thread.
+   */
+  no(
+    'a member who left can no longer read the thread they left',
+    STUDENT_IN,
+    'conversation:read',
+    'STUDENT:isParticipant',
+    THREAD_S1_HAS_LEFT,
+  ),
+  no(
+    'a member who left can no longer send into it',
+    STUDENT_IN,
+    'conversation:send',
+    'STUDENT:isParticipant',
+    THREAD_S1_HAS_LEFT,
+  ),
+
+  /*
+   * REMOVE. Terminal cells, exactly like `conversation:join` and for the same
+   * reason, so a bare `can()` is a complete gate — which is what lets the dialog
+   * render a remove control with no subject in hand.
+   */
+  no('anonymous removes a participant', ANON, 'conversation:remove', 'anonymous:deny'),
+  no(
+    'student removes somebody from a thread',
+    STUDENT_IN,
+    'conversation:remove',
+    'STUDENT:deny',
+    THREAD_WITH_S1_AND_TA,
+  ),
+  no(
+    'teacher removes somebody from a thread',
+    TEACHER_A,
+    'conversation:remove',
+    'TEACHER:deny',
+    THREAD_WITH_S1_AND_TA,
+  ),
+  ok('admin removes somebody from a thread', ADMIN, 'conversation:remove', THREAD_WITH_S1_AND_TA),
 ];
 
 const MFA_CELLS: readonly Cell[] = [
@@ -1679,6 +1803,10 @@ const PERMISSIVE_SUBJECT: Subject = {
   isPublic: true,
   publishedAt: T0,
   participantIds: [STUDENT_IN.id, TEACHER_A.id, ADMIN.id],
+  // Present so a "maximally permissive" subject is actually permissive for the
+  // leave rule too: without it, `isMember` would deny under `PERMISSIVE_SUBJECT`
+  // and every generated block below would be proving that a denial stays a denial.
+  memberIds: [STUDENT_IN.id, TEACHER_A.id, ADMIN.id],
 };
 
 /** Same, re-pointed at whichever actor is under test. */
@@ -1689,6 +1817,7 @@ const permissiveFor = (actor: Actor): Subject => ({
   studentId: actor.id,
   courseTeacherId: actor.id,
   participantIds: [actor.id],
+  memberIds: [actor.id],
 });
 
 const ANONYMOUS_ALLOWED: readonly Action[] = [
@@ -1729,6 +1858,20 @@ const DESTRUCTIVE_ACTIONS: readonly Action[] = [
   // leaves a real qualification nobody can undo with the same credentials.
   'certificate:issue',
   'certificate:revoke',
+  /*
+   * `conversation:leave` and `conversation:remove` are DELIBERATELY absent, and the
+   * reason is what they do not do. A leave stamps `leftAt`; it deletes no row, retracts
+   * no message, and resets no read marker, and an admin can undo it with the
+   * `conversation:join` upsert that has always cleared `leftAt`. Every member of this
+   * list is an action whose damage a shared workshop account could not repair with the
+   * same credentials; a seat someone can be re-given is not that.
+   *
+   * The counter-argument — that a demo seat is still a seat, and the demo should not
+   * be able to remove a colleague — is a claim about demo fidelity, and the honest
+   * version of it is that a DEMO session should not be able to make a change nobody
+   * would want. A self-service opt-out from a thread is not that: it is the thing a
+   * real user reaches for.
+   */
 ];
 
 // ---------------------------------------------------------------------------

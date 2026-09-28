@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { ArrowLeft, SendHorizonal, UserRoundPlus } from 'lucide-react';
+import { ArrowLeft, LogOut, SendHorizonal, UserRoundPlus } from 'lucide-react';
 import { ulid } from 'ulid';
 /*
  * The two response envelopes, taken from the package that DEFINES them.
@@ -20,13 +20,14 @@ import { api } from '@/lib/api';
 import { qk } from '@/lib/query';
 import { cn } from '@/lib/cn';
 import { useSession } from '@/lib/session';
-import { useCan } from '@/lib/policy';
+import { subject, useCan } from '@/lib/policy';
 import { formatRelative, formatTime } from '@/lib/format';
 import type { ConversationDto, MessageDto, ParticipantDto, SendMessageInput } from '@/lib/types';
 import { AddParticipantDialog } from '@/components/conversations/AddParticipantDialog';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button, IconButton } from '@/components/ui/Button';
+import { Dialog, DialogContent } from '@/components/ui/Dialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Pagination } from '@/components/ui/Pagination';
 import { SkeletonList, SkeletonThread } from '@/components/ui/Skeleton';
@@ -637,6 +638,77 @@ function Thread({
   const [adding, setAdding] = useState(false);
 
   /*
+   * LEAVING, and the subject it takes.
+   *
+   * `conversation:leave` is `isMember`, which reads `Subject.memberIds` — every seat
+   * this thread has ever had, INCLUDING the rows with a `leftAt` — while
+   * `participantIds` is the live set that `isParticipant` reads for read and send. The
+   * gate cannot be asked the `isParticipant` question: that is the condition the
+   * request destroys, so a leave gated on it could never be authorised.
+   *
+   * The subject is therefore built from the WHOLE roster, not from the members who
+   * have not left, and the two are the same list here only because the viewer is
+   * seated — the thread is in their inbox for exactly that reason. `subject()` is
+   * called with the fields NAMED (no spread), because a misspelled key is a silent
+   * denial that looks exactly like a genuine one — the #18 trap.
+   *
+   * `conversation` is null on a deep link whose thread is not on the page that is
+   * loaded, and an absent subject denies, so the control is simply absent there rather
+   * than offered and refused.
+   */
+  const canLeave = useCan(
+    'conversation:leave',
+    conversation
+      ? subject({
+          id: conversation.id,
+          memberIds: conversation.participants.map((participant) => participant.user.id),
+        })
+      : undefined,
+  );
+
+  const [confirmingLeave, setConfirmingLeave] = useState(false);
+  const leave = useMutation({
+    mutationFn: () => api.post<ConversationDto>(`/conversations/${conversationId}/leave`),
+    onSuccess: () => {
+      setConfirmingLeave(false);
+      toast.success('You have left the conversation');
+      /*
+       * Back to the list FIRST, and the list is refetched rather than patched.
+       * `writeConversationRow` would be wrong here: it republishes the row the server
+       * just sent, and that row belongs to a thread this person is no longer in. The
+       * refetch drops it, which is the same thing the server will say.
+       */
+      onBack();
+      void client.invalidateQueries({ queryKey: qk.conversations });
+    },
+    onError: (error) => toast.fromError(error, 'Could not leave the conversation'),
+  });
+
+  /*
+   * THE DIRECT THREAD, SPOKEN FOR.
+   *
+   * A one-to-one is deduplicated on a LIVE participant count (conversations.service.ts's
+   * `findDirectConversation`), so when one of two people leaves, the thread they were
+   * both in cannot be reopened: the next message to that person opens a new one. The
+   * survivor is left holding this one, alone, with a composer.
+   *
+   * That is a real cost, and the alternatives were worse — refusing the leave would
+   * leave a student no way out of a thread only an administrator could put them in. So
+   * the thread stays, and the screen SAYS SO rather than letting somebody compose into
+   * a void: the leaver can no longer read the thread (`conversation:read` is
+   * `isParticipant` and the leave did not change it), so a message sent here is read by
+   * nobody but its author.
+   */
+  const aloneInThread =
+    conversation !== null &&
+    conversation.participants.some(
+      (participant) => participant.leftAt === null && participant.user.id === user?.id,
+    ) &&
+    conversation.participants.every(
+      (participant) => participant.leftAt !== null || participant.user.id === user?.id,
+    );
+
+  /*
    * The header names the thread. It used to say the literal word "Conversation"
    * on every thread, which is the one piece of information a messaging screen has
    * no other way to give: the list row is above it on a desktop and BEHIND it on
@@ -685,7 +757,65 @@ function Thread({
             {label || 'Conversation'}
           </span>
         )}
+        {/*
+          THE WAY OUT, and it is an IconButton with no visible text because the header
+          is a name and a back arrow on a 375px screen — a third word would truncate the
+          name, which is the one thing the header is for. The accessible name is
+          required at the type level (ui/Button's IconButton), so a screen reader hears
+          "Leave conversation" and a thumb gets 44px, which is the floor
+          `check:mobile-first` and `e2e/mobile-shell.spec.ts` measure.
+        */}
+        {canLeave ? (
+          <IconButton
+            aria-label="Leave conversation"
+            icon={<LogOut aria-hidden="true" className="size-5" />}
+            onClick={() => setConfirmingLeave(true)}
+          />
+        ) : null}
       </div>
+
+      {/*
+        A CONFIRMATION, because a leave is the one write on this screen with no undo
+        the person who made it can perform: putting somebody back needs an
+        administrator and the `conversation:remove`/`join` pair. The `danger` variant is
+        paired with a confirmation by the kit's own rule, and the copy says what
+        actually happens — you stop receiving messages, an administrator can add you
+        back, and nothing already written is deleted — because "Leave" on its own
+        invites a reader to assume the messages go with it, which they do not.
+      */}
+      {confirmingLeave ? (
+        <Dialog open={confirmingLeave} onOpenChange={setConfirmingLeave}>
+          <DialogContent
+            title="Leave this conversation?"
+            description="You will stop receiving its messages. An administrator can add you back, and nothing already written here is deleted."
+            footer={
+              <>
+                <Button
+                  variant="ghost"
+                  block
+                  className="sm:w-auto"
+                  onClick={() => setConfirmingLeave(false)}
+                >
+                  Stay
+                </Button>
+                <Button
+                  variant="danger"
+                  block
+                  className="sm:w-auto"
+                  loading={leave.isPending}
+                  onClick={() => leave.mutate()}
+                >
+                  Leave conversation
+                </Button>
+              </>
+            }
+          >
+            <p className="text-sm text-fg-secondary">
+              Your name stays on the messages you have already sent.
+            </p>
+          </DialogContent>
+        </Dialog>
+      ) : null}
 
       {/*
         Mounted whenever the trigger has been used, and with an EMPTY roster when
@@ -766,8 +896,24 @@ function Thread({
         <div ref={endRef} />
       </div>
 
+      {aloneInThread ? (
+        <p className="border-t border-line-subtle px-3 py-2 text-xs text-fg-tertiary">
+          Everybody else has left this conversation, so a message you send here is read by nobody
+          but you. Starting a new conversation with them is a separate thread.
+        </p>
+      ) : null}
+
       <form
-        className="flex items-end gap-2 border-t border-line-subtle p-2"
+        /*
+         * The rule is on the FORM, and the notice above takes its place when it is
+         * showing — two adjacent `border-t` on stacked siblings render as one 2px
+         * line, which is the sort of thing that is only noticed by somebody comparing
+         * a screenshot against the tokens.
+         */
+        className={cn(
+          'flex items-end gap-2 p-2',
+          aloneInThread ? '' : 'border-t border-line-subtle',
+        )}
         onSubmit={(event) => {
           event.preventDefault();
           submit();

@@ -7,6 +7,7 @@ import {
   hasCompletedPrerequisite,
   isAuthor,
   isEnrolledStudent,
+  isMember,
   isParticipant,
   isPublic,
   isPublished,
@@ -98,6 +99,8 @@ export type Action =
   | 'conversation:create'
   | 'conversation:send'
   | 'conversation:join'
+  | 'conversation:leave'
+  | 'conversation:remove'
   // mfa
   | 'mfa:enroll'
   | 'mfa:verify'
@@ -872,6 +875,51 @@ export const POLICY: PolicyTable = definePolicy({
     ADMIN: allow,
   },
 
+  /*
+   * TWO VERBS, NOT ONE, and the split is not cosmetic.
+   *
+   * Leaving yourself and removing somebody else are the same COLUMN and two
+   * different powers. A participant giving up their own seat is a thing anyone
+   * seated may do; removing another person from a thread is a moderation act, and
+   * the module already has a name for moderation — `conversation:join` above, which
+   * is ADMIN-only for the mirror-image reason ("self-joining an arbitrary thread is
+   * the whole attack"). One verb covering both would have had to be either
+   * participant-shaped, which hands any seated user a remove button, or
+   * admin-shaped, which makes leaving a thread an administrator's job. So
+   * `leave` is a subject rule and `remove` is a bare one, and the pair is symmetric
+   * with `read`/`join`.
+   */
+  'conversation:leave': {
+    anonymous: deny,
+    /*
+     * `isMember`, not `isParticipant` — see the rule's own comment. Every rule above
+     * describes access to something that still exists, so they read the LIVE
+     * participant set; a gate that did the same here would evaluate permission
+     * against the exact condition the request destroys, and the check and the effect
+     * would be the same term. `memberIds` is every seat ever held, which the write
+     * does not touch, so the decision is made against a fact that is still true
+     * afterwards.
+     *
+     * It is a *membership* claim, not an access claim: leaving a thread you have
+     * already left is idempotent at the service and nothing more. It never confers
+     * the right to read, send to, or be counted in the thread, and all three of
+     * those still say `isParticipant`.
+     */
+    STUDENT: isMember,
+    TEACHER: isMember,
+    ADMIN: isMember,
+  },
+  'conversation:remove': {
+    anonymous: deny,
+    // The exact inverse of `conversation:join` above, and gated the same way: an
+    // admin is the only role that can change who is in a thread, in either
+    // direction. Every cell is terminal, so a BARE `can()` is the complete gate for
+    // the SPA — the same argument `conversation:join` makes.
+    STUDENT: deny,
+    TEACHER: deny,
+    ADMIN: allow,
+  },
+
   // -------------------------------------------------------------------------
   // MFA — always acts on the session's own user; no id appears in these routes,
   // so `allow` here cannot be turned into acting on somebody else.
@@ -983,6 +1031,12 @@ export const SUBJECT_INDEPENDENT_ACTIONS = [
   'upload:presign',
   'conversation:create',
   'conversation:join',
+  // The other half of `conversation:join`'s pair: four terminal cells, so a bare
+  // `can()` is the complete gate for the remove control the add-participant dialog
+  // renders beside every seated person. `conversation:leave` is DELIBERATELY absent
+  // — it is `isMember`, which reads a Subject field, so a subject-free call would be
+  // a guaranteed denial and the Leave button would never render for anybody.
+  'conversation:remove',
   'mfa:enroll',
   'mfa:verify',
   'mfa:disable',

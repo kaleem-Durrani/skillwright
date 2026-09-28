@@ -84,6 +84,26 @@ export const isParticipant: Rule = rule(
   (actor, subject) => actor !== null && (subject.participantIds?.includes(actor.id) ?? false),
 );
 
+/**
+ * Actor has EVER held a seat in the conversation, whether or not they still hold it.
+ *
+ * The leave rule, and the reason it cannot be `isParticipant`. A request to leave
+ * destroys the live membership, so a gate that read the live set would be deciding
+ * permission from a fact the request is in the act of making false — the check and
+ * the effect would be the same term. This reads `memberIds` instead, which the
+ * write does not change, so the decision is made against a fact that is still true
+ * afterwards.
+ *
+ * It is deliberately WEAKER than `isParticipant` and is not a substitute for it: it
+ * says "you were one of ours", never "you may read this". Nobody who has left can
+ * read, send, or see an unread count, and all three of those still say
+ * `isParticipant`.
+ */
+export const isMember: Rule = rule(
+  'isMember',
+  (actor, subject) => actor !== null && (subject.memberIds?.includes(actor.id) ?? false),
+);
+
 /** Subject is live. Actor-independent, so it is the only thing anonymous reads lean on. */
 export const isPublished: Rule = rule(
   'isPublished',

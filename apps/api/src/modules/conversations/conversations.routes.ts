@@ -182,6 +182,78 @@ const conversationsRoutes: FastifyPluginAsync = async (fastify) => {
         request.body,
       ),
   );
+
+  /*
+   * THE ROUTE THIS MODULE RECORDED AS MISSING, and it is the one route in it whose
+   * gate reads a subject that is NOT the live participant set.
+   *
+   * `conversation:leave` is `isMember`, which reads `Subject.memberIds` — every seat
+   * the thread has ever had, `leftAt` rows included. `loadConversationSubject` above
+   * would have been the wrong loader: `isParticipant` reads `participantIds`, which is
+   * the live set, so the gate would have been deciding permission from the exact
+   * condition the request makes false. The second call of a double-tap, or a retry
+   * after the first answer was lost, would then have been answered by a different
+   * question than the first.
+   *
+   * NO BODY AT ALL, rather than an empty object schema. The request says one thing —
+   * the thread in the path — and there is nothing optional here for `.nullish()` to
+   * guard: a schema that may be absent is only ever needed because Fastify hands a
+   * bodyless POST to the validator as `null` (LESSONS-LEARNED #12), and a route with
+   * no body schema never reaches the validator. `leave` takes the actor from the
+   * session, never from a body, because "leave" whose subject is in the payload is a
+   * route that can be pointed at somebody else's seat.
+   */
+  app.post(
+    '/:conversationId/leave',
+    {
+      schema: {
+        params: conversationIdParamSchema,
+        response: { 200: conversationSchema },
+      },
+      preHandler: authorize('conversation:leave', (request) =>
+        conversationsService.loadConversationMembership(conversationIdOf(request)),
+      ),
+    },
+    async (request) =>
+      conversationsService.leave(requireActor(request), request.params.conversationId),
+  );
+
+  /*
+   * `POST` and not `DELETE`, and not because a verb could not have been used. This is
+   * a soft write: the participant row survives, carries the moment it happened, and is
+   * what `addParticipant` above restores. A DELETE on `/participants/:userId` would
+   * name an operation this endpoint does not perform, and the first person to read the
+   * route list would reasonably assume the row is gone.
+   *
+   * BARE authorize(): `conversation:remove` in `POLICY` is anonymous deny / STUDENT
+   * deny / TEACHER deny / ADMIN allow — every cell terminal, reading no Subject field,
+   * so adding a subject loader would only invent a way for the gate to disagree with
+   * the policy. It is the exact inverse of `conversation:join` above and is argued the
+   * same way in `POLICY`.
+   *
+   * The body is `joinConversationSchema` UNCHANGED, and deliberately not a new schema:
+   * both routes take one `userId` and nothing else, and a second definition of that
+   * would be a second thing to keep in step. Self-removal is refused by the service,
+   * not here — it is a statement about the two verbs, and the service is where the
+   * write is.
+   */
+  app.post(
+    '/:conversationId/participants/remove',
+    {
+      schema: {
+        params: conversationIdParamSchema,
+        body: joinConversationSchema,
+        response: { 200: conversationSchema },
+      },
+      preHandler: authorize('conversation:remove'),
+    },
+    async (request) =>
+      conversationsService.removeParticipant(
+        requireActor(request),
+        request.params.conversationId,
+        request.body,
+      ),
+  );
 };
 
 export default conversationsRoutes;

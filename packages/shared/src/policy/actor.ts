@@ -96,6 +96,25 @@ export interface Subject {
   participantIds?: readonly string[];
 
   /**
+   * Everybody who has EVER held a seat in a Conversation — every
+   * `ConversationParticipant` row, including the ones with a `leftAt`.
+   *
+   * A separate field rather than a flag on `participantIds`, because the two answer
+   * different questions and conflating them is the bug this exists to prevent. Every
+   * rule written so far describes access to something that still EXISTS, so they read
+   * the live set: `isParticipant` is what `conversation:read` and `conversation:send`
+   * are, and a seat you gave up is not a seat. But an action that DESTROYS a
+   * membership cannot be decided by the same predicate — a gate reading
+   * `participantIds` would authorise `conversation:leave` against the exact
+   * condition the request makes false, and there is no second reading of that.
+   *
+   * So the vocabulary is stated twice, deliberately. `participantIds` is "is here
+   * now"; `memberIds` is "was ever here", which is the only fact that survives the
+   * write. An ABSENT `memberIds` denies, like every other absent field.
+   */
+  memberIds?: readonly string[];
+
+  /**
    * The subject COURSE's own requirement: the id of the course a student must
    * complete first, or null when the course names no prerequisite.
    *

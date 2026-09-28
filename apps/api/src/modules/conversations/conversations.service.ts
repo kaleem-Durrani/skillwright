@@ -722,111 +722,242 @@ export async function addParticipant(
   });
 
   const dto = await conversationDto(actor, conversationId);
+  return withholdContentFromNonParticipant(dto, actor);
+}
 
-  /*
-   * `conversation:read` is `isParticipant` for ADMIN too (`POLICY`). An admin
-   * may SEAT someone into a thread they are not in, but seating someone does not earn
-   * the right to read it, and `lastMessage` is message content. It is withheld rather
-   * than the whole response being a 204, because the caller still needs to see that
-   * the seat now exists.
-   */
+/**
+ * `conversation:read` is `isParticipant` for ADMIN too (`POLICY`), and for somebody who has just
+ * LEFT as well — the read rule did not change when the leave route was added.
+ *
+ * So the response to a seat-changing write is not the whole conversation: an admin who
+ * seated somebody into a thread they are not in, and a participant who has just given
+ * up their own seat, are both answered with the roster and WITHOUT `lastMessage`,
+ * which is message content. It is withheld rather than the whole response being a 204,
+ * because the caller still needs to see that the seat now exists — or, for a leave,
+ * that it is gone.
+ */
+function withholdContentFromNonParticipant(dto: ConversationDto, actor: Actor): ConversationDto {
   const seated = dto.participants.some(
     (participant) => participant.user.id === actor.id && participant.leftAt === null,
   );
   return seated ? dto : { ...dto, lastMessage: null };
 }
 
+// ---------------------------------------------------------------------------
+// Leaving, and being left
+// ---------------------------------------------------------------------------
+
+/**
+ * Subject for `conversation:leave` — and the reason it is NOT the loader above.
+ *
+ * `loadConversationSubject` answers with the LIVE participants, because every rule
+ * that has ever read a conversation subject describes access to something that still
+ * exists. A leave is the one action that makes that fact false, so this loader answers
+ * with `memberIds`: every `ConversationParticipant` row for the conversation,
+ * `leftAt` or not. The gate then decides from a fact the write does not change.
+ *
+ * Reusing the other loader would not have been "the same check more cheaply" — it
+ * would have made the route's permission depend on the state it is asking to end, so a
+ * second call (or a second device, or the 15-second poll that has not yet seen the
+ * first call's answer) would decide a different question than the first.
+ *
+ * `undefined` for a missing conversation, for the reason `loadConversationSubject`
+ * returns `undefined`: the POLICY denies (403) rather than this loader throwing a bare
+ * 404 before the gate has run.
+ */
+export async function loadConversationMembership(
+  conversationId: string,
+): Promise<Subject | undefined> {
+  const conversation = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    select: { id: true, participants: { select: { userId: true } } },
+  });
+  if (!conversation) return undefined;
+
+  return {
+    id: conversation.id,
+    memberIds: conversation.participants.map((participant) => participant.userId),
+  };
+}
+
+/**
+ * The three facts a leave does not touch, written down because each of them is a
+ * plausible "while we are in here":
+ *
+ *   1. NOT a delete of the participant row. `participantSchema` carries `leftAt`, the
+ *      SPA renders a thread's membership history from it, and `AddParticipantDialog`
+ *      shows the WHOLE roster rather than the active subset precisely because the
+ *      upsert above can restore a seat. Deleting the row would make `leftAt`
+ *      permanently null — indistinguishable from never having left — and would take
+ *      the restore with it.
+ *   2. NOT a retraction. `Message` rows are untouched and `nextSeq` is not
+ *      renumbered, so a leave cannot unsay what the departing participant has read. A
+ *      school communications product that implied otherwise would be promising
+ *      something the storage cannot keep.
+ *   3. NOT a `lastReadSeq` reset. The upsert above deliberately leaves the marker
+ *      where the departing participant abandoned it, so a re-seated person comes back
+ *      to the messages they missed. Resetting it here would mark unread mail read as a
+ *      side effect of somebody clicking a button, and nothing anywhere would report
+ *      it.
+ *
+ * A direct (two-person) thread IS abandoned by this, and deliberately so. The concern
+ * recorded against it is real — `findDirectConversation` identifies a one-to-one by
+ * `title: null` plus a LIVE participant count equal to the pair, so after one side
+ * leaves, the next message to that person creates a second thread and the history
+ * splits across the two. The alternative refusals were checked against this function
+ * and are worse: refusing the leave makes "stop messaging me" unavailable to a student,
+ * who cannot add anybody to a thread in the first place (`conversation:join` is
+ * ADMIN-only) and would otherwise have no way out at all; and deleting the thread
+ * destroys the history of the person who did NOT leave, over the leaver's decision.
+ *
+ * So the old thread stays where it is, the survivor keeps their seat in it, and the
+ * SPA says plainly that they are the last one in it. Reopening the pair creates a new
+ * thread rather than resurrecting this one, which is the one behaviour that is
+ * arguably wrong — and it is wrong on a row nobody has to guess about, because
+ * `leftAt` on the participant row is still there saying who is gone and when.
+ */
+export async function leave(actor: Actor, conversationId: string): Promise<ConversationDto> {
+  // The gate proved the actor is in `memberIds`; this proves the CONVERSATION is
+  // there, which the gate cannot do for the same reason `addParticipant` repeats it.
+  const participant = await prisma.conversationParticipant.findUnique({
+    where: { conversationId_userId: { conversationId, userId: actor.id } },
+    select: { leftAt: true },
+  });
+  // A member of a conversation that does not exist is the same 404 a stranger gets,
+  // rather than a 409 that would confirm the thread is real.
+  if (!participant) throw notFound('Conversation');
+
+  /*
+   * Leaving twice is a conflict rather than a silent success, because the caller is
+   * about to render "you are no longer in this conversation" from a 200 that changed
+   * nothing — and a double-tap on a phone is the ordinary way this arrives. The row is
+   * not re-stamped either: a second `leftAt` would move the moment somebody was
+   * removed, and the roster's value is that it is the FIRST time.
+   */
+  if (participant.leftAt !== null) throw conflict('You have already left this conversation');
+
+  await prisma.conversationParticipant.update({
+    where: { conversationId_userId: { conversationId, userId: actor.id } },
+    // `leftAt` and nothing else — see the three facts above. In particular this is
+    // not an `updateMany` with a `leftAt: null` guard: the guard would make a race
+    // silently succeed, and the conflict above is the answer to a race.
+    data: { leftAt: new Date() },
+  });
+
+  /*
+   * No notification, deliberately. The person being notified is the person who
+   * pressed the button, and `CONVERSATION_REMOVED` exists for the case where somebody
+   * ELSE did it. The row that records this is the participant's own `leftAt`.
+   */
+  const dto = await conversationDto(actor, conversationId);
+  return withholdContentFromNonParticipant(dto, actor);
+}
+
+/**
+ * ADMIN-only (`conversation:remove` in `POLICY`), the exact inverse of `addParticipant`
+ * above and gated the same way — four terminal cells, so a BARE `authorize()` is the
+ * complete gate and the conversation's existence is checked HERE and answered as a
+ * 404.
+ */
+export async function removeParticipant(
+  actor: Actor,
+  conversationId: string,
+  input: JoinConversationInput,
+): Promise<ConversationDto> {
+  /*
+   * Refused rather than quietly accepted, so the two verbs stay two verbs. A student
+   * who wants out uses `leave`, which is theirs to use; an admin who wants out of their
+   * own thread uses `leave` too. A removal is a moderation act and is announced as one
+   * (the notification below), so letting it double as a self-service exit would put
+   * "you were removed from a conversation" in the bell of somebody who left.
+   */
+  if (input.userId === actor.id) {
+    throw validationFailed([
+      { path: 'userId', message: 'Use the leave route to remove yourself from a conversation' },
+    ]);
+  }
+
+  const participant = await prisma.conversationParticipant.findUnique({
+    where: { conversationId_userId: { conversationId, userId: input.userId } },
+    select: { leftAt: true, user: { select: { name: true, deletedAt: true } } },
+  });
+  /*
+   * ONE lookup answers both questions, and they have different honest answers. No
+   * participant row means either the thread does not exist or this person is not in
+   * it; a 404 says "no such participant" for both, which is true of both and tells a
+   * caller nothing it could act on. A field-level 422 — the shape `addParticipant`
+   * uses for an unknown `userId` — would claim the person does not exist, which is a
+   * different claim, and the difference is a second query to establish.
+   */
+  if (!participant) throw notFound('Participant');
+  if (participant.leftAt !== null) {
+    throw conflict('That person has already left this conversation');
+  }
+
+  await prisma.conversationParticipant.update({
+    where: { conversationId_userId: { conversationId, userId: input.userId } },
+    data: { leftAt: new Date() },
+  });
+
+  /*
+   * ANNOUNCED, and this is the notification the module could not send before this
+   * route existed. `Message` records what was said; nothing recorded who was entitled
+   * to hear it, so a removal that passed unannounced left the person with a thread
+   * that vanished from their list, an unread badge nothing can clear, and no way to
+   * tell an administrator's mistake from a bug.
+   *
+   * The whole REST of the thread is NOT notified: they are not affected, they can see
+   * the roster change, and the copy above ("X removed you") would be untrue for them.
+   *
+   * Best-effort, after the write, never throws — `notify()` catches its own failures.
+   * A soft-deleted account is skipped: its notification rows would only race the
+   * cascade that removes them, which is the same filter `sendMessage` applies.
+   */
+  if (participant.user.deletedAt === null) {
+    await notify({
+      userIds: [input.userId],
+      type: 'CONVERSATION_REMOVED',
+      title: 'Removed from a conversation',
+      body: 'An administrator removed you from a conversation.',
+      linkPath: '/messages',
+    });
+  }
+
+  const dto = await conversationDto(actor, conversationId);
+  return withholdContentFromNonParticipant(dto, actor);
+}
+
 /*
- * THERE IS NO LEAVE ROUTE, AND THIS IS THE DESIGN NOTE SAYING WHY.
+ * THE NOTE THAT WAS HERE IS NOW THE CODE ABOVE, and this is what it decided.
  *
- * Recorded here rather than in a report because the module that owns
- * `ConversationParticipant` is the only place a reader can check the claim, and the claim
- * is checkable: `leftAt` is written in exactly one place in the whole API, and it is
- * written to `null`. Nothing in this repository ever stamps it. So a participant cannot
- * leave a thread and an admin cannot remove one, and the only undo for a mis-seated
- * person is an action that does not exist.
+ * The note recorded that `leftAt` was written in exactly one place in the whole API and
+ * that the place wrote `null`, so a participant could not leave a thread and an admin
+ * could not remove one. It also argued that the obvious route was wrong in three ways,
+ * and two of the three were right and are now answered rather than repeated:
  *
- * What makes it a note and not a missing handler is that the column is otherwise fully
- * wired. `ConversationParticipant` declares `leftAt` and an index on `[userId, leftAt]`;
- * `actor.ts`'s `participantIds` means "active participants" and every list scoped to the
- * caller inherits that; the dashboard's raw count carries `p."leftAt" IS NULL` beside
- * the literal comment that a seat you gave up is not a seat; `conversationDto` puts the
- * value on the wire; and `AddParticipantDialog` accepts the WHOLE roster rather than the
- * active subset for one reason — a person who left is restorable, because
- * `addParticipant` above is an upsert whose update clears the timestamp. A half-wired
- * invariant like that is the shape that reads as finished in review, because every read
- * of the column does the right thing with a value nobody writes.
+ *   1. "The subject is the thing being changed" — CORRECT, and the reason
+ *      `Subject.memberIds` and the `isMember` rule exist. `loadConversationMembership`
+ *      answers with every seat a thread has ever had, so `conversation:leave` is
+ *      decided from a fact the `leftAt` write does not touch. The hand-rolled membership
+ *      test the note warned against was not written; the check is in the policy table.
+ *   2. "A new action is not a row in a table" — CORRECT, and paid: two actions, eight
+ *      hand-written cells in `policy-matrix.test.ts`, a regenerated
+ *      `docs/permissions.md`.
+ *   3. "The direct thread is the hard case" — the observation is right and the
+ *      conclusion was not. `findDirectConversation` really does identify a one-to-one by
+ *      a LIVE participant count, so a leave does split a direct thread in two on the
+ *      next message. But refusing the leave is worse than the split: a student cannot
+ *      add anybody to a thread (`conversation:join` is ADMIN-only), so refusing is
+ *      refusing the only way out of a conversation they were seated into. `leave` says
+ *      the whole argument where the decision is made.
  *
- * THE OBVIOUS ROUTE IS WRONG, in three separate ways, and each is a reason the absence
- * is a decision rather than an oversight.
- *
- * 1. The subject is the thing being changed. `conversation:read` is `isParticipant`, and
- *    `isParticipant` reads the LIVE participant set — `leftAt: null` (the same predicate
- *    `findDirectConversation` and `conversationDto` use above). So a `conversation:leave`
- *    gated on the existing rule would evaluate its authorisation against the exact
- *    condition the request destroys, and the policy layer has no vocabulary for "was a
- *    participant": every rule in the table reads a live fact, because every rule in the
- *    table so far describes access to something that still exists. The shortcut —
- *    `updateMany({ where: { userId: actor.id, leftAt: null }, data: { leftAt: new Date() } })`
- *    with a hand-rolled membership test in the service — is precisely what lesson 14 is
- *    about: a guard that lives in a helper most routes call, rather than in the hook
- *    every route runs, inheriting no provenance and checking nothing else.
- *
- * 2. A new action is not a row in a table. `conversation:leave` needs hand-written cells
- *    for all four roles, the generated `docs/permissions.md` regenerated, and the
- *    matrix test's hand-written-versus-generated split reconciled. That is the cost, and
- *    it is worth paying — but it is worth paying once, deliberately, and not as a
- *    by-product of somebody adding a button.
- *
- * 3. The direct thread is the hard case, and the product is mostly direct threads.
- *    `findDirectConversation` identifies a one-to-one by `title: null` plus a live
- *    participant count equal to the pair's size. If one of two people leaves, the
- *    survivor is seated in a thread with ONE live participant, and the next message to
- *    that same person matches no thread and creates a second one. Both are now direct
- *    threads between the same two accounts, and the survivor's history is split across
- *    them with nothing to say which is which. The two ways out are both larger than the
- *    feature: delete the `Conversation`, which cascades the `Message` rows and destroys
- *    the history the survivor is the only remaining holder of; or give the thread a
- *    column that makes `findDirectConversation` skip it, which is a schema change, a
- *    migration, and a product decision about what a survivor is shown when the thread
- *    they never left has stopped existing. Neither is a `leftAt` write. That asymmetry —
- *    the easy case is easy and the ordinary case is not — is the whole reason this is a
- *    note.
- *
- * WHAT A LEAVE MUST NOT BE, so that whoever builds it does not have to rediscover it.
- *
- * It is not a delete of the participant row. `participantSchema` carries `leftAt` and
- * the SPA renders a thread's membership history from it (Messages.tsx filters its own
- * row list on it); deleting the row makes that field permanently null, makes the roster
- * `AddParticipantDialog` deliberately shows the wrong, and removes the restore that the
- * upsert above already implements. A soft write is the only shape the current read
- * paths can survive.
- *
- * It does not retract anything. `Message` rows are not deleted and `nextSeq` is not
- * renumbered, so a leave cannot unsay what a participant has already read, and a school
- * communications product that implied otherwise would be promising something the storage
- * cannot keep. If a future requirement needs messages to disappear from a leaver's
- * history, that is a different model with a different cost, and it should be argued as
- * one rather than smuggled in behind the word "leave".
- *
- * It must not touch `lastReadSeq`. The upsert above deliberately leaves it where the
- * departing participant abandoned it, so a re-seated person comes back to the messages
- * they missed rather than to a thread claiming it is fully read. A leave that reset the
- * marker, or a restore that reset it, would mark unread mail read as a side effect of
- * somebody clicking a button — and nothing anywhere would report it.
- *
- * AND THE AUDIT CONSEQUENCE, because it is the reason the column's half-wiring is
- * defensible today. `ConversationParticipant` is not in `AUDITED_MODELS`, and the
- * argument for its absence is the one `Upload` is excluded on: a seat is the mechanics
- * of a conversation, not an act of governance. That argument has a shelf life, and this
- * note is where it expires. The day a leave exists, the roster becomes a governance
- * record — who was in a thread, who was removed, when — and the roster is the ONLY place
- * that is written, because `Message` records what was said and not who was entitled to
- * hear it. `ConversationParticipant` should join `AUDITED_MODELS` in the same change as
- * the first leave, not after it.
- *
- * Until then the honest state is the one the SPA already renders: `AddParticipantDialog`
- * disables its confirm control rather than seating on a first tap, and says why in its
- * own header. That is a mitigation for a different gap on a different route, and neither
- * is an argument for the other.
+ * THE THING THE NOTE GOT WRONG ABOUT ITSELF, which is worth keeping. It argued that
+ * `ConversationParticipant` should join `AUDITED_MODELS` "in the same change as the
+ * first leave, not after it", and that change did not add it — because auditing that
+ * model writes an audit row for every seat ever created, including the nested creates
+ * in `seatNewConversation`, and that is a change to the audit surface of the whole
+ * database rather than a line in this module. The gap is real and it is still open; it
+ * is written down in migration 0015 rather than smuggled in here, and the roster's
+ * `leftAt` plus the `CONVERSATION_REMOVED` notification are what a reader has until it
+ * is paid.
  */

@@ -11,9 +11,9 @@ calling `can()`. Nothing here was written by hand, which is why it cannot
 disagree with the code — and if it ever did, the `permissions-doc` job in CI
 would fail before the change could merge.
 
-- **64** actions, derived from the policy object's own keys
-- **256** cells in the role matrix
-- **320** cells in the state matrix
+- **66** actions, derived from the policy object's own keys
+- **264** cells in the role matrix
+- **330** cells in the state matrix
 - Asserted independently in `packages/shared/test/policy-matrix.test.ts`
 
 ## Reading a cell
@@ -56,7 +56,9 @@ rule reads named fields off `Subject` and denies when they are absent.
 | `comment:update` | ✗ deny | `isAuthor` | `isAuthor` | `isAuthor` |
 | `conversation:create` | ✗ deny | ✓ allow | ✓ allow | ✓ allow |
 | `conversation:join` | ✗ deny | ✗ deny | ✗ deny | ✓ allow |
+| `conversation:leave` | ✗ deny | `isMember` | `isMember` | `isMember` |
 | `conversation:read` | ✗ deny | `isParticipant` | `isParticipant` | `isParticipant` |
+| `conversation:remove` | ✗ deny | ✗ deny | ✗ deny | ✓ allow |
 | `conversation:send` | ✗ deny | `isParticipant` | `isParticipant` | `isParticipant` |
 | `course:create` | ✗ deny | ✗ deny | ✓ allow | ✓ allow |
 | `course:delete` | ✗ deny | ✗ deny | `ownsCourse` | ✓ allow |
@@ -144,7 +146,9 @@ demo: reads and ordinary mutations pass, deletions and suspensions do not.
 | `comment:update` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `conversation:create` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `conversation:join` | ✗ `TEACHER:deny` | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✗ `TEACHER:deny` |
+| `conversation:leave` | ✗ `TEACHER:isMember` | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✗ `TEACHER:isMember` |
 | `conversation:read` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
+| `conversation:remove` | ✗ `TEACHER:deny` | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✗ `TEACHER:deny` |
 | `conversation:send` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `course:create` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `course:delete` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✗ `provenance:DEMO` |
