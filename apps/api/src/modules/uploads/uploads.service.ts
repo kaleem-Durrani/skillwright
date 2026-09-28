@@ -1,7 +1,8 @@
+import { z } from 'zod';
 import { prisma, type Prisma } from '@skillwright/db';
 import type { Actor, Subject, UploadPurpose } from '@skillwright/shared';
 import { baseLogger } from '../../lib/logger.js';
-import { notFound, validationFailed } from '../../lib/errors.js';
+import { notFound, payloadTooLarge, validationFailed } from '../../lib/errors.js';
 import {
   BUCKET,
   buildObjectKey,
@@ -41,6 +42,141 @@ const UPLOAD_SELECT = {
 } as const;
 
 type UploadRow = Prisma.UploadGetPayload<{ select: typeof UPLOAD_SELECT }>;
+
+/**
+ * How much of the bucket one account, and everyone together, may claim.
+ *
+ * These three numbers ARE the product decision this phase was asked to make visible,
+ * so they are written here rather than buried in a default, and the reasoning is the
+ * point rather than the values:
+ *
+ *  - `UPLOAD_USER_MAX_BYTES` — 2 GiB. The largest single permitted upload is a 512 MB
+ *    RESOURCE video (`UPLOAD_LIMITS` in packages/shared/src/schema/upload.ts), so a
+ *    teacher can still file four of them. A full course library of documents and
+ *    images is tens of megabytes; 2 GiB is roughly forty times that, which means the
+ *    number a legitimate user hits is not one they will hit by accident. Below it, one
+ *    account could park a meaningful share of a small bucket on its own.
+ *  - `UPLOAD_USER_MAX_FILES` — 500. Bytes alone do not stop a row flood: 2,000 avatar
+ *    uploads of 2 KB each is 4 MB and 2,000 `Upload` rows, four of which are unique-key
+ *    constrained and the rest of which the sweeper has to walk. Rows are cheap to make
+ *    and expensive to garbage-collect, so they get their own ceiling.
+ *  - `UPLOAD_BUCKET_MAX_BYTES` — 50 GiB. This is a STORAGE BUDGET, not a fairness rule:
+ *    it exists so the answer to "the disk is full" is a 413 naming the cause rather
+ *    than a write error from the object store that nobody can act on. 50 GiB is a
+ *    number to change on day one of a real deployment and it is wrong here; it is
+ *    wrong in a DIRECTION, because the alternative is no ceiling at all.
+ *
+ * 0 disables a ceiling, which is the only way to turn one off. That is worth saying
+ * because it is the opposite of `UPLOAD_SWEEP_MAX_AGE_MS`, where 0 would mean "sweep
+ * everything now" and is rejected by the schema.
+ *
+ * Parsed HERE rather than in `env.ts`, which is not this phase's file. `z.coerce`
+ * rather than a bare `Number()`, so a typo is a named boot failure instead of `NaN`
+ * comparisons that quietly allow everything.
+ */
+const quotaConfig = z
+  .object({
+    UPLOAD_USER_MAX_BYTES: z.coerce.number().int().min(0).default(2_147_483_648),
+    UPLOAD_USER_MAX_FILES: z.coerce.number().int().min(0).default(500),
+    UPLOAD_BUCKET_MAX_BYTES: z.coerce.number().int().min(0).default(53_687_091_200),
+  })
+  .parse(process.env);
+
+/**
+ * Refuse a presign that would push an account, or the whole bucket, past its ceiling.
+ *
+ * AT PRESIGN, and that placement is the design. By the time `commit` runs the bytes are
+ * already in the object store — the browser PUTs straight to it, with the API nowhere
+ * in the path — so a quota checked there is a quota checked after the disk filled. A
+ * ceiling that arrives late is a monitoring signal, not a limit.
+ *
+ * PENDING rows are counted, and that is the subtle part. A PENDING row's bytes may not
+ * exist yet, but the row RESERVES them: it carries the declared `sizeBytes` and it is
+ * about to be filled by a PUT that is already signed. Counting only COMMITTED rows
+ * would let a caller mint 500 signatures for the same 512 MB in a second and the quota
+ * would never notice, because nothing has been committed. The sweeper reclaims the
+ * abandoned ones (`UPLOAD_SWEEP_MAX_AGE_MS`), so a caller who signs and walks away
+ * frees the reservation on a timer rather than holding it forever.
+ *
+ * Two aggregates, run concurrently. The per-owner one is served by `@@index([ownerId])`
+ * on `Upload`; the whole-bucket one is a sequential scan of a single small integer
+ * column, which is the honest cost of a global ceiling and is the reason the ceiling
+ * is a number an operator can raise rather than something to compute per request.
+ */
+async function assertWithinUploadQuota(actor: Actor, requestedBytes: number): Promise<void> {
+  if (
+    quotaConfig.UPLOAD_USER_MAX_BYTES === 0 &&
+    quotaConfig.UPLOAD_USER_MAX_FILES === 0 &&
+    quotaConfig.UPLOAD_BUCKET_MAX_BYTES === 0
+  ) {
+    return;
+  }
+
+  const [mine, everyone] = await Promise.all([
+    prisma.upload.aggregate({
+      where: { ownerId: actor.id },
+      _sum: { sizeBytes: true },
+      _count: { _all: true },
+    }),
+    prisma.upload.aggregate({ _sum: { sizeBytes: true } }),
+  ]);
+
+  const heldBytes = mine._sum.sizeBytes ?? 0;
+  const heldFiles = mine._count._all;
+
+  if (
+    quotaConfig.UPLOAD_USER_MAX_BYTES > 0 &&
+    heldBytes + requestedBytes > quotaConfig.UPLOAD_USER_MAX_BYTES
+  ) {
+    log.warn(
+      {
+        userId: actor.id,
+        limit: 'upload:user-bytes',
+        heldBytes,
+        requestedBytes,
+        maxBytes: quotaConfig.UPLOAD_USER_MAX_BYTES,
+      },
+      'upload refused by the per-user quota',
+    );
+    throw payloadTooLarge(
+      `This account already holds ${heldBytes} bytes of uploads, which is the per-user limit. Delete something, or ask an administrator to raise UPLOAD_USER_MAX_BYTES.`,
+    );
+  }
+
+  if (quotaConfig.UPLOAD_USER_MAX_FILES > 0 && heldFiles + 1 > quotaConfig.UPLOAD_USER_MAX_FILES) {
+    log.warn(
+      {
+        userId: actor.id,
+        limit: 'upload:user-files',
+        heldFiles,
+        maxFiles: quotaConfig.UPLOAD_USER_MAX_FILES,
+      },
+      'upload refused by the per-user file-count quota',
+    );
+    throw payloadTooLarge(
+      `This account already holds ${heldFiles} uploads, which is the per-user limit.`,
+    );
+  }
+
+  const bucketBytes = everyone._sum.sizeBytes ?? 0;
+  if (
+    quotaConfig.UPLOAD_BUCKET_MAX_BYTES > 0 &&
+    bucketBytes + requestedBytes > quotaConfig.UPLOAD_BUCKET_MAX_BYTES
+  ) {
+    log.warn(
+      {
+        limit: 'upload:bucket-bytes',
+        bucketBytes,
+        requestedBytes,
+        maxBytes: quotaConfig.UPLOAD_BUCKET_MAX_BYTES,
+      },
+      'upload refused by the whole-bucket quota',
+    );
+    throw payloadTooLarge(
+      `The upload store is at its configured ceiling (${quotaConfig.UPLOAD_BUCKET_MAX_BYTES} bytes). This is an administrator's limit, not yours.`,
+    );
+  }
+}
 
 /**
  * The ONLY shape an upload is serialised as.
@@ -135,6 +271,10 @@ export async function presign(
   // has already applied its size and MIME limits (upload.ts:54-70), and the only trace
   // it leaves afterwards is the key prefix.
   const key = buildObjectKey(input.purpose, input.originalName);
+
+  // Before the row and before the signature. A 413 raised after either exists is a
+  // refusal the caller can see and a `Upload` row nobody will ever fill.
+  await assertWithinUploadQuota(actor, input.sizeBytes);
 
   const upload = await prisma.upload.create({
     data: {

@@ -168,7 +168,22 @@ function translate(error: unknown): AppError {
 const errorsPlugin: FastifyPluginAsync = async (app) => {
   app.setErrorHandler((error: unknown, request: FastifyRequest, reply: FastifyReply) => {
     const appError = translate(error);
-    const logPayload = { err: error, code: appError.code, status: appError.status };
+    /*
+     * `durationMs` and the route pattern joined the payload in Phase 9 because the two
+     * lines a responder starts from are "which request" and "how long had it already
+     * been". The requestId was already here and already in the mixin — what was missing
+     * is the ability to say "this is the /courses/:id handler, and it had been running
+     * for 4 seconds" without opening a second tool. `problem+json` carries the same
+     * requestId, so a user reporting a failure quotes an id and that id finds this line.
+     */
+    const logPayload = {
+      err: error,
+      code: appError.code,
+      status: appError.status,
+      method: request.method,
+      route: request.routeOptions?.url ?? 'unmatched',
+      durationMs: Math.round(reply.elapsedTime),
+    };
 
     if (appError.status >= 500) {
       request.log.error(logPayload, 'request failed');

@@ -8,7 +8,7 @@ import type { Actor } from '@skillwright/shared';
 import { visibilityWhere as visibleCoursesWhere } from '../courses/courses.service.js';
 import { visibilityWhere as visibleResourcesWhere } from '../resources/resources.service.js';
 import { visibilityWhere as visibleAnnouncementsWhere } from '../announcements/announcements.service.js';
-import { headlineOf, matchFilter, rankOf } from './search.sql.js';
+import { candidateSet, headlineOf, matchFilter, rankOf } from './search.sql.js';
 import type {
   AnnouncementHit,
   CourseHit,
@@ -37,6 +37,13 @@ import type {
  * The ids are fetched WITHOUT pagination because a school's live rows number in the
  * hundreds at most; ranking over an explicit id set is one index-friendly scan. If
  * that ever stops being true, phase 1 grows a LIMIT — not a second visibility copy.
+ *
+ * Phase 9 changed HOW the set reaches SQL and nothing about what it selects. Each
+ * group used to spell `c.id IN (${Prisma.join(...)})` inline, which is one bind
+ * variable per id and therefore a hard failure at 32,767 visible rows rather than a
+ * slowdown; all three now go through `candidateSet`, the one function the three
+ * per-entity `?q=` handlers use too. Four copies of the same predicate in one module
+ * is four chances to keep one of them wrong.
  */
 export async function search(actor: Actor | null, query: SearchQuery): Promise<SearchResult> {
   const [courses, resources, announcements] = await Promise.all([
@@ -66,6 +73,10 @@ async function courseGroup(
   const vector = Prisma.sql`c."searchVector"`;
   const filter = matchFilter(vector, [Prisma.sql`c."name"`, Prisma.sql`c."code"`], q);
   const rank = rankOf(vector, q);
+  const inCandidates = candidateSet(
+    Prisma.sql`c`,
+    visible.map((row) => row.id),
+  );
   // Headline document: name plus blurb, so a hit in either produces a highlight the
   // catalogue card can render directly.
   const document = Prisma.sql`c.name || ' ' || coalesce(c.description, '')`;
@@ -75,13 +86,13 @@ async function courseGroup(
       SELECT c.id, c.code, c.name,
              ${headlineOf(document, q)} AS headline
         FROM "Course" c
-       WHERE c.id IN (${Prisma.join(visible.map((row) => row.id))}) AND ${filter}
+       WHERE ${inCandidates} AND ${filter}
     ORDER BY ${rank} DESC, c."createdAt" DESC, c.id ASC
        LIMIT ${limit}`,
     prisma.$queryRaw<Array<{ count: number }>>`
       SELECT COUNT(*)::int AS count
         FROM "Course" c
-       WHERE c.id IN (${Prisma.join(visible.map((row) => row.id))}) AND ${filter}`,
+       WHERE ${inCandidates} AND ${filter}`,
   ]);
 
   return {
@@ -113,6 +124,10 @@ async function resourceGroup(
   const filter = matchFilter(vector, [Prisma.sql`r."title"`], q);
   const rank = rankOf(vector, q);
   const document = Prisma.sql`r.title || ' ' || coalesce(r.description, '')`;
+  const inCandidates = candidateSet(
+    Prisma.sql`r`,
+    visible.map((row) => row.id),
+  );
 
   const [hits, counts] = await prisma.$transaction([
     prisma.$queryRaw<
@@ -128,13 +143,13 @@ async function resourceGroup(
              ${headlineOf(document, q)} AS headline
         FROM "Resource" r
         JOIN "Course" c ON c.id = r."courseId"
-       WHERE r.id IN (${Prisma.join(visible.map((row) => row.id))}) AND ${filter}
+       WHERE ${inCandidates} AND ${filter}
     ORDER BY ${rank} DESC, r."createdAt" DESC, r.id ASC
        LIMIT ${limit}`,
     prisma.$queryRaw<Array<{ count: number }>>`
       SELECT COUNT(*)::int AS count
         FROM "Resource" r
-       WHERE r.id IN (${Prisma.join(visible.map((row) => row.id))}) AND ${filter}`,
+       WHERE ${inCandidates} AND ${filter}`,
   ]);
 
   return {
@@ -165,6 +180,10 @@ async function announcementGroup(
   const filter = matchFilter(vector, [Prisma.sql`a."title"`], q);
   const rank = rankOf(vector, q);
   const document = Prisma.sql`a.title || ' ' || a.content`;
+  const inCandidates = candidateSet(
+    Prisma.sql`a`,
+    visible.map((row) => row.id),
+  );
 
   const [hits, counts] = await prisma.$transaction([
     prisma.$queryRaw<
@@ -178,13 +197,13 @@ async function announcementGroup(
       SELECT a.id, a.title, a.type,
              ${headlineOf(document, q)} AS headline
         FROM "Announcement" a
-       WHERE a.id IN (${Prisma.join(visible.map((row) => row.id))}) AND ${filter}
+       WHERE ${inCandidates} AND ${filter}
     ORDER BY ${rank} DESC, a."createdAt" DESC, a.id ASC
        LIMIT ${limit}`,
     prisma.$queryRaw<Array<{ count: number }>>`
       SELECT COUNT(*)::int AS count
         FROM "Announcement" a
-       WHERE a.id IN (${Prisma.join(visible.map((row) => row.id))}) AND ${filter}`,
+       WHERE ${inCandidates} AND ${filter}`,
   ]);
 
   return {

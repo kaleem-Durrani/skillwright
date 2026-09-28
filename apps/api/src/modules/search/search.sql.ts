@@ -85,6 +85,47 @@ export function headlineOf(document: Prisma.Sql, term: string): Prisma.Sql {
   return Prisma.sql`ts_headline('english', ${document}, ${tsQuery(term)})`;
 }
 
+/**
+ * The id set the raw phase ranks WITHIN, as ONE bound parameter.
+ *
+ * This used to be `alias.id IN (${Prisma.join(candidateIds)})`, which is correct SQL and
+ * was correct code when it was written — and it is time-dependent now. `Prisma.join`
+ * emits one bind variable PER id, and the PostgreSQL extended protocol refuses a
+ * prepared statement with more than 32,767 of them. Measured against the compose
+ * Postgres on 2026-09-28, with the ids this very endpoint collects:
+ *
+ *     candidates: 33000
+ *     IN-list  FAIL  too many bind variables in prepared statement,
+ *                   expected maximum of 32767, received 33004
+ *     ANY-arr  OK    602ms, 20 rows
+ *
+ * So the failure is not "slow past 10k rows" — it is a hard 500 that arrives at 32,768
+ * visible courses, which is a school four years into running the same catalogue, not a
+ * scale milestone. Below the ceiling the old shape is merely wasteful: at 12,000
+ * candidates the same query measured 282–336ms against 241ms for this one, because the
+ * server rebuilds a hashed array of N constants on every execution, twice (the page
+ * query and the count), while one array parameter is hashed once.
+ *
+ * WHY AN ARRAY RATHER THAN A CAP: capping the candidate set would be the obvious way
+ * to make the statement small, and it would silently change what the endpoint
+ * matches — a cap drops the tail of a result set, and `meta.total` would report the
+ * cap rather than the truth. The plan forbids that, so the SET stays whole and only the
+ * STATEMENT stops growing with it. One row of the result is identical either way; only
+ * the way it is asked for has changed.
+ *
+ * `::text[]` rather than letting the id column's type decide: `Course.id`/`Resource.id`/
+ * `Announcement.id` are all `String @default(cuid())`, which is `text`, and an explicit
+ * cast keeps the parameter's type from being inferred against whatever the column
+ * happens to be in a future migration.
+ *
+ * An empty array is the honest empty set (`= ANY('{}')` matches nothing), so the
+ * early-returns the callers already have stay where they are rather than becoming a
+ * second thing to remember here.
+ */
+export function candidateSet(alias: Prisma.Sql, candidateIds: string[]): Prisma.Sql {
+  return Prisma.sql`${alias}.id = ANY(${candidateIds}::text[])`;
+}
+
 // ---------------------------------------------------------------------------
 // The two-query shape slice 1 shares across all three list handlers
 // ---------------------------------------------------------------------------
@@ -112,6 +153,11 @@ export interface RankedIdPageParams {
    * The raw phase ranks within exactly this set and never re-states visibility:
    * `visibilityWhere` stays the one mirror of the policy rows, and a second copy
    * inside SQL is precisely the drift dashboard.service.ts paid for once already.
+   *
+   * Passed whole. `candidateSet` carries the whole set as one bound array parameter,
+   * which is what keeps the statement from growing with it — see its own comment for
+   * the measurement. Nothing here truncates it, because truncating it would change
+   * what this endpoint matches.
    */
   candidateIds: Array<string>;
   limit: number;
@@ -131,18 +177,19 @@ export function rankedIdPage(params: RankedIdPageParams): RankedIdPage {
   const filter = matchFilter(params.vector, params.likeColumns, params.term);
   const rank = rankOf(params.vector, params.term);
   const { alias } = params;
+  const inCandidates = candidateSet(alias, params.candidateIds);
   return {
     page: prisma.$queryRaw<Array<{ id: string }>>`
       SELECT ${alias}.id
         FROM ${params.table}
-       WHERE ${alias}.id IN (${Prisma.join(params.candidateIds)})
+       WHERE ${inCandidates}
          AND ${filter}
     ORDER BY ${rank} DESC, ${alias}."createdAt" DESC, ${alias}.id ASC
        LIMIT ${params.limit} OFFSET ${params.offset}`,
     total: prisma.$queryRaw<Array<{ count: number }>>`
       SELECT COUNT(*)::int AS count
         FROM ${params.table}
-       WHERE ${alias}.id IN (${Prisma.join(params.candidateIds)})
+       WHERE ${inCandidates}
          AND ${filter}`,
   };
 }
