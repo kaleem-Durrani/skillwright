@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from '@tanstack/react-router';
 import type { Actor, ActorStatus, Provenance, Role } from '@skillwright/shared/policy';
 import type {
   LoginInput,
@@ -220,13 +221,75 @@ export function useMfaVerify() {
 
 export function useLogout() {
   const client = useQueryClient();
+  const navigate = useNavigate();
   return useMutation({
     mutationFn: () => api.post<void>('/auth/logout'),
-    // Drop everything: a cache entry that outlives its session is a data leak
-    // the next user on a shared workshop machine would see.
-    onSettled: async () => {
+    /*
+     * The navigation belongs HERE rather than in the per-call `onSettled` the
+     * callers hand to `mutate()` (AppShell.tsx:252-256, Settings.tsx:830-832),
+     * and that is not a preference — the per-call handler does not arrive.
+     *
+     * A per-call `onSettled` is delivered by the mutation's MutationObserver,
+     * not by the mutation. The cache write below is synchronous, so React
+     * re-renders before TanStack dispatches the result; AppShell.tsx:72
+     * (`if (!user) return <>{children}</>`) drops the TopBar that owns
+     * `useLogout`, `observer.hasListeners()` is false by the time the dispatch
+     * lands, and the handler is not called late — it is never called. The user
+     * is left on the URL they signed out from with no shell and no way forward
+     * but a manual refresh, which is what was reported from /notifications,
+     * where the page renders with no app chrome at all. `router.invalidate()`
+     * does not rescue it either: `requireAuth` only runs entering the `_app`
+     * branch and `/login` has no `beforeLoad` (routes/_public/login.tsx) and
+     * no guard under `_public.tsx` to re-run.
+     *
+     * The hook-level `onSettled` is invoked BY the mutation, which awaits it
+     * before dispatching, so nothing here depends on the component that called
+     * `useLogout` still being mounted — the unmount it causes is harmless.
+     * `navigate` is a bound function over the router singleton and keeps
+     * working after this component is gone. The callers' per-call handlers are
+     * now redundant rather than harmful: they are still not delivered, and one
+     * that ever were would navigate to the same place twice.
+     *
+     * ORDER — sentinel, sweep, navigate:
+     *
+     * - The sentinel first, because it is what the shell re-renders from
+     *   (`useSession` -> `user === null` -> the early return above). Clearing
+     *   the signed-in chrome before the navigation commits is deliberate: a
+     *   page still showing the signed-in shell over the login form is its own
+     *   bug, and nothing on /login re-checks anything to correct it.
+     * - `removeQueries`, not `resetQueries`, and the reason is timing rather
+     *   than the request. Measured, not assumed: removing an entry a component
+     *   is still observing makes that observer build a fresh query and refetch,
+     *   and `resetQueries` refetches every active entry too — so neither is
+     *   free, and nothing here claims otherwise. What `resetQueries` adds is
+     *   the `await`, and the navigation would have been behind that promise:
+     *   every query the current page was watching, each against a cookie the
+     *   server had just destroyed, before anything moved. The blank screen this
+     *   fixes is a blank screen that does not resolve, and gating the
+     *   navigation on a round trip nobody is waiting for is how it would have
+     *   stayed on screen. Removing the entries is also the stronger reading of
+     *   the leak rule below: the entry is gone, not merely emptied, and a
+     *   later mount of the same key cannot mistake an emptied one for a
+     *   refetch that never came back.
+     * - Matched by the key's head rather than by reference, as
+     *   `handleSessionLost` does at query.ts:69, so a sweep cannot miss a key
+     *   space added after this was written.
+     *
+     * The session entry is deliberately KEPT, carrying the anonymous sentinel
+     * instead of the user — the same call `handleSessionLost` makes at
+     * query.ts:62-71 and for the same reason: the guard reads the session out
+     * of the cache (`ensureQueryData`, guards.ts:22-24), and `{user: null}` is
+     * the value `fetchSession` itself resolves to on a 401 (above). Removing
+     * it would make the next reader fetch instead.
+     *
+     * `onSettled` and not `onSuccess`, so a network blip on the way out still
+     * empties this browser. Drop everything: a cache entry that outlives its
+     * session is a data leak the next user on a shared workshop machine sees.
+     */
+    onSettled: () => {
       client.setQueryData(qk.session, { user: null } satisfies SessionResponse);
-      await client.resetQueries();
+      client.removeQueries({ predicate: (query) => query.queryKey[0] !== 'session' });
+      void navigate({ to: '/login' });
     },
   });
 }
