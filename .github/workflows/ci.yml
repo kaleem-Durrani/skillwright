@@ -199,11 +199,26 @@ jobs:
       # commands, docker-compose.yml:39-63) but as workflow steps.
       - name: Start MinIO
         run: |
-          docker network create minio-net
+          # Idempotent. `docker network create` exits non-zero when the network
+          # already exists, which would fail the step before the container is even
+          # asked for — a failure that has nothing to do with MinIO.
+          docker network inspect minio-net >/dev/null 2>&1 || docker network create minio-net
+          docker rm -f minio >/dev/null 2>&1 || true
           docker run -d --name minio --network minio-net -p 9000:9000 \
             -e MINIO_ROOT_USER=skillwright \
             -e MINIO_ROOT_PASSWORD=skillwright-dev-secret \
             minio/minio:latest server /data
+          # `docker run -d` returns the moment the container is created, so a
+          # container that dies immediately still leaves this step green and the
+          # failure surfaces two steps later as a bucket that never appeared. Wait
+          # here, and on failure print what the container actually said — a bare
+          # exit code from a detached `docker run` is not a diagnosis.
+          if ! timeout 60 sh -c 'until curl -sf http://localhost:9000/minio/health/live; do sleep 2; done'; then
+            echo "::error title=MinIO::The object store did not become healthy within 60s."
+            docker ps -a --filter name=minio || true
+            docker logs minio 2>&1 | tail -40 || true
+            exit 1
+          fi
 
       # Credentials, bucket name and port match the S3_* fallbacks setup.ts:68-73
       # supplies, so the API under test needs no extra env here. The bucket is
