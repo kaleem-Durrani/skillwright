@@ -142,7 +142,8 @@ export function AnnouncementDetailPage() {
           <Link
             to="/announcements"
             search={{ page: 1 }}
-            className="inline-flex items-center gap-1.5 text-fg-secondary hover:text-fg"
+            // `tap md:min-h-0` — see the same back-link on CourseDetail.
+            className="tap inline-flex items-center gap-1.5 text-fg-secondary hover:text-fg md:min-h-0"
           >
             <ArrowLeft aria-hidden="true" className="size-3.5" />
             All announcements

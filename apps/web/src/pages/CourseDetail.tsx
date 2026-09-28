@@ -451,7 +451,14 @@ export function CourseDetailPage() {
           <Link
             to="/courses"
             search={{ page: 1 }}
-            className="inline-flex items-center gap-1.5 text-fg-secondary hover:text-fg"
+            /*
+             * `tap md:min-h-0`: this back-link measured 18px — the height of one
+             * line of `text-sm` — and on a course page a phone user is most often
+             * holding it because they have just scrolled a long syllabus, not
+             * because they are at the top of anything. `md:min-h-0` restores the
+             * natural line height from `md` up, where a pointer is not a thumb.
+             */
+            className="tap inline-flex items-center gap-1.5 text-fg-secondary hover:text-fg md:min-h-0"
           >
             <ArrowLeft aria-hidden="true" className="size-3.5" />
             All courses

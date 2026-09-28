@@ -69,7 +69,16 @@ function AdminLayout() {
                 {...(tab.exact ? { activeOptions: { exact: true } } : {})}
                 activeProps={{ 'aria-current': 'page' as const }}
                 className={cn(
-                  'relative flex shrink-0 items-center gap-2 px-3 pb-2.5 pt-2 text-sm font-medium whitespace-nowrap',
+                  /*
+                   * `tap md:min-h-0`: the rail measured 38px — 20px of `text-sm` plus
+                   * its 18px of padding — on a phone, where this tab rail is the ONLY
+                   * way between the four admin screens and the bottom tab bar is
+                   * already carrying five more targets. `md:min-h-0` puts the rail
+                   * back to its own rhythm from `md` up, where the sidebar takes over
+                   * the navigation and a pointer is not a thumb. The same treatment
+                   * the account button in the top bar has had all along.
+                   */
+                  'tap relative flex shrink-0 items-center gap-2 px-3 pb-2.5 pt-2 text-sm font-medium whitespace-nowrap md:min-h-0',
                   'text-fg-secondary transition-colors duration-[var(--duration-fast)] outline-none',
                   'hover:text-fg focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-focus',
                   'aria-[current=page]:text-fg after:absolute after:inset-x-2 after:-bottom-px after:h-0.5 after:rounded-full',

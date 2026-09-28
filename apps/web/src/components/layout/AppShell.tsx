@@ -76,7 +76,15 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="flex min-h-dvh flex-col bg-canvas">
         <a
           href="#main-content"
-          className="skip-link ms-3 rounded-md bg-brand px-4 py-2 text-sm font-semibold text-fg-on-brand shadow-e3"
+          /*
+           * `tap` on a control that is off-screen until it takes focus. It is still
+           * a control, it is still reachable by the keyboard and by the switch
+           * control a screen-reader user is running, and it measured 36px — the
+           * obvious alternative is to exempt anything hidden, which would also have
+           * exempted every dialog the app ever opens. `md:min-h-0` is omitted
+           * because nothing about this link changes with the viewport.
+           */
+          className="skip-link tap ms-3 rounded-md bg-brand px-4 py-2 text-sm font-semibold text-fg-on-brand shadow-e3"
         >
           Skip to content
         </a>
@@ -183,7 +191,16 @@ function TopBar({ onPageSlot }: { onPageSlot: (element: HTMLElement | null) => v
       <div className="gutter-safe flex h-[var(--shell-topbar-h)] items-center gap-2">
         <Link
           to="/dashboard"
-          className="flex items-center gap-2 rounded-md outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-focus"
+          /*
+           * `tap`, for the same reason the account button beside it has it: the
+           * wordmark is a LINK to the dashboard and it is the only home affordance
+           * a phone has once the sidebar is gone. It measured 32px — the height of
+           * the `size-8` tile inside it — and nothing noticed for as long as the
+           * 44px rule was asserted on `/login` alone, which has no shell at all.
+           * `md:min-h-0` puts the bar back to its natural rhythm from `md` up,
+           * where the sidebar is the navigation and a pointer is not a thumb.
+           */
+          className="tap flex items-center gap-2 rounded-md outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-focus md:min-h-0"
         >
           <span
             aria-hidden="true"
