@@ -155,6 +155,28 @@ export const qk = {
   // detail screen need to invalidate or read ONE row without knowing what filters
   // the list was under.
   resource: (resourceId: string) => ['resources', resourceId] as QueryKey,
+  /*
+   * Three key spaces under `assignments`, because there are three SHAPES and they are
+   * not variations of one another:
+   *
+   *   - `myAssignments(params)` is the STUDENT's own list — `{ data: MyAssignmentDto[] }`,
+   *     unpaginated, each row already joined to whether they have handed in. The filter
+   *     object is in the key so switching course or intake is a fetch, not a stale read.
+   *   - `offeringAssignments(offeringId)` is one intake's task list, a bare array. A
+   *     task belongs to an INTAKE (schema.prisma's `Assignment.offeringId`), so this
+   *     is the teacher's reader and a bare array is what the route answers.
+   *   - `assignmentSubmissions(assignmentId)` is ONE task's class, `{ data: [...] }`.
+   *
+   * All three share the `assignments` head so a blanket `['assignments']` sweep after a
+   * hand-in reaches the student's list, the teacher's list and the class that has to be
+   * re-rendered, without any of the three knowing about the others.
+   */
+  myAssignments: (params: Record<string, unknown> = {}) =>
+    ['assignments', 'mine', params] as QueryKey,
+  offeringAssignments: (offeringId: string) => ['assignments', 'offering', offeringId] as QueryKey,
+  assignment: (assignmentId: string) => ['assignments', assignmentId] as QueryKey,
+  assignmentSubmissions: (assignmentId: string) =>
+    ['assignments', assignmentId, 'submissions'] as QueryKey,
   announcements: (params: Record<string, unknown> = {}) => ['announcements', params] as QueryKey,
   // Single-row key, distinct from the list above for the same reason `course` sits
   // beside `courses`: `routes/_app/announcements.$announcementId.tsx`'s loader and

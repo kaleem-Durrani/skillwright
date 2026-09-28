@@ -94,8 +94,14 @@ export function toAuditEventDetail(event: AuditEventWithActor): AuditEventDetail
  * a second home that policy.ts could not see.
  *
  * `deletedAt` is not filtered because `AuditEvent` does not have the column: the table
- * is append-only, and migration 0002:107-108 documents the grant that revokes UPDATE
- * and DELETE from the application role.
+ * is append-only, and a trigger in migration 0012 refuses UPDATE, DELETE and TRUNCATE
+ * on it. That enforcement replaced a claim this comment used to make — a REVOKE in
+ * migration 0002, which is commented out at 0002_constraints/migration.sql:107-110 and
+ * would not have worked regardless, the API connecting as the table's owner.
+ *
+ * Retention is the one documented way rows leave this table, and only when an operator
+ * sets `AUDIT_RETENTION_DAYS`; unset, the pruner deletes nothing (SECURITY.md,
+ * "What is deliberately not decided yet").
  *
  * The four filters are spread rather than assigned so an absent one is an absent key
  * rather than an explicit `undefined`, which `exactOptionalPropertyTypes` rejects.

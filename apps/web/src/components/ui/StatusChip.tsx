@@ -33,6 +33,13 @@ const STATUS_MAP = {
   PRESENT: { tone: 'success', label: 'Present' },
   ABSENT: { tone: 'danger', label: 'Absent' },
   LATE: { tone: 'warning', label: 'Late' },
+  // SubmissionStatus — a verdict, not a mark. RETURNED is warning rather than danger
+  // on purpose: the work is coming back for another go, which is an ordinary thing
+  // that happens in a workshop, and painting it red tells a student they have failed
+  // something the teacher has not decided.
+  SUBMITTED: { tone: 'info', label: 'Submitted' },
+  GRADED: { tone: 'success', label: 'Graded' },
+  RETURNED: { tone: 'warning', label: 'Returned' },
   // Capacity
   FULL: { tone: 'danger', label: 'Full' },
   OPEN: { tone: 'success', label: 'Open' },

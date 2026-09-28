@@ -21,6 +21,17 @@ export type { AuditContext } from './audit.js';
 
 export { avatarUrlFor } from './avatar.js';
 
+// Retention passes — Phase 7. The thresholds live in the API's env.ts, so this package
+// never reads its own configuration and the window a deployment sweeps to is set in one
+// place (packages/db/src/retention/sweepers.ts).
+export {
+  pruneAuditEvents,
+  sweepExpiredSessions,
+  sweepExpiredVerifications,
+  sweepSpentRecoveryCodes,
+  SPENT_RECOVERY_CODE_RETENTION_MS,
+} from './retention/index.js';
+
 export { logger as dbLogger } from './logger.js';
 
 // The TOTP storage envelope. Exported so the seed and apps/api share ONE

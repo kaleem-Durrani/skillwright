@@ -97,6 +97,28 @@ export const ORIGIN = 'http://localhost:5173';
 export const COOKIE_NAME = process.env.SESSION_COOKIE_NAME as string;
 
 /**
+ * Empties the audit table between tests.
+ *
+ * It exists because migration 0012 made `AuditEvent` genuinely append-only: `DELETE` is
+ * refused by a trigger, so the `prisma.auditEvent.deleteMany({})` that three suites used
+ * to run in their `beforeEach` began failing with 'AuditEvent is append-only; DELETE is
+ * not permitted'. That failure is the guarantee working, not a regression — the trail is
+ * supposed to outlive the test that created it.
+ *
+ * The flag is the one escape hatch the trigger accepts, set with `set_config(..., true)`
+ * so it is scoped to this transaction and cannot leak to the next statement on this pooled
+ * connection. A suite that reaches for a raw `deleteMany` here instead is testing a
+ * database without the trigger on it, and would go on passing after the guarantee was
+ * quietly removed.
+ */
+export async function clearAuditEvents(): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT set_config('skillwright.audit_prune', 'on', true)`;
+    await tx.auditEvent.deleteMany({});
+  });
+}
+
+/**
  * Deleting users cascades to sessions, verifications, recovery codes, profiles,
  * enrollments, uploads, conversations and messages — but NOT through the three
  * `Restrict` edges that point at a User: `Course.teacherId`, `Resource.authorId` and

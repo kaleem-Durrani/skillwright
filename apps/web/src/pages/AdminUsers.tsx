@@ -1,13 +1,22 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { MoreVertical, Pencil, Plus, Search, UserRoundCheck, UserRoundX } from 'lucide-react';
+import {
+  MoreVertical,
+  Pencil,
+  Plus,
+  Search,
+  UserRoundCheck,
+  UserRoundX,
+  UsersRound,
+} from 'lucide-react';
 import { api, type Paginated } from '@/lib/api';
 import { qk } from '@/lib/query';
 import { subject, usePolicy } from '@/lib/policy';
 import { formatRelative } from '@/lib/format';
 import type { UserDetail } from '@/lib/types';
 import { Gate } from '@/components/Gate';
+import { UserBulkImportDialog } from '@/components/users/UserBulkImportDialog';
 import { UserCreateDialog } from '@/components/users/UserCreateDialog';
 import { UserEditDialog } from '@/components/users/UserEditDialog';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -68,6 +77,11 @@ export function AdminUsersPage() {
   const [term, setTerm] = useState(search.q ?? '');
   const [suspending, setSuspending] = useState<UserDetail | null>(null);
   const [creating, setCreating] = useState(false);
+  /*
+    The cohort import, `hidden md:flex` at its trigger — the desktop-only decision
+    and its reason are at the button itself, not here.
+  */
+  const [importing, setImporting] = useState(false);
   /*
    * The row being edited, held as the WHOLE record rather than an id, because the
    * dialog seeds its form from the row it was handed and the row already carries
@@ -158,22 +172,60 @@ export function AdminUsersPage() {
         title="Users"
         description="One identity table. Role is a column, and suspension destroys sessions immediately."
         actions={
-          /*
-            `user:create` is subject-free — every cell is a terminal allow/deny
-            decided by role alone (policy.ts:338-347), which is what makes it safe to
-            gate an affordance with no target on it. A teacher or student never sees
-            the button; the API would refuse them anyway.
-          */
-          <Gate action="user:create">
-            <Button
-              block
-              className="sm:w-auto"
-              leadingIcon={<Plus aria-hidden="true" className="size-4" />}
-              onClick={() => setCreating(true)}
-            >
-              Add a user
-            </Button>
-          </Gate>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            {/*
+              `user:create` is subject-free — every cell is a terminal allow/deny
+              decided by role alone (policy.ts:338-347), which is what makes it safe to
+              gate an affordance with no target on it. A teacher or student never sees
+              the button; the API would refuse them anyway.
+            */}
+            <Gate action="user:create">
+              <Button
+                block
+                className="sm:w-auto"
+                leadingIcon={<Plus aria-hidden="true" className="size-4" />}
+                onClick={() => setCreating(true)}
+              >
+                Add a user
+              </Button>
+            </Gate>
+
+            {/*
+              THE COHORT IMPORT IS A DESKTOP TASK AND SAYS SO, which is what the
+              `hidden md:flex` below is. An import is a spreadsheet: a wide grid of
+              twenty columns, a file picker, and a results table with row numbers
+              beside it. At 375px every one of those becomes a horizontal scroll
+              inside a dialog that is already one column wide, and the person
+              checking their import against the file is now comparing two things
+              neither of which fits.
+
+              Hiding it is not the alternative being rejected. The alternative is
+              shipping a phone-shaped import that nobody uses and that fails
+              silently — the 44px floor is what a control needs to be TAPPABLE, not
+              what it needs to be READABLE, and a table of email addresses is the
+              second thing. ADR 0008 makes the phone the baseline and the desktop the
+              enhancement; this is the enhancement, and the honest way to say so is a
+              class that stops rendering it below `md` with the reason in this
+              comment.
+
+              A `hidden` base with a `md:` override styles the SMALL viewport as
+              the base, which is the rule the script enforces. The equivalent-looking
+              spelling that switches off above a width is a max-width query wearing
+              a Tailwind hat, and `scripts/check-mobile-first.ts` refuses every
+              member of that family — including the one it names here, which is why
+              it is described rather than written out.
+            */}
+            <Gate action="user:bulk-create">
+              <Button
+                className="hidden w-auto md:inline-flex"
+                variant="secondary"
+                leadingIcon={<UsersRound aria-hidden="true" className="size-4" />}
+                onClick={() => setImporting(true)}
+              >
+                Import cohort
+              </Button>
+            </Gate>
+          </div>
         }
       />
 
@@ -316,6 +368,14 @@ export function AdminUsersPage() {
         on screen without any local bookkeeping here.
       */}
       <UserCreateDialog open={creating} onOpenChange={setCreating} />
+
+      {/*
+        The cohort import. Mounted once like its siblings, and the dry run is its
+        own path through the same dialog — an admin who checks a file and comes back
+        tomorrow has to re-paste it either way, which is a cost the format has rather
+        than the component.
+      */}
+      <UserBulkImportDialog open={importing} onOpenChange={setImporting} />
 
       {/*
         The edit surface for `PATCH /users/:id`, which had a route, a policy gate

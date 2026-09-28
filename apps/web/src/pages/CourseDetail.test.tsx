@@ -170,9 +170,20 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-function renderPage(served: CourseDetail = course()): void {
+function renderPage(
+  served: CourseDetail = course(),
+  options: { viewer?: SessionUser; mine?: unknown; offeringTasks?: unknown[] } = {},
+): void {
   apiGet.mockImplementation((path) => {
     if (path === `/courses/${COURSE_ID}`) return Promise.resolve(served);
+    // The student's own assignments, already joined server-side to whether they have
+    // handed in and what they were marked. The panel asks for it by this exact path.
+    if (path === '/assignments/mine') return Promise.resolve(options.mine ?? { data: [] });
+    // The teacher's per-INTAKE list, which the route answers as a bare array (there is
+    // no envelope and no pager: a task list is as long as the intake is).
+    if (path.startsWith('/offerings/') && path.endsWith('/assignments')) {
+      return Promise.resolve(options.offeringTasks ?? []);
+    }
     // The resources tab's list; everything else this page might ask for is noise.
     return Promise.resolve(EMPTY_PAGE);
   });
@@ -180,7 +191,7 @@ function renderPage(served: CourseDetail = course()): void {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  client.setQueryData(qk.session, { user: VIEWER });
+  client.setQueryData(qk.session, { user: options.viewer ?? VIEWER });
   render(
     <QueryClientProvider client={client}>
       <CourseDetailPage />
@@ -1024,5 +1035,199 @@ describe('CourseDetail conversation', () => {
     // signed-in roles — but a one-participant thread is not a conversation, and the
     // server's dedup branch needs two.
     expect(screen.queryByRole('button', { name: /message/i })).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Assignments tab
+// ---------------------------------------------------------------------------
+
+/**
+ * The training itself, on the course page.
+ *
+ * The tab is UNGATED, and that is the assertion this block exists to make durable.
+ * `assignment:read` is a subject-dependent rule — a student needs an APPROVED seat and
+ * a teacher needs `ownsCourse` — so a subject-free `can()` on the trigger would deny
+ * every viewer including admins, and a gate on the COURSE subject would deny every
+ * seated student, because the answer is per-INTAKE. Both are LESSONS-LEARNED #15 and
+ * #31, and the list underneath self-scopes on the server instead.
+ */
+
+/** One row of `GET /assignments/mine`: the task, joined to the viewer's own hand-in. */
+function myAssignment(overrides: Record<string, unknown> = {}) {
+  return {
+    id: '01JGXDFAM0K2Z1GYCSNM5F5RE1',
+    offeringId: OFFERING_ID,
+    title: 'Weld the fillet',
+    brief: 'Two runs of a 6mm fillet, all round.',
+    dueAt: '2030-03-14T09:00:00.000Z',
+    maxScore: 100,
+    resourceId: null,
+    createdAt: '2026-08-01T09:00:00.000Z',
+    updatedAt: '2026-08-01T09:00:00.000Z',
+    course: { id: COURSE_ID, name: 'Welding Fundamentals', code: 'WELD-101' },
+    submission: null,
+    submissionCount: 0,
+    scorePercent: null,
+    overdue: false,
+    ...overrides,
+  };
+}
+
+/** A committed hand-in, as `submissionSchema` serves it. */
+function submission(overrides: Record<string, unknown> = {}) {
+  return {
+    id: '01JGXDFAM0K2Z1GYCSNM5F5RE2',
+    assignmentId: '01JGXDFAM0K2Z1GYCSNM5F5RE1',
+    enrollmentId: '01JGXDFAM0K2Z1GYCSNM5F5RE3',
+    status: 'SUBMITTED',
+    attempt: 1,
+    score: null,
+    feedback: null,
+    submittedAt: '2026-09-02T09:00:00.000Z',
+    gradedAt: null,
+    gradedBy: null,
+    upload: {
+      id: '01JGXDFAM0K2Z1GYCSNM5F5RE4',
+      originalName: 'fillet-weld.pdf',
+      contentType: 'application/pdf',
+      sizeBytes: 2048,
+    },
+    createdAt: '2026-09-02T09:00:00.000Z',
+    ...overrides,
+  };
+}
+
+describe('CourseDetail assignments — a student', () => {
+  it('offers the tab and renders the task with its deadline and its brief', async () => {
+    renderPage(course(), { mine: { data: [myAssignment()] } });
+
+    const tab = await screen.findByRole('tab', { name: 'Assignments' });
+    await userEvent.click(tab);
+
+    expect(await screen.findByText('Weld the fillet')).toBeInTheDocument();
+    // The brief is rendered in FULL, not clamped: a student who has to guess what a
+    // task wants is a student who guesses wrong.
+    expect(screen.getByText(/Two runs of a 6mm fillet/)).toBeInTheDocument();
+    expect(screen.getByText(/out of 100/)).toBeInTheDocument();
+  });
+
+  it('shows the mark and the feedback once the work has been graded', async () => {
+    renderPage(course(), {
+      mine: {
+        data: [
+          myAssignment({
+            submission: submission({
+              status: 'GRADED',
+              score: 62.5,
+              feedback: 'Good root, a little proud on the third leg.',
+              gradedAt: '2026-09-04T09:00:00.000Z',
+              gradedBy: { id: TEACHER_ID, name: 'Dana Okafor', role: 'TEACHER', avatarUrl: null },
+            }),
+            submissionCount: 1,
+            scorePercent: 62.5,
+          }),
+        ],
+      },
+    });
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Assignments' }));
+
+    expect(await screen.findByText(/62.5 \/ 100 \(62.5%\)/)).toBeInTheDocument();
+    expect(screen.getByText('Good root, a little proud on the third leg.')).toBeInTheDocument();
+    // Scoped to the feedback block: the header's "Message" button carries the same
+    // name, and an unscoped query here would pass on the wrong element.
+    expect(screen.getByText(/Dana Okafor’s feedback/)).toBeInTheDocument();
+  });
+
+  /*
+   * The null contract, and it is worth a test rather than a comment.
+   *
+   * An ungraded or returned hand-in has had NO mark, and the server sends
+   * `scorePercent: null` precisely so a client cannot invent one. Rendering that null
+   * as "0%" would tell a student they failed a task nobody has read yet, which is the
+   * single worst thing this screen could do.
+   */
+  it('never renders a mark for a hand-in nobody has graded', async () => {
+    renderPage(course(), {
+      mine: {
+        data: [
+          myAssignment({
+            submission: submission({ status: 'RETURNED', feedback: 'Undercut — run it again.' }),
+            submissionCount: 1,
+          }),
+        ],
+      },
+    });
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Assignments' }));
+
+    expect(await screen.findByText('Undercut — run it again.')).toBeInTheDocument();
+    expect(screen.queryByText(/0%/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/\/ 100/)).not.toBeInTheDocument();
+    // And the way back is named for what it does, not for what it is called elsewhere.
+    expect(screen.getByRole('button', { name: 'Hand in again' })).toBeInTheDocument();
+  });
+
+  it('says so when nothing has been set, without claiming the teacher has not', async () => {
+    renderPage(course(), { mine: { data: [] } });
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Assignments' }));
+
+    expect(await screen.findByText('No tasks set yet')).toBeInTheDocument();
+  });
+});
+
+describe('CourseDetail assignments — a teacher', () => {
+  const TEACHER: SessionUser = {
+    id: TEACHER_ID,
+    email: 'teacher@example.edu',
+    name: 'Dana Okafor',
+    role: 'TEACHER',
+    status: 'ACTIVE',
+    provenance: 'PASSWORD',
+    avatarUrl: null,
+    totpEnabled: false,
+  };
+
+  it('offers to set a task on a course they own', async () => {
+    renderPage(course(), { viewer: TEACHER });
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Assignments' }));
+
+    /*
+     * TWO, and deliberately: the panel's own header action and the empty state's, which
+     * is the same arrangement the Resources tab already has ("Add a resource" in both
+     * places). They open ONE dialog, so there is one create flow rather than two that
+     * can drift — and a test that asserted `getByRole` here would be asserting that
+     * the second one had been deleted, which is the opposite of the intent.
+     */
+    await screen.findByText('No tasks on this intake yet');
+    expect(screen.getAllByRole('button', { name: 'Set a task' })).toHaveLength(2);
+  });
+
+  /*
+   * `assignment:create` is `ownsCourse`, which reads `courseTeacherId` — a field that
+   * lives on the COURSE. A teacher looking at a colleague's course must therefore see
+   * no button at all rather than one the API would answer 403 for, and this is the
+   * same guarantee the resources tab's row menu makes.
+   */
+  it('offers nothing on a course they do not own', async () => {
+    const colleague = {
+      ...course(),
+      teacher: {
+        id: '01JGXDFAM0K2Z1GYCSNM5F5RDX',
+        name: 'Sam Ilori',
+        role: 'TEACHER',
+        avatarUrl: null,
+      },
+    } satisfies CourseDetail;
+
+    renderPage(colleague, { viewer: TEACHER });
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Assignments' }));
+
+    await screen.findByText('No tasks on this intake yet');
+    expect(screen.queryByRole('button', { name: 'Set a task' })).not.toBeInTheDocument();
   });
 });

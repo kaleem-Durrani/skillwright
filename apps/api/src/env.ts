@@ -122,6 +122,56 @@ const envSchema = z.object({
    */
   UPLOAD_SWEEP_INTERVAL_MS: count.default(300_000),
   UPLOAD_SWEEP_MAX_AGE_MS: count.default(86_400_000),
+
+  /**
+   * The retention sweeper (modules/audit/retention.sweeper.ts): how often it runs. It
+   * reclaims three kinds of row that the database already knows are dead, so the interval
+   * is a load question rather than a correctness one — an hour late on an expired session
+   * costs nothing, because `findLiveSession` refuses it the moment its clock passes and
+   * deletes it inline on the way out.
+   */
+  RETENTION_SWEEP_INTERVAL_MS: count.default(3_600_000),
+
+  /**
+   * How long a SPENT recovery code's hash is kept before it is reclaimed.
+   *
+   * A month, and the word doing the work is SPENT. This age never applies to an unused
+   * code: a recovery code is password-equivalent, `regenerateRecoveryCodes` shows it once
+   * and never again (totp.service.ts:90-95), and the model has no `expiresAt` — so a
+   * sweeper that reached for `createdAt` here would be deleting live credentials. The
+   * WHERE clause is `usedAt IS NOT NULL`, and this number only decides how long a code
+   * that can no longer authenticate anything is kept for forensics.
+   * See packages/db/src/retention/sweepers.ts.
+   */
+  SPENT_RECOVERY_CODE_SWEEP_MAX_AGE_MS: count.default(2_592_000_000),
+
+  /**
+   * The audit trail's retention window, in days. UNSET, and there is no default, on
+   * purpose.
+   *
+   * `AuditEvent` is the compliance record, and how long a school must keep one is a
+   * question about the school's obligations, not about this database — so this repository
+   * does not answer it. Phase 7 of the feature plan says so directly: "it is the
+   * compliance record, so its retention is a policy question, not a technical one. Do not
+   * invent a number." Inventing 365 would have looked like a decision and functioned as
+   * one, in a file nobody reads, deleting compliance evidence on a schedule chosen by a
+   * default value.
+   *
+   * So the mechanism ships and the decision does not. Unset, or `0`, means KEEP
+   * EVERYTHING, and the sweeper says so in the log on every boot rather than trimming
+   * quietly. An operator who has a real obligation sets a number here; one who has not
+   * sets nothing and loses nothing. `null` — rather than `0` — is what carries "not
+   * decided" through to the pruner, so the state cannot be confused with a real window of
+   * zero days.
+   *
+   * Nothing else in this file is this asymmetric, and the asymmetry is the point: every
+   * other default here is a safe value for the mechanism it configures, and this one is
+   * not a value at all.
+   */
+  AUDIT_RETENTION_DAYS: z
+    .union([z.literal(''), z.coerce.number().int().min(0)])
+    .optional()
+    .transform((v) => (v === undefined || v === '' || v === 0 ? null : v)),
 });
 
 export type Env = Readonly<z.infer<typeof envSchema>>;

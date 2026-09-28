@@ -11,9 +11,9 @@ calling `can()`. Nothing here was written by hand, which is why it cannot
 disagree with the code — and if it ever did, the `permissions-doc` job in CI
 would fail before the change could merge.
 
-- **51** actions, derived from the policy object's own keys
-- **204** cells in the role matrix
-- **255** cells in the state matrix
+- **58** actions, derived from the policy object's own keys
+- **232** cells in the role matrix
+- **290** cells in the state matrix
 - Asserted independently in `packages/shared/test/policy-matrix.test.ts`
 
 ## Reading a cell
@@ -41,6 +41,8 @@ rule reads named fields off `Subject` and denies when they are absent.
 | `announcement:publish` | ✗ deny | ✗ deny | `isAuthor` | ✓ allow |
 | `announcement:read` | `isPublished` | `isPublished` | `or(isPublished, isAuthor)` | ✓ allow |
 | `announcement:update` | ✗ deny | ✗ deny | `isAuthor` | ✓ allow |
+| `assignment:create` | ✗ deny | ✗ deny | `ownsCourse` | ✓ allow |
+| `assignment:read` | ✗ deny | `enrolledApproved` | `ownsCourse` | ✓ allow |
 | `attendance:mark` | ✗ deny | ✗ deny | `ownsCourse` | ✓ allow |
 | `attendance:read` | ✗ deny | `isEnrolledStudent` | `ownsCourse` | ✓ allow |
 | `audit:read` | ✗ deny | ✗ deny | ✗ deny | ✓ allow |
@@ -79,9 +81,14 @@ rule reads named fields off `Subject` and denies when they are absent.
 | `resource:download` | ✗ deny | `or(and(isPublic, isPublished), enrolledApproved)` | `or(and(isPublic, isPublished), ownsCourse, isAuthor)` | ✓ allow |
 | `resource:read` | `and(isPublic, isPublished)` | `or(and(isPublic, isPublished), enrolledApproved)` | `or(and(isPublic, isPublished), ownsCourse, isAuthor)` | ✓ allow |
 | `resource:update` | ✗ deny | ✗ deny | `ownsCourse` | ✓ allow |
+| `submission:grade` | ✗ deny | ✗ deny | `ownsCourse` | ✓ allow |
+| `submission:read` | ✗ deny | `isEnrolledStudent` | `ownsCourse` | ✓ allow |
 | `upload:commit` | ✗ deny | `isSelf` | `isSelf` | `isSelf` |
 | `upload:presign` | ✗ deny | ✓ allow | ✓ allow | ✓ allow |
+| `user:bulk-create` | ✗ deny | ✗ deny | ✗ deny | ✓ allow |
 | `user:create` | ✗ deny | ✗ deny | ✗ deny | ✓ allow |
+| `user:delete` | ✗ deny | `isSelf` | `isSelf` | `isSelf` |
+| `user:export` | ✗ deny | `isSelf` | `isSelf` | `isSelf` |
 | `user:list` | ✗ deny | ✗ deny | ✗ deny | ✓ allow |
 | `user:read` | ✗ deny | `isSelf` | `isSelf` | ✓ allow |
 | `user:reinstate` | ✗ deny | ✗ deny | ✗ deny | ✓ allow |
@@ -116,6 +123,8 @@ demo: reads and ordinary mutations pass, deletions and suspensions do not.
 | `announcement:publish` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `announcement:read` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `announcement:update` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
+| `assignment:create` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
+| `assignment:read` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `attendance:mark` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `attendance:read` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `audit:read` | ✗ `TEACHER:deny` | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✗ `TEACHER:deny` |
@@ -154,9 +163,14 @@ demo: reads and ordinary mutations pass, deletions and suspensions do not.
 | `resource:download` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `resource:read` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `resource:update` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
+| `submission:grade` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
+| `submission:read` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `upload:commit` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `upload:presign` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
+| `user:bulk-create` | ✗ `TEACHER:deny` | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✗ `provenance:DEMO` |
 | `user:create` | ✗ `TEACHER:deny` | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✗ `TEACHER:deny` |
+| `user:delete` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✗ `provenance:DEMO` |
+| `user:export` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `user:list` | ✗ `TEACHER:deny` | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✗ `TEACHER:deny` |
 | `user:read` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `user:reinstate` | ✗ `TEACHER:deny` | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✗ `TEACHER:deny` |

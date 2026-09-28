@@ -2,6 +2,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { prisma, type Session, type SessionProvenance, type User } from '@skillwright/db';
 import { env } from '../../env.js';
 import { randomToken, sha256 } from '../../lib/crypto.js';
+import { getRequestContext } from '../../lib/logger.js';
 
 /** Sliding window: how long an idle session stays usable. */
 export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -58,6 +59,58 @@ export async function findLiveSession(token: string): Promise<SessionWithUser | 
     include: { user: true },
   });
   if (!session) return null;
+
+  /*
+   * The lazy finaliser for a due account deletion (Phase 6), and this is the only
+   * call site on purpose. `findLiveSession` is where every authenticated request in
+   * the system enters, so a deletion whose cool-off has passed takes effect on the
+   * account's own next request and no request can reach the account before it does.
+   * The alternative — a background sweeper — is Phase 7's work and is deliberately
+   * not built here; see `finaliseDueDeletions`'s own comment for the gap that
+   * leaves (an account whose owner never returns is never finalised, and the
+   * consequence is disk rather than access).
+   *
+   * GATED ON `deletionEffectiveFor` BEING NON-NULL, which is free: the user row is
+   * ALREADY loaded above, so the check reads a column that crossed the wire anyway.
+   * The ungated version cost an extra indexed SELECT on EVERY authenticated request
+   * in the system to discover that almost every account has no pending deletion —
+   * a real per-request tax, paid by every user, to serve a feature one of them
+   * asked for. The gate is not an optimisation that can drift out of sync with the
+   * sweeper's predicate: both key on the same column, and a null there means there
+   * is nothing to finalise by definition.
+   *
+   * LAZY IMPORT, not a top-level one: `users.lifecycle.service` imports
+   * `destroyAllSessions` from THIS file, so a static import back would be a cycle
+   * through the auth module — the module every request depends on. A cycle in ESM
+   * usually resolves, which is exactly what makes it a bad thing to ship into a
+   * module this central.
+   */
+  if (session.user.deletionEffectiveFor !== null) {
+    /*
+     * ATTRIBUTE THE WRITE BEFORE MAKING IT, not after. `auth.plugin` sets the
+     * ambient `ctx.actorId` a few lines further down — but this finalisation runs
+     * FIRST, so without setting it here the `DELETE` audit row the extension writes
+     * would carry a null actor, and the one row in this whole feature that says the
+     * account ended would be the one row that cannot say who ended it.
+     *
+     * The actor is the person themselves, which is the truth: nobody else did this
+     * to them, and they proved it by holding a password for thirty days. A
+     * system-initiated deletion (which is what a future sweeper would be) happens
+     * outside any request scope, where `getRequestContext()` is undefined and the
+     * row correctly carries a null actor.
+     */
+    const ctx = getRequestContext();
+    if (ctx) ctx.actorId = session.userId;
+
+    const { finaliseDueDeletions } = await import('../users/users.lifecycle.service.js');
+    if (await finaliseDueDeletions(session.userId)) {
+      // Soft-deleted now. Returning null refuses the CURRENT request too, rather
+      // than letting this one — the one that happened to trigger the finalisation —
+      // be the single request that reaches the account after its deletion landed.
+      await prisma.session.delete({ where: { id: session.id } }).catch(() => undefined);
+      return null;
+    }
+  }
 
   const now = new Date();
   if (session.expiresAt <= now || session.absoluteExpiresAt <= now || session.user.deletedAt) {

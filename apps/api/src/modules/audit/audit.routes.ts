@@ -15,9 +15,11 @@ import * as auditService from './audit.service.js';
  *
  * This module performs NO writes, and must not grow any. Audit rows are written by the
  * Prisma client extension in packages/db (audit.ts:288-427), which is the whole reason
- * no service can forget to write one; and migration 0002:107-108 documents the grant
- * that revokes UPDATE and DELETE on the table from the application role, so the
- * append-only property is enforced by Postgres rather than by this file's restraint.
+ * no service can forget to write one; and a trigger in migration 0012 refuses UPDATE,
+ * DELETE and TRUNCATE on the table, so the append-only property is enforced by Postgres
+ * rather than by this file's restraint. (It was previously described here as a REVOKE in
+ * migration 0002 — that REVOKE is commented out at 0002_constraints/migration.sql:107-110
+ * and never protected anything, because the API connects as the table's owner.)
  * A `POST /audit-events` would either duplicate a row the extension already wrote or
  * fail at the database — there is no third outcome.
  *

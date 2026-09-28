@@ -22,17 +22,26 @@
  * the `user:create` action.
  */
 export {
+  accountDeletionSchema,
+  accountDeletionStatusSchema,
+  bulkImportSchema,
+  bulkImportResultSchema,
   createUserSchema,
   listUsersQuerySchema,
   reinstateUserSchema,
   suspendUserSchema,
   updateUserSchema,
   userDetailSchema,
+  userExportSchema,
   // Supporting shapes the routes bind directly.
   idParamSchema,
 } from '@skillwright/shared';
 
 export type {
+  AccountDeletionInput,
+  AccountDeletionStatus,
+  BulkImportInput,
+  BulkImportResult,
   CreateUserInput,
   ListUsersQuery,
   ReinstateUserInput,

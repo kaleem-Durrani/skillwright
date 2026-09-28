@@ -5,6 +5,7 @@ import type { AppInstance } from '../src/app.js';
 import type { Role } from '@skillwright/shared';
 import {
   buildApp,
+  clearAuditEvents,
   cookieHeader,
   createDepartment,
   originHeaders,
@@ -47,7 +48,7 @@ beforeEach(async () => {
   await resetRateLimits(app.redis);
   // resetDatabase()'s own deletes write audit rows (User/Department are audited
   // models); the export tests below read the feed's CONTENTS, so they start clear.
-  await prisma.auditEvent.deleteMany({});
+  await clearAuditEvents();
   departmentId = await createDepartment();
 });
 
@@ -482,7 +483,7 @@ describe('GET /audit-events/export', () => {
     const admin = await signIn('clerk@example.com', 'ADMIN', 'Ada Clerk');
     // The login above is itself audited; this assertion reads CONTENTS, so the feed
     // starts empty once the fixtures exist (audit.test.ts's clearAudit argument).
-    await prisma.auditEvent.deleteMany({});
+    await clearAuditEvents();
     await seedEvent({ entityType: 'Course', createdAt: new Date('2026-05-01T00:00:00.000Z') });
     await seedEvent({
       action: 'SUSPEND',

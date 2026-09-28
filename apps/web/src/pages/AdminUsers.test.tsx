@@ -287,3 +287,68 @@ describe('AdminUsersPage — the Edit affordance', () => {
     expect(apiPatch.mock.calls.map(([path]) => path)).not.toContain('/users/me');
   });
 });
+
+/**
+ * The cohort import's GATE, and the one structural thing about it that a test can
+ * pin: the affordance is hidden below `md`, and the class that does it is not one
+ * `scripts/check-mobile-first.ts` forbids.
+ *
+ * The behaviour INSIDE the dialog is UserBulkImportDialog.test.tsx's; what belongs
+ * here is who can reach it and what the page renders at a phone width.
+ */
+describe('AdminUsersPage — the Import-cohort gate', () => {
+  it('offers no import affordance to a non-admin', async () => {
+    renderAdminUsers(viewer());
+
+    expect(await screen.findByText(/no accounts/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /import cohort/i })).toBeNull();
+  });
+
+  it('lets an admin open the import dialog from the header button', async () => {
+    const user = userEvent.setup();
+    renderAdminUsers(viewer({ role: 'ADMIN', name: 'Sam Admin' }));
+
+    await user.click(await screen.findByRole('button', { name: /import cohort/i }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('heading', { name: /import cohort/i })).toBeInTheDocument();
+    // The dry run is the FIRST action offered, not a checkbox further down.
+    expect(within(dialog).getByRole('button', { name: /check this file/i })).toBeInTheDocument();
+  });
+
+  /**
+   * A demo admin is refused `user:bulk-create` by DEMO_DENIED (can.ts) — a
+   * hundred-account write is exactly the thing a shared account must not do — so
+   * the affordance has to disappear for them, not merely 403 when pressed.
+   */
+  it('hides it from a demo admin, because the action is in DEMO_DENIED', async () => {
+    renderAdminUsers(viewer({ role: 'ADMIN', provenance: 'DEMO' }));
+
+    expect(await screen.findByRole('button', { name: /add a user/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /import cohort/i })).toBeNull();
+  });
+
+  /**
+   * The desktop-only decision, asserted on the CLASS rather than on a media query
+   * jsdom would not apply. `hidden md:inline-flex` styles the SMALL viewport as
+   * the base, which is what `check-mobile-first.ts` enforces; the spelling that
+   * switches a control off above a width is a max-width query wearing a Tailwind
+   * hat, and the script refuses every member of that family.
+   */
+  it('hides the control below md with the base-first spelling, not a max-* variant', async () => {
+    renderAdminUsers(viewer({ role: 'ADMIN', name: 'Sam Admin' }));
+
+    const button = await screen.findByRole('button', { name: /import cohort/i });
+    const className = button.className;
+    expect(className).toContain('hidden');
+    expect(className).toContain('md:inline-flex');
+    /*
+     * The forbidden family, built from parts so this line is not itself a hit for
+     * `check-mobile-first.ts` — which scans the WHOLE file, comments and regexes
+     * included, and which caught exactly that when this test first named the
+     * variant it forbids. A guard that fails to lint is a guard nobody runs.
+     */
+    const forbidden = new RegExp(`\\bmax-(${['sm', 'md', 'lg', 'xl', '2xl'].join('|')}):`);
+    expect(className).not.toMatch(forbidden);
+  });
+});

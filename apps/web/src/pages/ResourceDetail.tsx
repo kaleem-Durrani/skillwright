@@ -2,6 +2,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import {
   ArrowLeft,
+  ClipboardList,
   Download,
   ExternalLink,
   FileText,
@@ -32,6 +33,9 @@ const RESOURCE_ICON: Record<ResourceTypeValue, LucideIcon> = {
   DOCUMENT: FileText,
   VIDEO: Video,
   LINK: Link2,
+  // Added in migration 0010 with the enum member: a task's brief is filed as course
+  // material and `Assignment.resourceId` points at this row.
+  ASSIGNMENT: ClipboardList,
 };
 
 export function ResourceDetailPage() {

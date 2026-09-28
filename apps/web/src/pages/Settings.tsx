@@ -4,14 +4,20 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
-import { ShieldCheck, ShieldOff } from 'lucide-react';
-import { phoneSchema, type UpdateUserInput, type UserDetail } from '@skillwright/shared/schema';
-import { api } from '@/lib/api';
+import { ShieldCheck, ShieldOff, Download } from 'lucide-react';
+import {
+  ACCOUNT_DELETION_COOL_OFF_DAYS,
+  phoneSchema,
+  type UpdateUserInput,
+  type UserDetail,
+} from '@skillwright/shared/schema';
+import { api, apiUrl } from '@/lib/api';
 import { qk } from '@/lib/query';
 import { subject, usePolicy } from '@/lib/policy';
 import { ApiError } from '@/lib/problem';
 import { useLogout, useSession } from '@/lib/session';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { AccountDeletionDialog } from '@/components/users/AccountDeletionDialog';
 import { AvatarPicker } from '@/components/settings/AvatarPicker';
 import { OtpInput } from '@/components/auth/OtpInput';
 import { Avatar } from '@/components/ui/Avatar';
@@ -501,6 +507,7 @@ function SecurityTab() {
   const policy = usePolicy();
   const client = useQueryClient();
   const logout = useLogout();
+  const [deleting, setDeleting] = useState(false);
   // No `navigate` here any more. The Sign out button below used to hand a
   // per-call `onSettled` to `logout.mutate()`, and that handler rode the
   // mutation's observer — which this screen unsubscribes from the moment the
@@ -840,6 +847,77 @@ function SecurityTab() {
           Sign out
         </Button>
       </Card>
+
+      <Separator />
+
+      {/*
+        YOUR DATA. Two controls, and they are together on purpose: a person asking
+        to be deleted is, nine times in ten, a person exercising a right to take
+        their data with them, and the export is one click from the deletion. Split
+        across two screens they would take their data afterwards — or not at all.
+
+        The export is a PLAIN ANCHOR to `apiUrl('/users/me/export')`, not a fetch.
+        It has to be: it returns a file the browser should save to disk, and routing
+        it through `lib/api.ts` would mean a `blob:` URL with no filename, no
+        streaming and no browser download UI. `apiUrl` is the same-origin
+        `/api/v1` prefix that `api` uses, so the `__Host-` session cookie rides
+        along on a normal navigation — the same argument `credentials: 'include'`
+        makes for the JSON client.
+      */}
+      <Card className="flex flex-col gap-4">
+        <CardTitle>Your data</CardTitle>
+        <p className="text-sm text-fg-secondary">
+          Download everything we hold about you — your profile, sessions, enrolments, attendance,
+          comments, messages and notifications — as one JSON file. It takes a moment, and it is
+          yours to keep.
+        </p>
+        <a
+          href={apiUrl('/users/me/export')}
+          download="skillwright-export.json"
+          className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-[var(--control-radius)] border border-line px-4 text-sm font-medium text-fg hover:bg-sunken sm:w-auto sm:self-start"
+        >
+          <Download aria-hidden="true" className="size-4" />
+          Download my data
+        </a>
+      </Card>
+
+      <Separator />
+
+      {/*
+        DELETION, AND IT IS LAST. The ordering is a decision: an account-deletion
+        control directly under "Change password" reads as one of several routine
+        settings, and the whole point of the cool-off is that this is the opposite
+        of routine. The dialog it opens is where the export link and the
+        confirm-by-typing live, so the person who opens it has both in front of them
+        before they can type anything.
+
+        `user:delete` is `isSelf` for every role INCLUDING ADMIN (policy.ts), which
+        is why the gate below is a subject rather than a bare `can()`: it is the
+        caller who is the subject, exactly as the server builds it. The rule reads
+        `Subject.userId` and denies when it is absent (combinators.ts), so a
+        subject-free call would read as a refusal for every role and the button
+        would never appear at all.
+      */}
+      <Card className="flex flex-col gap-4">
+        <CardTitle>Delete your account</CardTitle>
+        <p className="text-sm text-fg-secondary">
+          Nothing happens straight away. You have {ACCOUNT_DELETION_COOL_OFF_DAYS} days to change
+          your mind, and your enrolments and qualifications are kept either way — they are the
+          school&rsquo;s record that you took the course.
+        </p>
+        <div>
+          <Button
+            variant="danger"
+            block
+            className="sm:w-auto sm:self-start"
+            onClick={() => setDeleting(true)}
+          >
+            Delete my account
+          </Button>
+        </div>
+      </Card>
+
+      <AccountDeletionDialog open={deleting} onOpenChange={setDeleting} />
     </div>
   );
 }

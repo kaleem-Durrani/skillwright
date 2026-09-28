@@ -7,6 +7,7 @@ import type { AppInstance } from '../src/app.js';
 import { hashPassword } from '../src/lib/password.js';
 import {
   buildApp,
+  clearAuditEvents,
   cookieHeader,
   originHeaders,
   prisma,
@@ -78,7 +79,7 @@ async function signedIn(email: string, role: TestRole, name?: string): Promise<s
  * (audit.ts:43-59).
  */
 async function clearAudit(): Promise<void> {
-  await prisma.auditEvent.deleteMany({});
+  await clearAuditEvents();
 }
 
 type AuditActionName = 'CREATE' | 'UPDATE' | 'DELETE' | 'LOGIN' | 'SUSPEND' | 'APPROVE';

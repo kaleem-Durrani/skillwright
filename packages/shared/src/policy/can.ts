@@ -20,6 +20,14 @@ function refuse(rule: string, reason: string): PolicyResult {
  * Demo accounts are shared and reset on a schedule; letting one of them delete a
  * row or suspend a user hands every anonymous visitor a wrecking ball. Everything
  * non-destructive stays open so the demo is worth logging into.
+ *
+ * `user:bulk-create` and `user:delete` joined the set with Phase 6. Bulk create is
+ * a hundred-account write from a session the whole internet is looking at, and
+ * `user:delete` has a thirty-day cool-off with a real deadline behind it — neither
+ * belongs on a shared account that resets on a schedule and whose "30 days from now"
+ * would outlive the reset. `user:export` is deliberately NOT here: it is a read of
+ * the caller's own record, and refusing it would leave a privacy request that the
+ * only route to satisfies with a database query — the exact thing Phase 6 replaced.
  */
 const DEMO_DENIED: ReadonlySet<Action> = new Set<Action>([
   'course:delete',
@@ -28,6 +36,8 @@ const DEMO_DENIED: ReadonlySet<Action> = new Set<Action>([
   'comment:delete',
   'department:delete',
   'user:suspend',
+  'user:bulk-create',
+  'user:delete',
 ]);
 
 /** The single action a half-authenticated session is permitted to complete. */

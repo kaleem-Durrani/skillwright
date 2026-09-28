@@ -29,6 +29,9 @@ const RESOURCE_TYPE_LABEL: Record<ResourceHit['type'], string> = {
   DOCUMENT: 'Document',
   VIDEO: 'Video',
   LINK: 'Link',
+  // Added in migration 0010 with the enum member. A search hit for a task's brief has
+  // to say what it is, and "ASSIGNMENT" in a search result row reads like a verb.
+  ASSIGNMENT: 'Task brief',
 };
 
 const ANNOUNCEMENT_TYPE_LABEL: Record<AnnouncementHit['type'], string> = {

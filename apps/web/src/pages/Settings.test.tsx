@@ -478,3 +478,78 @@ describe('SettingsPage — MFA enrolment', () => {
     expect(screen.queryByRole('button', { name: /set up two-factor/i })).toBeNull();
   });
 });
+
+/**
+ * Phase 6: the two account-lifecycle controls, and the ORDER they appear in.
+ *
+ * AccountDeletionDialog.test.tsx owns the dialog. What belongs here is that the
+ * settings screen offers both controls, that the export is a plain same-origin
+ * ANCHOR rather than a fetch, and that deletion is LAST — an account-deletion
+ * control directly under "Change password" reads as one of several routine
+ * settings, and the whole point of the cool-off is that this is the opposite of
+ * routine.
+ */
+describe('SettingsPage — your data, and deleting your account', () => {
+  async function openSecurityTab(): Promise<void> {
+    renderSettings({ tab: 'security' });
+    await screen.findByRole('tab', { name: 'Security' });
+  }
+
+  it('offers the export as a same-origin anchor, not a fetch', async () => {
+    await openSecurityTab();
+
+    const link = await screen.findByRole('link', { name: /download my data/i });
+    /*
+     * `apiUrl`, NOT `api.get`. The endpoint returns a file the browser should save
+     * to disk; routing it through `lib/api` would mean a `blob:` URL with no
+     * filename, no streaming and none of the browser's own download UI. The href is
+     * the `/api/v1` prefix `api` itself uses, so the `__Host-` session cookie
+     * rides along on a normal navigation.
+     */
+    expect(link).toHaveAttribute('href', '/api/v1/users/me/export');
+    expect(link).toHaveAttribute('download', 'skillwright-export.json');
+    // And nothing was fetched to render it.
+    expect(apiGet).not.toHaveBeenCalledWith('/users/me/export', expect.anything());
+  });
+
+  it('offers account deletion, LAST, and states the cool-off on the screen', async () => {
+    await openSecurityTab();
+
+    const deleteButton = await screen.findByRole('button', { name: /delete my account/i });
+    // The shared constant, not a restatement: 30 days is the deadline the server
+    // schedules with, and two copies of that number is one copy that drifts.
+    expect(screen.getByText(/30 days to change your mind/i)).toBeInTheDocument();
+    // And the honest sentence about what survives. A school that deleted a
+    // qualification with the person would be worse off than one holding a dormant
+    // row, and saying so up front is what stops the support ticket.
+    expect(screen.getByText(/enrolments and qualifications are kept/i)).toBeInTheDocument();
+
+    // ORDER, asserted rather than described. Signing out is a routine action;
+    // deleting the account is not, and they must not be visually equivalent.
+    // `signOut.compareDocumentPosition(deleteButton) & FOLLOWING` reads as
+    // "the delete button comes after Sign out" — the direction is the argument's,
+    // not the receiver's, which is the half of this API that is always got wrong.
+    const signOut = screen.getByRole('button', { name: /^sign out$/i });
+    expect(
+      signOut.compareDocumentPosition(deleteButton) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('opens the deletion dialog from the settings control', async () => {
+    const user = userEvent.setup();
+    await openSecurityTab();
+
+    await user.click(await screen.findByRole('button', { name: /delete my account/i }));
+    expect(
+      await screen.findByRole('heading', { name: /delete your account/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('offers it to an admin too — user:delete is isSelf for ADMIN, not deny', async () => {
+    // The policy cell most likely to be "tidied up" into a deny by someone
+    // reasoning from `user:update`, where ADMIN is a bare `allow`. Admin who needs
+    // somebody gone has `user:suspend`, which is reversible.
+    await openSecurityTab();
+    expect(await screen.findByRole('button', { name: /delete my account/i })).toBeInTheDocument();
+  });
+});

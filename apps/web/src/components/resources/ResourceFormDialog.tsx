@@ -67,12 +67,18 @@ const TYPE_LABEL: Record<ResourceTypeValue, string> = {
   DOCUMENT: 'Document',
   VIDEO: 'Video',
   LINK: 'Link',
+  // Added in migration 0010 with the enum member itself. A teacher files the brief of
+  // a task as course material, and `Assignment.resourceId` then points at this row —
+  // which is why the type is a label on a Resource rather than a second attachment
+  // table with its own visibility answer.
+  ASSIGNMENT: 'Task brief',
 };
 
 const TYPE_HINT: Record<ResourceTypeValue, string> = {
   DOCUMENT: 'Notes, slides, a spreadsheet — a file you upload.',
   VIDEO: 'A video file you upload.',
   LINK: 'A web address. Nothing is uploaded.',
+  ASSIGNMENT: 'The brief of a task — the procedure, the drawing, the guidance a student works to.',
 };
 
 /**

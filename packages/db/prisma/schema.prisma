@@ -74,12 +74,32 @@ enum AttendanceStatus {
 
 /// Set explicitly by the creator. Never inferred from a MIME type — inferring is
 /// what made this enum meaningless in the previous system.
-/// ASSIGNMENT and QUIZ are deliberately absent: the assessment engine is out of
-/// scope, and a reserved enum value is an invitation to build it.
+/// QUIZ is still deliberately absent: there is no question bank, no attempt timer and
+/// no autograding, and a reserved enum value is an invitation to build one.
+/// ASSIGNMENT is no longer absent. It was, until migration 0010, with the reasoning
+/// above — and that reasoning was correct while there was no assessment engine, which
+/// is exactly what it said: "a reserved enum value is an invitation to build it". The
+/// engine now exists, and an assignment's brief is course material a school already
+/// files through this table — the welding procedure, the drawing, the candidate
+/// guidance — so the reversal avoids a SECOND attachment mechanism for bytes this one
+/// already stores, each with its own presign/commit path and its own visibility
+/// answer. `Assignment.resourceId` points at a real Resource row, not at an Upload.
 enum ResourceType {
   DOCUMENT
   VIDEO
   LINK
+  ASSIGNMENT
+}
+
+/// Where a hand-in is in the grader's hands. NOT the same axis as a mark: GRADED
+/// carries a score, RETURNED carries only feedback and asks for another attempt, and
+/// SUBMITTED is what arrives unopened. The three were separate values rather than a
+/// score being optional because "returned with a zero" and "returned for another go"
+/// are different things to say to a student.
+enum SubmissionStatus {
+  SUBMITTED
+  GRADED
+  RETURNED
 }
 
 enum AnnouncementType {
@@ -171,6 +191,20 @@ model User {
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
 
+  // --- account deletion, Phase 6 ---
+  //
+  // `deletedAt` alone is an instant, unappealable account deletion served over
+  // HTTP, which this schema refuses to model: rule 3 says anything a human can
+  // remove is SOFT deleted precisely so the removal is reversible while the record
+  // still has a reader. So a request writes these two and nothing changes until
+  // the second passes — the cool-off, during which the requester can still sign in
+  // and cancel. See migration 0011_user_lifecycle for why two nullable timestamps
+  // rather than a status enum, and why nothing else on the row is destroyed.
+  /// When the person asked. Null for every account that never has.
+  deletionRequestedAt DateTime?
+  /// When the soft delete takes effect. Never earlier than deletionRequestedAt.
+  deletionEffectiveFor DateTime?
+
   teacherProfile TeacherProfile?
   studentProfile StudentProfile?
 
@@ -183,6 +217,7 @@ model User {
   enrollmentsDecided Enrollment[]             @relation("EnrollmentDecidedBy")
   enrollmentsCompleted Enrollment[]           @relation("EnrollmentCompletedBy")
   attendanceMarked  AttendanceRecord[]        @relation("AttendanceMarkedBy")
+  submissionsGraded Submission[]              @relation("SubmissionGradedBy")
   resourcesAuthored Resource[]                @relation("ResourceAuthor")
   announcements     Announcement[]            @relation("AnnouncementAuthor")
   comments          Comment[]                 @relation("CommentAuthor")
@@ -196,6 +231,10 @@ model User {
   @@index([status])
   @@index([deletedAt])
   @@index([createdAt])
+  // Serves the due-deletion sweep, which filters on this column AND on
+  // `deletedAt IS NULL`. Migration 0011_user_lifecycle; see that file for why the
+  // sweep is indexed rather than left to a sequential scan on every request.
+  @@index([deletionEffectiveFor])
 }
 
 model TeacherProfile {
@@ -429,6 +468,7 @@ model CourseOffering {
   deletedAt DateTime?
 
   enrollments Enrollment[]
+  assignments Assignment[]
 
   @@index([courseId])
   @@index([deletedAt])
@@ -471,6 +511,7 @@ model Enrollment {
   updatedAt DateTime @updatedAt
 
   attendanceRecords AttendanceRecord[]
+  submissions       Submission[]
 
   /// One enrollment row per (student, OFFERING). A withdrawn student who re-applies
   /// to the same intake updates this row rather than creating a second one; applying
@@ -519,6 +560,110 @@ model AttendanceRecord {
   @@index([sessionDate])
 }
 
+/// One piece of assessed work set on ONE intake. Migration 0010; see that file's
+/// header for the four shapes that were argued rather than reached for.
+///
+/// `offeringId` and never `courseId`: a deadline belongs to a run of the course, so
+/// the template re-run five times a year has five different deadlines and five
+/// different sets of hand-ins. Everything per-intake since migration 0007 — seats,
+/// dates, the register — points the same way, and an assignment on the template would
+/// put one March deadline on the autumn cohort.
+model Assignment {
+  id String @id @default(cuid())
+
+  title String
+  /// The task itself, in the words the teacher gave. Required rather than optional:
+  /// a hand-in with no brief is a file the student cannot act on, and the dialogue
+  /// asking what it was for happens after the deadline.
+  brief String
+  dueAt DateTime
+  /// Out of what, as a decimal because half marks are real and an integer column
+  /// makes a teacher round 62.5 in their head before writing it down. CHECK
+  /// (maxScore > 0) in migration 0010 — a task worth zero points is a data-entry
+  /// accident, and Phase 3's certificate will divide a total by this.
+  maxScore Decimal @db.Decimal(10, 2)
+
+  offering   CourseOffering @relation(fields: [offeringId], references: [id], onDelete: Cascade)
+  offeringId String
+
+  /// The brief as an uploaded artefact — a real Resource row, not an Upload, so it
+  /// already has an author, a public flag and a course-scoped visibility answer and
+  /// this model does not have to restate any of them (ResourceType gained
+  /// ASSIGNMENT in migration 0010 for exactly this).
+  ///
+  /// SetNull: a brief is ATTACHED material. Deleting the resource must not delete the
+  /// assignment — an assessment whose text has been superseded still has a deadline
+  /// and still has hand-ins against it.
+  resource   Resource? @relation(fields: [resourceId], references: [id], onDelete: SetNull)
+  resourceId String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  submissions Submission[]
+
+  /// The read path a teacher's own list takes: one intake's tasks in deadline order.
+  /// `dueAt` alone is the student's cross-course list, and the compound index serves
+  /// it because the offering filter is always present there too.
+  @@index([offeringId, dueAt])
+  @@index([resourceId])
+  @@index([deletedAt])
+}
+
+/// One hand-in, by one seated student, for one assignment, at one attempt.
+///
+/// `enrollmentId` and NOT `studentId`. A seat is required before a hand-in, and
+/// `Enrollment` is already "this student holds this seat in this intake" — the row the
+/// register already rides (migration 0004) and the one `enrolledApproved` can gate on.
+/// A `studentId` here would be a second, parallel way to say who a student is, and the
+/// two could disagree.
+///
+/// The unique triple means a RESUBMISSION IS A NEW ROW and the history survives:
+/// overwriting the first hand-in would destroy the only record of what a student
+/// turned in before their teacher read it, and a grader who reconsiders would
+/// silently rewrite the evidence. Same shape as `AttendanceRecord`'s unique pair,
+/// where marking twice corrects; here hand-in twice is two facts rather than one
+/// corrected one.
+model Submission {
+  id String @id @default(cuid())
+
+  assignment   Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  assignmentId String
+
+  enrollment   Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  enrollmentId String
+
+  /// The bytes of the hand-in. `onDelete: Restrict`, the action migration 0003 gave
+  /// `Resource.uploadId` for the same reason: the file IS the submission, and deleting
+  /// it under a live row would destroy assessment evidence. `@unique` so one upload
+  /// backs exactly one hand-in.
+  upload   Upload @relation(fields: [uploadId], references: [id], onDelete: Restrict)
+  uploadId String @unique
+
+  status SubmissionStatus @default(SUBMITTED)
+  /// 1 for the first hand-in. Never renumbered and never reused: `attempt` is what
+  /// the unique triple keys on, and renumbering a returned attempt would collide with
+  /// the row it is meant to supersede.
+  attempt     Int       @default(1)
+  submittedAt DateTime  @default(now())
+  score       Decimal?  @db.Decimal(10, 2)
+  feedback    String?
+  gradedBy    User?     @relation("SubmissionGradedBy", fields: [gradedById], references: [id], onDelete: SetNull)
+  gradedById  String?
+  gradedAt    DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@unique([assignmentId, enrollmentId, attempt])
+  @@index([assignmentId, status])
+  @@index([enrollmentId])
+  @@index([gradedById])
+  @@index([deletedAt])
+}
+
 // ---------------------------------------------------------------------------
 // Content
 // ---------------------------------------------------------------------------
@@ -555,6 +700,10 @@ model Upload {
   resource       Resource?
   courseSyllabus Course?   @relation("CourseSyllabus")
   userAvatar     User?     @relation("UserAvatar")
+  /// The bytes of a hand-in. The only attachment point that is a 1:1 REQUIRED relation
+  /// rather than a nullable one, because a submission without a file is not a
+  /// submission — see `Submission.uploadId`'s own comment for the Restrict.
+  submission     Submission?
 
   @@index([ownerId])
   @@index([status, createdAt])
@@ -592,6 +741,11 @@ model Resource {
   deletedAt DateTime?
 
   comments Comment[]
+
+  /// Briefs this resource backs. `Assignment.resourceId` is SetNull, so a deleted
+  /// resource leaves the assignment standing with no uploaded brief rather than
+  /// taking the assessment and its hand-ins with it.
+  assignments Assignment[]
 
   @@index([courseId, createdAt])
   @@index([authorId])

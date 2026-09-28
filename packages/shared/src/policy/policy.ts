@@ -43,6 +43,12 @@ export type Action =
   // attendance
   | 'attendance:mark'
   | 'attendance:read'
+  // assignment
+  | 'assignment:read'
+  | 'assignment:create'
+  // submission
+  | 'submission:read'
+  | 'submission:grade'
   // resource
   | 'resource:read'
   | 'resource:create'
@@ -64,9 +70,12 @@ export type Action =
   | 'user:read'
   | 'user:update'
   | 'user:create'
+  | 'user:bulk-create'
   | 'user:suspend'
   | 'user:reinstate'
   | 'user:list'
+  | 'user:delete'
+  | 'user:export'
   // department
   | 'department:read'
   | 'department:list'
@@ -291,6 +300,92 @@ export const POLICY: PolicyTable = definePolicy({
   },
 
   // -------------------------------------------------------------------------
+  // Assignment
+  //
+  // Two actions covering the four verbs the module exposes (list, create, update,
+  // delete), exactly as `course:update` already covers the three offering routes.
+  // The subject shape differs by verb and that difference is the whole design:
+  //   - `assignment:read` and `:create` act on the INTAKE, so a student is gated by
+  //     `enrolledApproved` on `subject.enrollmentStatus` (the VIEWER's own status in
+  //     that course) and a teacher by `ownsCourse` on `subject.courseTeacherId`;
+  //   - `submission:read` and `:grade` act on ONE HAND-IN, whose subject carries the
+  //     ENROLLMENT's `studentId`. That is the #31 shape this phase is named for: a
+  //     student's rule reads a subject field, so a loader that forgets the join
+  //     denies silently — and an absent field must DENY, in the safe direction.
+  // -------------------------------------------------------------------------
+  'assignment:read': {
+    anonymous: deny,
+    // A task set to a cohort is not a published syllabus, and an unpublished draft
+    // intake is not a course. `enrolledApproved` reads `enrollmentStatus`, which the
+    // subject loader scopes to the REQUESTING actor — a student without an APPROVED
+    // seat denies here, as does a teacher who does not own the course and reads
+    // nothing at all.
+    STUDENT: enrolledApproved,
+    TEACHER: ownsCourse,
+    ADMIN: allow,
+  },
+  'assignment:create': {
+    anonymous: deny,
+    STUDENT: deny,
+    // Scoped to the OFFERING named in the body, on the same reasoning as
+    // `resource:create`: there is no row yet, and `ownsCourse` is precisely what
+    // stops a teacher setting work on a colleague's intake by guessing an offeringId.
+    //
+    // It is also the gate for PATCH and DELETE. Three offering routes already ride
+    // `course:update` (opening an intake IS editing the course); this is the same
+    // economy, and the argument is the same one. The authority to SET work on an
+    // intake is the authority to correct it and to withdraw it, and a verb per verb
+    // would be three restatements of one rule that could drift apart — which is what
+    // lesson 28 is about.
+    //
+    // A fifth action for `assignment:delete` was available and is deliberately NOT
+    // taken. Deleting an assignment is a SOFT delete that leaves the hand-ins and
+    // their grades standing for the register, which makes it a correction rather
+    // than the destruction `course:delete` is; and adding the verb would put the
+    // four-cell-per-role shape below out of step with a six-cell one for no
+    // authorization gain.
+    TEACHER: ownsCourse,
+    ADMIN: allow,
+  },
+
+  // -------------------------------------------------------------------------
+  // Submission
+  // -------------------------------------------------------------------------
+  'submission:read': {
+    anonymous: deny,
+    /*
+     * Own hand-ins only, and this is the cell the whole phase turns on.
+     *
+     * The subject is a SUBMISSION, and `studentId` is read off the ENROLLMENT the
+     * hand-in was made on — deliberately not off a `studentId` column the submission
+     * does not have, because a second copy of "who is this student" is a second
+     * thing that can disagree with the register.
+     *
+     * An ABSENT `studentId` denies, which is the safe direction and also the
+     * invisible one: a loader that forgets the join does not leak, it turns every
+     * student's list empty with no log line and no type error (LESSONS-LEARNED #31,
+     * which has cost three features). The same rule on a whole assignment is a
+     * different answer — a teacher reads their class's work, and that is decided per
+     * assignment by the list's WHERE clause rather than assembled one hand-in at a
+     * time.
+     */
+    STUDENT: isEnrolledStudent,
+    TEACHER: ownsCourse,
+    ADMIN: allow,
+  },
+  'submission:grade': {
+    anonymous: deny,
+    STUDENT: deny,
+    // The SAME cell as `submission:read` for a teacher, and deliberately so, on the
+    // reasoning `enrollment:complete` states verbatim: the authority to read a
+    // class's hand-ins is the authority to mark them. A narrower "grader" role would
+    // be a place to write down who signs off a qualification, and nothing in this
+    // repository answers that better than the rule that already answers who may read.
+    TEACHER: ownsCourse,
+    ADMIN: allow,
+  },
+
+  // -------------------------------------------------------------------------
   // Resource
   // -------------------------------------------------------------------------
   'resource:read': {
@@ -424,6 +519,64 @@ export const POLICY: PolicyTable = definePolicy({
     STUDENT: deny,
     TEACHER: deny,
     ADMIN: allow,
+  },
+  /*
+   * Cohort import — the same verb as `user:create`, at the same authority.
+   *
+   * A separate action rather than a widening of `user:create`, and the reason is
+   * the one that made the two differ: a bulk import is a DIFFERENT request shape
+   * with different blast radius. It is capped at BULK_IMPORT_MAX_ROWS rather than
+   * being one call, it is rate-limited on its own bucket rather than sharing
+   * `/users`'s, and it answers a per-row result instead of a single 201. Those are
+   * three separate decisions an operator has to be able to reason about, and a
+   * matrix that cannot tell you which gate a request passed through cannot answer
+   * "who created 60 accounts last Tuesday".
+   *
+   * Subject-free for the same reason `user:create` is — before the first row
+   * exists there is no target to load — and therefore eligible for
+   * SUBJECT_INDEPENDENT_ACTIONS, which is what lets the SPA gate the affordance
+   * with a bare `can()` rather than building a subject it has no data for.
+   */
+  'user:bulk-create': {
+    anonymous: deny,
+    STUDENT: deny,
+    TEACHER: deny,
+    ADMIN: allow,
+  },
+  /*
+   * Deleting your OWN account. `isSelf` for every role, ADMIN included.
+   *
+   * The ADMIN cell is the one worth arguing about, because `user:update` gives
+   * ADMIN a bare `allow` and it would be consistent to do the same here. It would
+   * also mean `POST /users/:id/delete` deletes anybody, which is not a thing this
+   * product should have: an administrator who needs somebody gone has
+   * `user:suspend`, which is reversible, leaves the enrolment record intact, and
+   * writes its own audit verb. Self-service deletion is a different act with a
+   * different consequence — it ends the account — so it stays self-only, and the
+   * `not(isSelf)` guard `user:suspend` carries is deliberately NOT mirrored here
+   * because the whole point of this verb is that it acts on the caller.
+   */
+  'user:delete': {
+    anonymous: deny,
+    STUDENT: isSelf,
+    TEACHER: isSelf,
+    ADMIN: isSelf,
+  },
+  /*
+   * `GET /users/me/export` — a data-subject access request, satisfied by the API
+   * instead of by a hand-written database query.
+   *
+   * Self-only for the same reason and with the same consequence as `user:read`:
+   * the subject is the caller, the route takes no id, and an ADMIN gets no bypass
+   * here. An admin who wants somebody's record has the directory; this verb exists
+   * for the person whose record it is, and widening it would make a GDPR request
+   * an export of a third party.
+   */
+  'user:export': {
+    anonymous: deny,
+    STUDENT: isSelf,
+    TEACHER: isSelf,
+    ADMIN: isSelf,
   },
   'user:suspend': {
     anonymous: deny,
@@ -639,6 +792,7 @@ export const SUBJECT_INDEPENDENT_ACTIONS = [
   'comment:read',
   'comment:create',
   'user:create',
+  'user:bulk-create',
   'user:list',
   'user:reinstate',
   'department:read',

@@ -12,6 +12,7 @@ export * from './department.js';
 export * from './course.js';
 export * from './enrollment.js';
 export * from './attendance.js';
+export * from './assignment.js';
 export * from './upload.js';
 export * from './resource.js';
 export * from './announcement.js';

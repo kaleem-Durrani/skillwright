@@ -3,6 +3,7 @@ import { Link } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft,
+  ClipboardList,
   Download,
   ExternalLink,
   FileText,
@@ -40,6 +41,7 @@ import {
 import { MessageTeacherButton } from '@/components/courses/MessageTeacherButton';
 import { RegisterExportButtons } from '@/components/courses/RegisterExportButtons';
 import { ViewerSeatActions } from '@/components/courses/ViewerSeatActions';
+import { AssignmentsPanel } from '@/components/assignments/AssignmentsPanel';
 import { ResourceFormDialog } from '@/components/resources/ResourceFormDialog';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button, IconButton } from '@/components/ui/Button';
@@ -74,6 +76,12 @@ const RESOURCE_ICON: Record<ResourceTypeValue, LucideIcon> = {
   DOCUMENT: FileText,
   VIDEO: Video,
   LINK: Link2,
+  // Added in migration 0010, which reversed the reservation at schema.prisma:75-78:
+  // an assignment's brief is course material, so it is filed as a Resource rather than
+  // through a second attachment mechanism. Icon rather than removed, because the key
+  // type is what makes this a checked lookup — deleting the entry would restore
+  // exactly the implicit-any index the Record exists to prevent.
+  ASSIGNMENT: ClipboardList,
 };
 
 /**
@@ -581,6 +589,19 @@ export function CourseDetailPage() {
       <Tabs defaultValue="resources">
         <TabsList>
           <TabsTrigger value="resources">Resources</TabsTrigger>
+          {/*
+            The training itself, and ungated by design.
+
+            `assignment:read` is a SUBJECT-dependent rule — a student needs an APPROVED
+            seat (`enrolledApproved`) and a teacher needs `ownsCourse` — so gating this
+            tab on a subject-free `can()` would deny every viewer including admins, and
+            gating it on the COURSE subject would deny every student who is actually
+            seated, because the answer is per-INTKE. Both are LESSONS-LEARNED #15 and
+            #31, and the list underneath self-scopes on the server exactly as
+            `GET /enrollments` does. A tab whose list is a WHERE clause has no subject
+            to gate on; what this tab shows is simply what the API serves.
+          */}
+          <TabsTrigger value="assignments">Assignments</TabsTrigger>
           {policy.can('enrollment:read', viewerSubject) ? (
             <TabsTrigger value="students" count={pendingCount}>
               Students
@@ -772,6 +793,18 @@ export function CourseDetailPage() {
               }
             />
           )}
+        </TabsContent>
+
+        {/*
+          The panel decides which of the two audiences it is rendering — the student's
+          own tasks with their hand-ins and marks, or one intake's tasks with the class
+          that handed in for each. The intake is `selectedOffering`, the same selection
+          the Students tab's register and exports follow, because a task belongs to an
+          intake and showing a second, different selection above two tabs would give
+          the page two answers to "which intake are we looking at".
+        */}
+        <TabsContent value="assignments">
+          <AssignmentsPanel course={data} offering={selectedOffering} />
         </TabsContent>
 
         {policy.can('enrollment:read', viewerSubject) ? (

@@ -15,6 +15,7 @@ import { API_BASE_PATH } from '@skillwright/shared';
 import { env, isTest } from './env.js';
 import { baseLogger } from './lib/logger.js';
 import { startUploadSweeper } from './modules/uploads/uploads.sweeper.js';
+import { startRetentionSweeper } from './modules/audit/retention.sweeper.js';
 import loggerPlugin from './plugins/logger.plugin.js';
 import prismaPlugin from './plugins/prisma.plugin.js';
 import redisPlugin from './plugins/redis.plugin.js';
@@ -28,6 +29,7 @@ import departmentsRoutes from './modules/departments/departments.routes.js';
 import coursesRoutes from './modules/courses/courses.routes.js';
 import enrollmentsRoutes from './modules/enrollments/enrollments.routes.js';
 import attendanceRoutes from './modules/attendance/attendance.routes.js';
+import assignmentsRoutes from './modules/assignments/assignments.routes.js';
 import resourcesRoutes from './modules/resources/resources.routes.js';
 import announcementsRoutes from './modules/announcements/announcements.routes.js';
 import commentsRoutes from './modules/comments/comments.routes.js';
@@ -122,6 +124,9 @@ export async function buildApp(): Promise<AppInstance> {
   // Attendance spans /courses/:id/attendance and /enrollments/:id/attendance, so it
   // registers at the API root and spells its full paths (attendance.routes.ts).
   await app.register(attendanceRoutes, { prefix: API_PREFIX });
+  // Same shape, same reason: tasks hang off an intake, hand-ins off a task and a
+  // hand-in, so the module spells its full paths (assignments.routes.ts).
+  await app.register(assignmentsRoutes, { prefix: API_PREFIX });
   await app.register(resourcesRoutes, { prefix: `${API_PREFIX}/resources` });
   await app.register(announcementsRoutes, { prefix: `${API_PREFIX}/announcements` });
   await app.register(commentsRoutes, { prefix: `${API_PREFIX}/comments` });
@@ -251,8 +256,16 @@ export async function buildApp(): Promise<AppInstance> {
    * Registered here so main.ts and the integration tests build the SAME app and the
    * job can never be forgotten in one of them; skipped under test, where suites drive
    * `sweepAbandonedUploads` directly and must not race a background timer.
+   *
+   * The retention sweeper is registered beside it for the same reason and under the same
+   * guard: expired sessions, verifications and spent recovery codes are reclaimed on a
+   * timer, and a suite that let one run in the background would be racing its own
+   * fixtures (retention.sweeper.ts).
    */
-  if (!isTest) startUploadSweeper(app);
+  if (!isTest) {
+    startUploadSweeper(app);
+    startRetentionSweeper(app);
+  }
 
   await app.ready();
   return app;

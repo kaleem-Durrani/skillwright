@@ -1,14 +1,19 @@
 import { prisma, type Prisma } from '@skillwright/db';
 import {
+  bulkImportRowSchema,
   paginationMeta,
   toSkipTake,
   type Actor,
+  type BulkImportFailureCode,
+  type BulkImportInput,
+  type BulkImportResult,
+  type CreateUserInput,
   type FieldError,
   type Paginated,
   type Role,
 } from '@skillwright/shared';
 import { ulid } from 'ulid';
-import { conflict, notFound, validationFailed } from '../../lib/errors.js';
+import { conflict, isAppError, notFound, validationFailed } from '../../lib/errors.js';
 import { baseLogger } from '../../lib/logger.js';
 import { presignGet, safeFilename } from '../../lib/storage.js';
 /*
@@ -31,7 +36,6 @@ import { assertUploadClaimable } from '../uploads/uploads.service.js';
 import { notify } from '../notifications/notifications.service.js';
 import { destroyAllSessions } from '../auth/session.service.js';
 import type {
-  CreateUserInput,
   ListUsersQuery,
   ReinstateUserInput,
   SuspendUserInput,
@@ -500,6 +504,32 @@ async function assertEmailAvailable(email: string): Promise<void> {
  * models of their own (audit.ts:51-59).
  */
 export async function create(input: CreateUserInput): Promise<UserDetail> {
+  const plan = await planCreate(input);
+  const user = await prisma.user.create({ data: plan });
+  return detailById(user.id);
+}
+
+/**
+ * Everything `create` checks, and nothing it writes.
+ *
+ * Extracted so the cohort import's DRY RUN runs THE SAME CHECKS rather than a
+ * restatement of them. A dry run that validated a second copy of the rules would be
+ * the single most expensive possible place for the two copies to diverge: the admin
+ * who trusts it uploads the file for real, and the rule that drifted is the one that
+ * was wrong. So the check and the write are one function, and `dryRun` is the branch
+ * that stops after the first half.
+ *
+ * Throws the same `AppError` `create` would, at the same field paths, which is what
+ * lets `bulkImport` below map a thrown error to a per-row code without a second
+ * translation table.
+ *
+ * NOTE WHAT IS NOT HERE: the generated `enrollmentNo` for a student who did not
+ * supply one. It is produced on the way into the plan, and the plan is discarded by
+ * a dry run — so a dry run cannot preview it. That is honest rather than a gap: the
+ * value is a ULID, unpredictable by construction, and a dry run that printed one
+ * would be promising an id the real run cannot honour.
+ */
+async function planCreate(input: CreateUserInput): Promise<Prisma.UserCreateInput> {
   /*
    * createUserSchema is bound verbatim, so it validates each field's SHAPE but cannot
    * fully police the role/field pairing. Anything present-but-inappropriate is refused
@@ -516,10 +546,7 @@ export async function create(input: CreateUserInput): Promise<UserDetail> {
       ]);
     }
     await assertEmailAvailable(input.email);
-    const admin = await prisma.user.create({
-      data: { email: input.email, name: input.name, role: 'ADMIN' },
-    });
-    return detailById(admin.id);
+    return { email: input.email, name: input.name, role: 'ADMIN' };
   }
 
   // TEACHER or STUDENT from here. Department validity is public information (the
@@ -555,39 +582,177 @@ export async function create(input: CreateUserInput): Promise<UserDetail> {
         { path: 'qualification', message: 'A teacher requires a qualification.' },
       ]);
     }
-    const user = await prisma.user.create({
-      data: {
-        email: input.email,
-        name: input.name,
-        role: 'TEACHER',
-        teacherProfile: {
-          create: {
-            departmentId,
-            qualification: input.qualification,
-            specialization: input.specialization ?? null,
-            staffNo: input.staffNo ?? null,
-          },
-        },
-      },
-    });
-    return detailById(user.id);
-  }
-
-  const user = await prisma.user.create({
-    data: {
+    return {
       email: input.email,
       name: input.name,
-      role: 'STUDENT',
-      studentProfile: {
+      role: 'TEACHER',
+      teacherProfile: {
         create: {
           departmentId,
-          enrollmentNo: input.enrollmentNo ?? generateEnrollmentNo(),
+          qualification: input.qualification,
+          specialization: input.specialization ?? null,
+          staffNo: input.staffNo ?? null,
         },
       },
-    },
-  });
+    };
+  }
 
-  return detailById(user.id);
+  return {
+    email: input.email,
+    name: input.name,
+    role: 'STUDENT',
+    studentProfile: {
+      create: {
+        departmentId,
+        enrollmentNo: input.enrollmentNo ?? generateEnrollmentNo(),
+      },
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Cohort import (Phase 4)
+// ---------------------------------------------------------------------------
+
+/**
+ * `POST /users/bulk` — the thirty-click intake, made one request.
+ *
+ * IT CALLS `create` PER ROW AND NOT `createMany`, which is the whole design and
+ * worth defending because the alternative looks better on paper. `createMany` is one
+ * statement instead of sixty and it cannot do a single one of the three things this
+ * endpoint exists to do: the audit extension's `createMany` branch records the
+ * CALLER'S INPUT with no ids, for a model whose ids the database generates
+ * (packages/db/src/audit.ts), so there would be no attributable row at all; it
+ * cannot carry the nested `teacherProfile`/`studentProfile` satellite that gives a
+ * person their department; and it cannot return the per-row result the feature is
+ * for.
+ *
+ * SO: each row is one `create` call, and the batch is deliberately NOT ONE
+ * TRANSACTION. Those two clauses in the brief are mutually exclusive and the second
+ * is the one the plan argues for — "A school importing 60 people will hit 4
+ * already-existing addresses and needs the other 56 to land. Do not make it
+ * all-or-nothing." A single `$transaction` would roll back all sixty rows because
+ * of the four, which is the exact failure the feature exists to remove. Each
+ * `create` remains its own atomic unit: a nested user+profile write is ONE
+ * statement, hence one implicit Postgres transaction, so the guarantee that actually
+ * holds is the one that matters — a user row never exists without its profile, and
+ * every row reported as created is committed.
+ *
+ * ONE AUDIT ROW PER CREATED USER comes from the extension firing on each
+ * `prisma.user.create`, with the importing admin as the actor for all of them. It
+ * is never written by hand, for the reason the extension's own comment gives: a
+ * service-level `auditService.record(...)` is a line some future edit omits, and
+ * this is the code path that most needed it. The test asserts the COUNT equals the
+ * number created, because one summary row per import would satisfy a weaker
+ * assertion and be a compliance hole.
+ *
+ * `dryRun` is the feature's more valuable half and the reason the request has a
+ * shape at all: the first thing an admin does with an import is upload the wrong
+ * file, and a wrong file that is a hundred rows of real students is not a mistake
+ * anybody undoes by hand. It runs `planCreate` — the same checks, see above — and
+ * writes nothing.
+ *
+ * NOT PARALLEL. Rows go in submission order, one await at a time, and that is
+ * load-bearing rather than merely simple: `assertEmailAvailable` READS the
+ * database, so a batch containing the same address twice resolves correctly only if
+ * the first insert has committed before the second check runs. `Promise.all` would
+ * make that a race whose outcome depends on scheduling.
+ */
+export async function bulkImport(input: BulkImportInput): Promise<BulkImportResult> {
+  const created: UserDetail[] = [];
+  const failed: BulkImportResult['failed'] = [];
+
+  /*
+   * Addresses already claimed by an EARLIER ROW OF THIS SAME BATCH.
+   *
+   * Without this the dry run LIES about the most common failure an import has. A
+   * spreadsheet with the same address on rows 4 and 11 validates clean — neither is
+   * in the database yet — and the real run then fails row 11 with a 409 the dry run
+   * promised would not happen. A dry run that under-reports is worse than none: it
+   * is the check people stop running once it has lied to them.
+   *
+   * Lower-cased because `email` is `@db.Citext` (schema.prisma), so uniqueness is
+   * case-insensitive in the database and a Set of raw strings would miss the very
+   * collision the insert is about to hit.
+   */
+  const claimed = new Set<string>();
+
+  for (const [index, raw] of input.rows.entries()) {
+    // 1-based: the person fixing the file is looking at a spreadsheet whose first
+    // row is row 1, and a zero-based index sends them one line up.
+    const rowNumber = index + 1;
+    try {
+      /*
+       * PER-ROW VALIDATION, against the SAME `createUserSchema` the single-create
+       * endpoint binds. The wire schema deliberately carries `z.unknown()` here
+       * (see the comment on `bulkImportSchema`), so this parse is where a row's
+       * SHAPE is decided — and it is the same object the route, the SPA's dry run
+       * and the single-create form all use, so a rule cannot be enforced on one
+       * path and forgotten on another.
+       *
+       * The issues are re-emitted as ONE `AppError` rather than returned as a list,
+       * because `describeFailure` below projects a thrown `AppError` into the
+       * per-row `code`/`detail` and nothing else in this function knows how to read
+       * a ZodError. A row with three problems reports the first one; the admin fixes
+       * it, re-runs the dry run, and sees the next — which is one more round trip
+       * than ideal and infinitely better than a 422 that names no row at all.
+       */
+      const parsed = bulkImportRowSchema.safeParse(raw);
+      if (!parsed.success) {
+        const first = parsed.error.issues[0];
+        const field = first?.path.join('.') ?? 'row';
+        throw validationFailed([
+          {
+            path: field,
+            message: `${field}: ${first?.message ?? 'This row is not a valid user.'}`,
+          },
+        ]);
+      }
+      const row = parsed.data;
+
+      if (claimed.has(row.email.toLowerCase())) {
+        throw conflict('An earlier row in this import already uses this email address');
+      }
+      claimed.add(row.email.toLowerCase());
+
+      // The same checks, and then STOP. `created` stays empty for a dry run: the
+      // SPA's results table is built from `failed`, and a dry run that listed users
+      // it did not create would be reporting a fiction.
+      if (input.dryRun) {
+        await planCreate(row);
+        continue;
+      }
+
+      created.push(await create(row));
+    } catch (error) {
+      failed.push({ row: rowNumber, ...describeFailure(error) });
+    }
+  }
+
+  return { created, failed, dryRun: input.dryRun };
+}
+
+/**
+ * A thrown error as the two fields the per-row result carries: the shared
+ * `ErrorCode` the SPA already maps to copy, and the server's own sentence for it.
+ *
+ * An `AppError` is the only thing route and service code may throw deliberately
+ * (lib/errors.ts), so its `code` is authoritative and this is a projection rather
+ * than a translation. Anything else is a bug in a rule we thought we had covered,
+ * and `INTERNAL` is the honest code for that — the brief asks for a `code` per row,
+ * and inventing a fourteenth taxonomy value for "we did not expect this" would put
+ * a branch in the SPA that can never be reached.
+ */
+function describeFailure(error: unknown): {
+  code: BulkImportFailureCode;
+  detail?: string;
+} {
+  if (isAppError(error)) {
+    return error.detail === undefined
+      ? { code: error.code }
+      : { code: error.code, detail: error.detail };
+  }
+  return { code: 'INTERNAL' };
 }
 
 /**

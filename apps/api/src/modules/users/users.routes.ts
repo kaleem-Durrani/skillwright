@@ -3,6 +3,10 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { paginated, type Subject } from '@skillwright/shared';
 import { authorize, requireActor } from '../../plugins/auth.plugin.js';
 import {
+  accountDeletionSchema,
+  accountDeletionStatusSchema,
+  bulkImportSchema,
+  bulkImportResultSchema,
   createUserSchema,
   idParamSchema,
   listUsersQuerySchema,
@@ -10,7 +14,9 @@ import {
   suspendUserSchema,
   updateUserSchema,
   userDetailSchema,
+  userExportSchema,
 } from './users.schema.js';
+import * as lifecycle from './users.lifecycle.service.js';
 import * as userService from './users.service.js';
 
 /**
@@ -99,6 +105,150 @@ const usersRoutes: FastifyPluginAsync = async (fastify) => {
       preHandler: authorize('user:create'),
     },
     async (request, reply) => reply.status(201).send(await userService.create(request.body)),
+  );
+
+  /*
+   * The cohort import, `POST /users/bulk` (Phase 4).
+   *
+   * DECLARED BEFORE `/:id` and the same static-segment argument as `/me` above
+   * applies: find-my-way ranks a static segment above a parametric one, so `/bulk`
+   * is never parsed as an id and `idParamSchema` never gets a chance to 422 it.
+   *
+   * ITS OWN RATE-LIMIT BUCKET, which is the brief's "rate-limited separately from
+   * the rest of `/users`" and is a separate `config.rateLimit` rather than a
+   * `preHandler`. The distinction is not cosmetic: the global bucket is
+   * 300/minute per IP over the WHOLE API (ratelimit.plugin.ts), and a hundred-row
+   * import arriving every thirty seconds would spend a third of the entire
+   * instance's request budget on one admin's afternoon. Ten per hour keyed on the
+   * ACTING ADMIN rather than the address is the right shape for the operation — a
+   * school imports a cohort a handful of times a year, and an admin behind a shared
+   * NAT should not spend the school's budget.
+   *
+   * `keyGenerator` is what makes it per-admin: the global one is `request.ip`, so
+   * every teacher in a college sharing one NAT would share this bucket too. The
+   * unauthenticated case (an anonymous caller) has no actor and falls back to the
+   * IP, which is the right answer for a request that is about to be refused anyway.
+   *
+   * AND ITS OWN ACTION, `user:bulk-create`, rather than reusing `user:create` —
+   * see policy.ts for why the two are deliberately distinct cells.
+   */
+  app.post(
+    '/bulk',
+    {
+      // Size cap is the schema's `BULK_IMPORT_MAX_ROWS`; this is the second, and
+      // the byte-level, one. A hundred rows of a createUser body is well under
+      // Fastify's 1 MiB default, so the row cap binds first and this is the
+      // backstop for a caller who sends a thousand rows of something else entirely.
+      bodyLimit: 512 * 1024,
+      config: {
+        rateLimit: {
+          max: 10,
+          timeWindow: 60 * 60 * 1000,
+          /*
+           * `groupId`, not `nameSpace`. A route-level `config.rateLimit` is merged
+           * onto the GLOBAL plugin registration, and `nameSpace` is a
+           * plugin-registration option only — the per-route type does not have it.
+           * `groupId` is the documented mechanism for exactly this: it is appended
+           * to the computed key, so `rl:global:<actorId>users-bulk` is a different
+           * Redis key from the global `rl:global:<ip>`, and the two counters cannot
+           * see each other. That is what "separately rate-limited" has to mean — a
+           * shared counter is the same counter with a different label on it.
+           */
+          groupId: 'users-bulk',
+          /*
+           * Keyed on the ACTING ADMIN, not the address. The global generator is
+           * `request.ip`, so every teacher in a college behind one NAT would share
+           * this bucket and one admin's import would 429 a colleague mid-session.
+           * The anonymous fallback is the IP, which is the right key for a request
+           * that `authorize` is about to refuse anyway.
+           */
+          keyGenerator: (request: FastifyRequest) => request.actor?.id ?? request.ip,
+        },
+      },
+      schema: { body: bulkImportSchema, response: { 200: bulkImportResultSchema } },
+      preHandler: authorize('user:bulk-create'),
+    },
+    async (request) => userService.bulkImport(request.body),
+  );
+
+  /*
+   * `GET /users/me/export` — a data-subject access request, satisfied by the API
+   * rather than by a hand-written database query.
+   *
+   * 200, not 201 or 202: nothing was created and nothing is pending, and a status
+   * that implies otherwise would be a small lie in a document somebody is about to
+   * hand to a regulator. A GET with no side effects is also why this needs no
+   * CSRF token beyond the same-origin check every GET here runs.
+   *
+   * The subject is the caller, so `user:export` is `isSelf` for all three roles and
+   * the route takes no id — there is no `/:id/export`, and adding one would be an
+   * export of a third party, which policy.ts says in as many words.
+   */
+  app.get(
+    '/me/export',
+    {
+      schema: { response: { 200: userExportSchema } },
+      preHandler: authorize('user:export', selfSubject),
+    },
+    async (request) => lifecycle.exportMine(requireActor(request).id),
+  );
+
+  /*
+   * `GET /users/me/deletion` — the caller's own pending deletion, so the SPA can
+   * render the deadline and offer the cancel without a second write. Read-only, so
+   * it needs no `confirmEmail`.
+   */
+  app.get(
+    '/me/deletion',
+    {
+      schema: { response: { 200: accountDeletionStatusSchema } },
+      preHandler: authorize('user:delete', selfSubject),
+    },
+    async (request) => lifecycle.deletionStatus(requireActor(request).id),
+  );
+
+  /*
+   * `POST /users/me/deletion` — schedule the caller's own deletion.
+   *
+   * 202, not 200, and the distinction is the feature. The account is NOT deleted:
+   * the response is a schedule with a deadline in it, and `cancellation is still
+   * possible` is exactly what 202 means. A 200 here would tell the caller — and any
+   * script reading it — that the thing was done, and the person would then discover
+   * a month later that the undo they were told about had a deadline they never saw.
+   *
+   * The body is NOT `.nullish()`, unlike the two bodyless POSTs on this router.
+   * That is deliberate and it is the opposite rule: a bodyless DELETE REQUEST
+   * confirms nothing, and the confirm-by-typing is a real control whose server
+   * half is the `confirmEmail` comparison in the service. Binding it `.nullish()`
+   * would let `POST /users/me/deletion` with no body at all schedule a thirty-day
+   * clock, which is the one outcome nobody asked for.
+   */
+  app.post(
+    '/me/deletion',
+    {
+      schema: { body: accountDeletionSchema, response: { 202: accountDeletionStatusSchema } },
+      preHandler: authorize('user:delete', selfSubject),
+    },
+    async (request, reply) => {
+      const actor = requireActor(request);
+      return reply
+        .status(202)
+        .send(await lifecycle.requestDeletion(actor.id, request.body.confirmEmail));
+    },
+  );
+
+  /*
+   * `DELETE /users/me/deletion` — the undo, inside the cool-off. No body: cancelling
+   * needs no confirmation, because the failure mode of a spurious cancel is that
+   * somebody's account stays alive, which is the recoverable direction.
+   */
+  app.delete(
+    '/me/deletion',
+    {
+      schema: { response: { 200: accountDeletionStatusSchema } },
+      preHandler: authorize('user:delete', selfSubject),
+    },
+    async (request) => lifecycle.cancelDeletion(requireActor(request).id),
   );
 
   /*

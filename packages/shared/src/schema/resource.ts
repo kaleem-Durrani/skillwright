@@ -4,11 +4,21 @@ import { paginationQuerySchema } from './pagination.js';
 import { userSummarySchema } from './user.js';
 
 /**
- * Set by the creator, never inferred from a MIME type. ASSIGNMENT and QUIZ are
- * absent on purpose: the assessment engine is out of scope, and a reserved enum
- * value invites someone to half-build it.
+ * Set by the creator, never inferred from a MIME type.
+ *
+ * ASSIGNMENT was absent on purpose until migration 0010, and the reason it was
+ * absent is quoted rather than deleted: "a reserved enum value invites someone to
+ * half-build it." That was correct while there was no assessment engine, and the
+ * engine now exists — `Assignment.resourceId` points at one of these rows so an
+ * assignment's brief is course material with an author, a public flag and a
+ * course-scoped visibility answer already answered, rather than a second attachment
+ * mechanism for bytes this one already stores.
+ *
+ * QUIZ is still absent, and for the original reason: there is no question bank, no
+ * attempt timer and no autograding, so a QUIZ value today would be exactly the
+ * half-built thing the comment warns about.
  */
-export const resourceTypeSchema = z.enum(['DOCUMENT', 'VIDEO', 'LINK']);
+export const resourceTypeSchema = z.enum(['DOCUMENT', 'VIDEO', 'LINK', 'ASSIGNMENT']);
 export type ResourceTypeValue = z.infer<typeof resourceTypeSchema>;
 
 export const resourceSchema = z.object({

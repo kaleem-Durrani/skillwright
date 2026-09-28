@@ -607,6 +607,190 @@ const ATTENDANCE_CELLS: readonly Cell[] = [
   ),
 ];
 
+/*
+ * An ASSIGNMENT as its INTAKE. `assignment:read` is `enrolledApproved` for a student,
+ * and that rule reads `subject.enrollmentStatus` — the VIEWER's own status in the
+ * course the intake belongs to. PENDING is a request, not a seat, and the register
+ * will not carry somebody who was never marked present, so it is not enough.
+ */
+const ASSIGNMENT_IN_A_APPROVED: Subject = {
+  ...COURSE_A_LIVE_APPROVED,
+  id: 'as_1',
+};
+const ASSIGNMENT_IN_A_PENDING: Subject = { ...COURSE_A_LIVE_PENDING, id: 'as_1' };
+const ASSIGNMENT_IN_A_NO_ENROLMENT: Subject = { ...COURSE_A_LIVE, id: 'as_1' };
+const ASSIGNMENT_IN_B_APPROVED: Subject = {
+  id: 'as_2',
+  courseId: 'c_b',
+  courseTeacherId: TEACHER_B.id,
+  publishedAt: T0,
+  enrollmentStatus: 'APPROVED',
+};
+
+/*
+ * A SUBMISSION as itself. `studentId` is the ENROLLMENT's student, not a column of
+ * Submission — the row has no `studentId` and must not acquire one (schema.prisma).
+ *
+ * The last two fixtures are the #31 pair and they are the reason this block is
+ * hand-written rather than generated: a subject MISSING `studentId` and a subject
+ * carrying someone ELSE's must both deny, and only the first is a mistake anybody
+ * would make by accident.
+ */
+const SUBMISSION_OF_S1_IN_A: Subject = {
+  id: 'sub_1',
+  studentId: STUDENT_IN.id,
+  courseId: 'c_a',
+  courseTeacherId: TEACHER_A.id,
+};
+const SUBMISSION_OF_S2_IN_A: Subject = {
+  ...SUBMISSION_OF_S1_IN_A,
+  id: 'sub_2',
+  studentId: STUDENT_OUT.id,
+};
+const SUBMISSION_OF_S2_IN_B: Subject = {
+  id: 'sub_3',
+  studentId: STUDENT_OUT.id,
+  courseId: 'c_b',
+  courseTeacherId: TEACHER_B.id,
+};
+/** A loader that forgot the enrollment join: everything but the deciding field. */
+const SUBMISSION_WITHOUT_ITS_STUDENT: Subject = {
+  id: 'sub_4',
+  courseId: 'c_a',
+  courseTeacherId: TEACHER_A.id,
+};
+
+const ASSIGNMENT_CELLS: readonly Cell[] = [
+  no(
+    'anonymous reads an assignment brief',
+    ANON,
+    'assignment:read',
+    'anonymous:deny',
+    ASSIGNMENT_IN_A_APPROVED,
+  ),
+  ok(
+    'approved student reads the assignments on their own intake',
+    STUDENT_IN,
+    'assignment:read',
+    ASSIGNMENT_IN_A_APPROVED,
+  ),
+  // PENDING is a request, not a seat. `enrolledApproved` has always refused to count
+  // one, and an assessment brief is not a published syllabus a visitor may browse.
+  no(
+    'student whose request is still pending reads the assignments',
+    STUDENT_OUT,
+    'assignment:read',
+    'STUDENT:enrolledApproved',
+    ASSIGNMENT_IN_A_PENDING,
+  ),
+  no(
+    'student with no enrolment at all reads the assignments',
+    STUDENT_OUT,
+    'assignment:read',
+    'STUDENT:enrolledApproved',
+    ASSIGNMENT_IN_A_NO_ENROLMENT,
+  ),
+  ok(
+    'teacher reads the assignments on their own intake',
+    TEACHER_A,
+    'assignment:read',
+    ASSIGNMENT_IN_A_APPROVED,
+  ),
+  no(
+    "teacher reads another intake's assignments",
+    TEACHER_A,
+    'assignment:read',
+    'TEACHER:ownsCourse',
+    ASSIGNMENT_IN_B_APPROVED,
+  ),
+  ok('admin reads any assignment', ADMIN, 'assignment:read', ASSIGNMENT_IN_B_APPROVED),
+
+  no(
+    'student sets an assignment',
+    STUDENT_IN,
+    'assignment:create',
+    'STUDENT:deny',
+    ASSIGNMENT_IN_A_APPROVED,
+  ),
+  ok(
+    'teacher sets an assignment on their own intake',
+    TEACHER_A,
+    'assignment:create',
+    ASSIGNMENT_IN_A_APPROVED,
+  ),
+  no(
+    "teacher sets an assignment on another teacher's intake",
+    TEACHER_A,
+    'assignment:create',
+    'TEACHER:ownsCourse',
+    ASSIGNMENT_IN_B_APPROVED,
+  ),
+  no(
+    'anonymous sets an assignment',
+    ANON,
+    'assignment:create',
+    'anonymous:deny',
+    ASSIGNMENT_IN_A_APPROVED,
+  ),
+  ok('admin sets an assignment anywhere', ADMIN, 'assignment:create', ASSIGNMENT_IN_B_APPROVED),
+];
+
+const SUBMISSION_CELLS: readonly Cell[] = [
+  no('anonymous reads a hand-in', ANON, 'submission:read', 'anonymous:deny', SUBMISSION_OF_S1_IN_A),
+  ok('student reads their own hand-in', STUDENT_IN, 'submission:read', SUBMISSION_OF_S1_IN_A),
+  no(
+    "student reads another student's hand-in in the same course",
+    STUDENT_IN,
+    'submission:read',
+    'STUDENT:isEnrolledStudent',
+    SUBMISSION_OF_S2_IN_A,
+  ),
+  // #31, and the cell that makes the phase: a subject that does not carry the
+  // enrollment's studentId DENIES. It does not fall through to "any hand-in in a
+  // course you are enrolled on", and it does not throw — the same silent, safe,
+  // invisible refusal that has cost three features in this repository.
+  no(
+    'a hand-in whose subject never loaded its studentId denies rather than opens',
+    STUDENT_IN,
+    'submission:read',
+    'STUDENT:isEnrolledStudent',
+    SUBMISSION_WITHOUT_ITS_STUDENT,
+  ),
+  ok("teacher reads their class's hand-in", TEACHER_A, 'submission:read', SUBMISSION_OF_S1_IN_A),
+  no(
+    "teacher reads a hand-in in another teacher's course",
+    TEACHER_A,
+    'submission:read',
+    'TEACHER:ownsCourse',
+    SUBMISSION_OF_S2_IN_B,
+  ),
+  ok('admin reads any hand-in', ADMIN, 'submission:read', SUBMISSION_OF_S2_IN_B),
+
+  no(
+    'student grades their own hand-in',
+    STUDENT_IN,
+    'submission:grade',
+    'STUDENT:deny',
+    SUBMISSION_OF_S1_IN_A,
+  ),
+  ok('teacher grades in their own course', TEACHER_A, 'submission:grade', SUBMISSION_OF_S1_IN_A),
+  no(
+    "teacher grades in another teacher's course",
+    TEACHER_A,
+    'submission:grade',
+    'TEACHER:ownsCourse',
+    SUBMISSION_OF_S2_IN_B,
+  ),
+  no(
+    'anonymous grades a hand-in',
+    ANON,
+    'submission:grade',
+    'anonymous:deny',
+    SUBMISSION_OF_S1_IN_A,
+  ),
+  ok('admin grades any hand-in', ADMIN, 'submission:grade', SUBMISSION_OF_S2_IN_B),
+];
+
 const RESOURCE_CELLS: readonly Cell[] = [
   ok('anonymous reads a public resource', ANON, 'resource:read', RESOURCE_A_PUBLIC),
   no(
@@ -987,6 +1171,52 @@ const USER_CELLS: readonly Cell[] = [
   no('student lists users', STUDENT_IN, 'user:list', 'STUDENT:deny'),
   no('teacher lists users', TEACHER_A, 'user:list', 'TEACHER:deny'),
   ok('admin lists users', ADMIN, 'user:list'),
+
+  /*
+   * `user:bulk-create`, the cohort import. The cells are a copy of `user:create`'s
+   * on purpose rather than a shared constant: the whole argument for a SEPARATE
+   * action is that the two requests are not the same request, and a matrix that
+   * proved both of them through one shared row would stop being evidence of that.
+   * If somebody ever widens one of these four cells, the divergence shows up here
+   * as a failing test rather than in a production import.
+   */
+  no('anonymous imports a cohort', ANON, 'user:bulk-create', 'anonymous:deny'),
+  no('student imports a cohort', STUDENT_IN, 'user:bulk-create', 'STUDENT:deny'),
+  no('teacher imports a cohort', TEACHER_A, 'user:bulk-create', 'TEACHER:deny'),
+  ok('admin imports a cohort', ADMIN, 'user:bulk-create'),
+
+  /*
+   * `user:delete` — the rows below are the reason ADMIN is `isSelf` and not a bare
+   * `allow`. `ok('admin deletes a user', ADMIN, 'user:delete', OTHER_USER)` is the
+   * one cell that would turn a self-service privacy right into an admin verb, and it
+   * is refused here with the rule tag that says why.
+   */
+  no('anonymous deletes an account', ANON, 'user:delete', 'anonymous:deny', OTHER_USER),
+  ok('student deletes their own account', STUDENT_IN, 'user:delete', SELF_STUDENT),
+  no('student deletes somebody else', STUDENT_IN, 'user:delete', 'STUDENT:isSelf', OTHER_USER),
+  ok('teacher deletes their own account', TEACHER_A, 'user:delete', SELF_TEACHER),
+  no('teacher deletes somebody else', TEACHER_A, 'user:delete', 'TEACHER:isSelf', OTHER_USER),
+  ok('admin deletes their own account', ADMIN, 'user:delete', SELF_ADMIN),
+  no(
+    'admin deletes somebody else — suspension is the reversible admin verb',
+    ADMIN,
+    'user:delete',
+    'ADMIN:isSelf',
+    OTHER_USER,
+  ),
+
+  /*
+   * `user:export`, the data-subject access request. Self-only for `user:read`'s
+   * reason: an export is a copy of the record, and an admin who has the directory
+   * does not thereby get a machine-readable dump of a colleague's account.
+   */
+  no('anonymous exports an account', ANON, 'user:export', 'anonymous:deny', OTHER_USER),
+  ok('student exports their own data', STUDENT_IN, 'user:export', SELF_STUDENT),
+  no('student exports somebody else', STUDENT_IN, 'user:export', 'STUDENT:isSelf', OTHER_USER),
+  ok('teacher exports their own data', TEACHER_A, 'user:export', SELF_TEACHER),
+  no('teacher exports somebody else', TEACHER_A, 'user:export', 'TEACHER:isSelf', OTHER_USER),
+  ok('admin exports their own data', ADMIN, 'user:export', SELF_ADMIN),
+  no('admin exports somebody else', ADMIN, 'user:export', 'ADMIN:isSelf', OTHER_USER),
 ];
 
 const DEPARTMENT_CELLS: readonly Cell[] = [
@@ -1218,6 +1448,8 @@ const MATRIX: readonly Cell[] = [
   ...COURSE_CELLS,
   ...ENROLLMENT_CELLS,
   ...ATTENDANCE_CELLS,
+  ...ASSIGNMENT_CELLS,
+  ...SUBMISSION_CELLS,
   ...RESOURCE_CELLS,
   ...ANNOUNCEMENT_CELLS,
   ...COMMENT_CELLS,
@@ -1273,6 +1505,11 @@ const DESTRUCTIVE_ACTIONS: readonly Action[] = [
   'comment:delete',
   'department:delete',
   'user:suspend',
+  // Phase 6. A bulk import is a hundred-account write from a session the whole
+  // internet is looking at, and a deletion request has a thirty-day deadline
+  // running behind it — neither belongs on an account that resets on a schedule.
+  'user:bulk-create',
+  'user:delete',
 ];
 
 // ---------------------------------------------------------------------------
@@ -1298,6 +1535,8 @@ const groups: ReadonlyArray<readonly [string, readonly Cell[]]> = [
   ['course', COURSE_CELLS],
   ['enrollment', ENROLLMENT_CELLS],
   ['attendance', ATTENDANCE_CELLS],
+  ['assignment', ASSIGNMENT_CELLS],
+  ['submission', SUBMISSION_CELLS],
   ['resource', RESOURCE_CELLS],
   ['announcement', ANNOUNCEMENT_CELLS],
   ['comment', COMMENT_CELLS],

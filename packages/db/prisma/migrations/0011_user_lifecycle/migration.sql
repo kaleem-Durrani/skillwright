@@ -1,0 +1,77 @@
+-- The account lifecycle, finally reachable.
+--
+-- `User.deletedAt` has existed since the first migration and NOTHING has ever
+-- written it. There was no column for a request, no column for a deadline, and no
+-- endpoint: a person who asked to be deleted, and the registrar who had to answer
+-- them, both had to run a database query by hand. This migration adds the two
+-- timestamps that turn "we should soft-delete this" into a scheduled fact, and the
+-- index that makes the schedule findable.
+--
+-- WHY TWO COLUMNS AND NOT ONE
+--
+-- `deletedAt` is the moment the account stops existing, and setting it is the
+-- irreversible part. Writing it the instant somebody clicks "delete my account"
+-- would be a one-click, unappealable account deletion served over HTTP by a
+-- product whose entire purpose is being the system of record for somebody's
+-- qualification — the exact class of endpoint the rest of this schema refuses to
+-- build. So a request writes `deletionRequestedAt` and `deletionEffectiveAt`, and
+-- nothing about the account changes until the second one passes. That gap is the
+-- cool-off, and it is the same reason `Enrollment.status` has a terminal state
+-- that Phase 1 still gave its own correction verb (`enrollment:uncomplete`): a
+-- terminal state with no undo is a data-entry trap, not a safety property.
+--
+-- The window is deliberately long. It is not a confirmation delay bolted onto an
+-- instant delete; it is the interval in which a person who clicked the button by
+-- accident, or under pressure, can still sign in and cancel. Sessions are destroyed
+-- the moment the request lands, so the account is not usable by anyone else in the
+-- meantime — the only party who can undo this is the person who started it, and they
+-- can undo it precisely because they still hold their password.
+--
+-- WHY THE COLUMNS ARE NULLABLE AND SEPARATE RATHER THAN ONE ENUM
+--
+-- A status column would have to answer "what happens when someone cancels" and
+-- "what happens when the deadline passes" with the same vocabulary, and the
+-- transitions between them are not the transitions the account's own `status`
+-- column models. Two nullable timestamps compose without a new state to reason
+-- about: both null is an ordinary account, `deletionRequestedAt` set and
+-- `deletionEffectiveFor` in the future is a scheduled deletion, and `deletedAt` set
+-- is the finished one. `deletedAt` alone already means "gone" everywhere else in
+-- this schema (every read filters it — see users.service.ts's `detailById`), so
+-- finalisation is one ordinary UPDATE and the existing soft-delete machinery is the
+-- whole implementation.
+--
+-- WHAT HAPPENS TO THE REST OF THE ROW
+--
+-- Nothing is destroyed. Enrolments, attendance, grades, comments, notifications and
+-- the audit trail all survive the person, and that is the decision rather than an
+-- oversight. This schema's rule 3 is that anything a human can remove is soft
+-- deleted, and rule 2 is that every relation declares its `onDelete` explicitly —
+-- three of them (`Course.teacherId`, `Resource.authorId`, `Announcement.authorId`)
+-- are `Restrict` precisely so that "losing a teacher must not silently delete their
+-- courses". A vocational school that issued a qualification in somebody's name and
+-- then deleted the record of them is worse than one that keeps a dormant row, and a
+-- hard delete is not even available here: it would be refused by those three foreign
+-- keys for any teacher who ever taught. Soft delete is what the schema was designed
+-- to permit, and the person keeps their data through `GET /users/me/export`, which
+-- is the other half of this phase.
+--
+-- `User.email` is `@db.Citext` with a unique index that spans soft-deleted rows, so
+-- a deleted account's address stays taken. That is deliberate and pre-existing —
+-- `users.service.assertEmailAvailable` already refuses a soft-deleted address rather
+-- than creating a second person on it — and this migration does not change it.
+--
+-- Migrations are APPLIED, never pushed: `prisma migrate deploy` replays this file,
+-- so the SQL below is the only description of the change that has to stay true.
+
+-- AlterTable
+ALTER TABLE "User" ADD COLUMN     "deletionRequestedAt" TIMESTAMP(3),
+                            ADD COLUMN     "deletionEffectiveFor" TIMESTAMP(3);
+
+-- CreateIndex
+--
+-- The sweeper that eventually finalises a due deletion — and the lazy finaliser in
+-- session.service.ts's `findLiveSession`, which is the one that runs today — both
+-- look for `deletionEffectiveFor <= now()` on rows where `deletedAt IS NULL`. That
+-- predicate is only cheap with an index here; without it the check degrades to a
+-- sequential scan of the whole user table on every authenticated request.
+CREATE INDEX "User_deletionEffectiveFor_idx" ON "User"("deletionEffectiveFor");

@@ -7,6 +7,7 @@ import type { AppInstance } from '../src/app.js';
 import { hashPassword } from '../src/lib/password.js';
 import {
   buildApp,
+  clearAuditEvents,
   cookieHeader,
   createDepartment,
   originHeaders,
@@ -162,12 +163,14 @@ describe('GET /admin/stats', () => {
     /*
      * Cleared AFTER the fixtures above, because User is in AUDITED_MODELS
      * (packages/db/src/audit.ts:51-59) and every `createAccount` above therefore wrote
-     * a row of its own. Deleting from AuditEvent is possible here only because
-     * migration 0002:107-113 leaves the REVOKE commented out for local development,
-     * where the owner and application roles are the same role; in production this
-     * table is append-only and a test could not do this.
+     * a row of its own. Since migration 0012 the table really IS append-only — a
+     * trigger refuses DELETE — so this goes through the one escape hatch the trigger
+     * accepts rather than a plain `deleteMany` that now raises. The previous version of
+     * this comment said deleting was possible only because 0002 left the REVOKE
+     * commented out; that described the table as unprotected, which is what the
+     * migration made false.
      */
-    await prisma.auditEvent.deleteMany({});
+    await clearAuditEvents();
     await prisma.auditEvent.createMany({
       data: [
         { action: 'CREATE', entityType: 'Department', entityId: 'today', createdAt: new Date() },
@@ -188,7 +191,7 @@ describe('GET /admin/stats', () => {
 
   it('counts the audit row the Prisma extension writes, not one written by hand', async () => {
     const admin = await signedIn('admin5@example.com', 'ADMIN');
-    await prisma.auditEvent.deleteMany({});
+    await clearAuditEvents();
 
     // Department is in AUDITED_MODELS, so this single create produces exactly one
     // audit row — written by the extension on its own pool (audit.ts:234-428), never
