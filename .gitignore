@@ -43,6 +43,10 @@ docs/*
 !docs/permissions.md
 !docs/PROGRESS.md
 !docs/LESSONS-LEARNED.md
+# The deferral register: what is deliberately NOT done, and what would unblock it.
+# Same reasoning as the two logs above — a decision to leave something alone that
+# lives only in a commit message is a decision the next person undoes by accident.
+!docs/DEFERRED.md
 # The README's hero image and gallery live here. `docs/*` above would have swallowed
 # them, and a screenshot that is not committed is a broken image on the one page a
 # stranger actually reads — the same shape of miss as the anchored `/uploads/` rule.
