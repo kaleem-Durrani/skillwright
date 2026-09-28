@@ -28,6 +28,19 @@ function refuse(rule: string, reason: string): PolicyResult {
  * would outlive the reset. `user:export` is deliberately NOT here: it is a read of
  * the caller's own record, and refusing it would leave a privacy request that the
  * only route to satisfies with a database query — the exact thing Phase 6 replaced.
+ *
+ * Phase 3 added `certificate:issue` and `certificate:revoke`, and the pair is decided
+ * together on one ground: a demo account is SHARED and resets on a schedule, while a
+ * certificate is the one row in this system that is designed to outlive every account
+ * involved in it (Phase 6's own rule — enrolments, grades and the audit trail survive
+ * the person). A demo session issuing one leaves a real qualification naming a real
+ * user, attached to a real PDF in a real bucket, and neither issuing nor revoking has
+ * an undo that does not involve a second shared account doing the same thing again.
+ *
+ * `certificate:read` and `certificate:verify` stay OPEN, on the rule the rest of this
+ * set is built from: everything non-destructive stays open so the demo is worth
+ * logging into. A demo viewer can look at a certificate and check a reference from its
+ * QR code — which is the only way anybody sees either — and cannot manufacture one.
  */
 const DEMO_DENIED: ReadonlySet<Action> = new Set<Action>([
   'course:delete',
@@ -38,6 +51,8 @@ const DEMO_DENIED: ReadonlySet<Action> = new Set<Action>([
   'user:suspend',
   'user:bulk-create',
   'user:delete',
+  'certificate:issue',
+  'certificate:revoke',
 ]);
 
 /** The single action a half-authenticated session is permitted to complete. */

@@ -11,9 +11,9 @@ calling `can()`. Nothing here was written by hand, which is why it cannot
 disagree with the code — and if it ever did, the `permissions-doc` job in CI
 would fail before the change could merge.
 
-- **58** actions, derived from the policy object's own keys
-- **232** cells in the role matrix
-- **290** cells in the state matrix
+- **64** actions, derived from the policy object's own keys
+- **256** cells in the role matrix
+- **320** cells in the state matrix
 - Asserted independently in `packages/shared/test/policy-matrix.test.ts`
 
 ## Reading a cell
@@ -46,6 +46,10 @@ rule reads named fields off `Subject` and denies when they are absent.
 | `attendance:mark` | ✗ deny | ✗ deny | `ownsCourse` | ✓ allow |
 | `attendance:read` | ✗ deny | `isEnrolledStudent` | `ownsCourse` | ✓ allow |
 | `audit:read` | ✗ deny | ✗ deny | ✗ deny | ✓ allow |
+| `certificate:issue` | ✗ deny | ✗ deny | `ownsCourse` | ✓ allow |
+| `certificate:read` | ✗ deny | `isEnrolledStudent` | `or(ownsCourse, isAuthor)` | ✓ allow |
+| `certificate:revoke` | ✗ deny | ✗ deny | ✗ deny | ✓ allow |
+| `certificate:verify` | ✓ allow | ✓ allow | ✓ allow | ✓ allow |
 | `comment:create` | ✗ deny | ✓ allow | ✓ allow | ✓ allow |
 | `comment:delete` | ✗ deny | `isAuthor` | `or(isAuthor, ownsCourse)` | ✓ allow |
 | `comment:read` | ✗ deny | ✓ allow | ✓ allow | ✓ allow |
@@ -76,6 +80,8 @@ rule reads named fields off `Subject` and denies when they are absent.
 | `mfa:verify` | ✗ deny | ✓ allow | ✓ allow | ✓ allow |
 | `notification:read` | ✗ deny | `isSelf` | `isSelf` | `isSelf` |
 | `notification:update` | ✗ deny | `isSelf` | `isSelf` | `isSelf` |
+| `qualification:create` | ✗ deny | ✗ deny | ✗ deny | ✓ allow |
+| `qualification:read` | ✗ deny | ✓ allow | ✓ allow | ✓ allow |
 | `resource:create` | ✗ deny | ✗ deny | `ownsCourse` | ✓ allow |
 | `resource:delete` | ✗ deny | ✗ deny | `ownsCourse` | ✓ allow |
 | `resource:download` | ✗ deny | `or(and(isPublic, isPublished), enrolledApproved)` | `or(and(isPublic, isPublished), ownsCourse, isAuthor)` | ✓ allow |
@@ -128,6 +134,10 @@ demo: reads and ordinary mutations pass, deletions and suspensions do not.
 | `attendance:mark` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `attendance:read` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `audit:read` | ✗ `TEACHER:deny` | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✗ `TEACHER:deny` |
+| `certificate:issue` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✗ `provenance:DEMO` |
+| `certificate:read` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
+| `certificate:revoke` | ✗ `TEACHER:deny` | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✗ `provenance:DEMO` |
+| `certificate:verify` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `comment:create` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `comment:delete` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✗ `provenance:DEMO` |
 | `comment:read` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
@@ -158,6 +168,8 @@ demo: reads and ordinary mutations pass, deletions and suspensions do not.
 | `mfa:verify` | ✓ | ✓ | ✗ `status:SUSPENDED` | ✓ | ✓ |
 | `notification:read` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `notification:update` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
+| `qualification:create` | ✗ `TEACHER:deny` | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✗ `TEACHER:deny` |
+| `qualification:read` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `resource:create` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |
 | `resource:delete` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✗ `provenance:DEMO` |
 | `resource:download` | ✓ | ✗ `status:PENDING_VERIFICATION` | ✗ `status:SUSPENDED` | ✗ `provenance:MFA_PENDING` | ✓ |

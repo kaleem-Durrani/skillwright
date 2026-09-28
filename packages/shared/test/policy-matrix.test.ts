@@ -791,6 +791,205 @@ const SUBMISSION_CELLS: readonly Cell[] = [
   ok('admin grades any hand-in', ADMIN, 'submission:grade', SUBMISSION_OF_S2_IN_B),
 ];
 
+/*
+ * A CERTIFICATE, as a student holds it. `studentId` is the holder and the only field
+ * a student's access rests on; `courseTeacherId` is reached through the seat the
+ * certificate was issued against, which is how `ownsCourse` can decide it. `authorId`
+ * is the ISSUER — see `loadCertificateSubject` in certificates.service.ts, which says
+ * in a comment that it is putting `issuedById` on that key, because `isAuthor` reads
+ * `authorId` and every other `Subject` field is optional.
+ */
+const CERTIFICATE_OF_S1_IN_A: Subject = {
+  id: 'cert_1',
+  studentId: STUDENT_IN.id,
+  courseId: 'c_a',
+  courseTeacherId: TEACHER_A.id,
+  authorId: TEACHER_A.id,
+};
+const CERTIFICATE_OF_S2_IN_A: Subject = {
+  ...CERTIFICATE_OF_S1_IN_A,
+  id: 'cert_2',
+  studentId: STUDENT_OUT.id,
+};
+const CERTIFICATE_OF_S2_IN_B: Subject = {
+  ...CERTIFICATE_OF_S1_IN_A,
+  id: 'cert_3',
+  studentId: STUDENT_OUT.id,
+  courseId: 'c_b',
+  courseTeacherId: TEACHER_B.id,
+  authorId: ADMIN.id,
+};
+/** #31 for this phase: everything except the field `isEnrolledStudent` reads. */
+const CERTIFICATE_WITHOUT_ITS_STUDENT: Subject = {
+  id: 'cert_4',
+  courseId: 'c_a',
+  courseTeacherId: TEACHER_A.id,
+};
+/**
+ * Issued by a teacher whose seat has since been hard-deleted, so there is no course
+ * to own. `ownsCourse` reads an absent field and denies; `isAuthor` is what saves it.
+ */
+const CERTIFICATE_ISSUERLESS_COURSE: Subject = {
+  id: 'cert_5',
+  studentId: STUDENT_IN.id,
+  courseId: 'c_a',
+  authorId: TEACHER_A.id,
+};
+
+/** The SEAT a certificate is issued against, which is what `certificate:issue` reads. */
+const COMPLETED_ENROLLMENT_S1_IN_A: Subject = {
+  id: 'enr_1',
+  studentId: STUDENT_IN.id,
+  courseId: 'c_a',
+  courseTeacherId: TEACHER_A.id,
+  enrollmentStatus: 'COMPLETED',
+};
+const COMPLETED_ENROLLMENT_S2_IN_B: Subject = {
+  id: 'enr_2',
+  studentId: STUDENT_OUT.id,
+  courseId: 'c_b',
+  courseTeacherId: TEACHER_B.id,
+  enrollmentStatus: 'COMPLETED',
+};
+
+const CERTIFICATE_CELLS: readonly Cell[] = [
+  no(
+    'anonymous reads a certificate',
+    ANON,
+    'certificate:read',
+    'anonymous:deny',
+    CERTIFICATE_OF_S1_IN_A,
+  ),
+  ok('student reads their own certificate', STUDENT_IN, 'certificate:read', CERTIFICATE_OF_S1_IN_A),
+  no(
+    "student reads another student's certificate",
+    STUDENT_IN,
+    'certificate:read',
+    'STUDENT:isEnrolledStudent',
+    CERTIFICATE_OF_S2_IN_A,
+  ),
+  no(
+    'a certificate whose subject never loaded its studentId denies rather than opens',
+    STUDENT_IN,
+    'certificate:read',
+    'STUDENT:isEnrolledStudent',
+    CERTIFICATE_WITHOUT_ITS_STUDENT,
+  ),
+  ok(
+    'teacher reads a certificate in their own course',
+    TEACHER_A,
+    'certificate:read',
+    CERTIFICATE_OF_S1_IN_A,
+  ),
+  ok(
+    'teacher reads a certificate they issued with no course left to own',
+    TEACHER_A,
+    'certificate:read',
+    CERTIFICATE_ISSUERLESS_COURSE,
+  ),
+  no(
+    "teacher reads a certificate in another teacher's course",
+    TEACHER_A,
+    'certificate:read',
+    'TEACHER:or(ownsCourse, isAuthor)',
+    CERTIFICATE_OF_S2_IN_B,
+  ),
+  ok('admin reads any certificate', ADMIN, 'certificate:read', CERTIFICATE_OF_S2_IN_B),
+
+  no(
+    'anonymous issues a certificate',
+    ANON,
+    'certificate:issue',
+    'anonymous:deny',
+    COMPLETED_ENROLLMENT_S1_IN_A,
+  ),
+  no(
+    'student issues their own certificate',
+    STUDENT_IN,
+    'certificate:issue',
+    'STUDENT:deny',
+    COMPLETED_ENROLLMENT_S1_IN_A,
+  ),
+  ok(
+    'teacher issues against a completed seat in their own course',
+    TEACHER_A,
+    'certificate:issue',
+    COMPLETED_ENROLLMENT_S1_IN_A,
+  ),
+  no(
+    "teacher issues against a seat in another teacher's course",
+    TEACHER_A,
+    'certificate:issue',
+    'TEACHER:ownsCourse',
+    COMPLETED_ENROLLMENT_S2_IN_B,
+  ),
+  ok(
+    'admin issues against any completed seat',
+    ADMIN,
+    'certificate:issue',
+    COMPLETED_ENROLLMENT_S2_IN_B,
+  ),
+
+  // Revocation is the narrowest cell in the table, and the three refusals are the
+  // point: a student cannot withdraw their own, a teacher cannot withdraw one from
+  // their own course, and an admin can.
+  no(
+    'student revokes their own certificate',
+    STUDENT_IN,
+    'certificate:revoke',
+    'STUDENT:deny',
+    CERTIFICATE_OF_S1_IN_A,
+  ),
+  no(
+    'teacher revokes a certificate in their own course',
+    TEACHER_A,
+    'certificate:revoke',
+    'TEACHER:deny',
+    CERTIFICATE_OF_S1_IN_A,
+  ),
+  no(
+    'anonymous revokes a certificate',
+    ANON,
+    'certificate:revoke',
+    'anonymous:deny',
+    CERTIFICATE_OF_S1_IN_A,
+  ),
+  ok('admin revokes any certificate', ADMIN, 'certificate:revoke', CERTIFICATE_OF_S1_IN_A),
+
+  /*
+   * The five `certificate:verify` cells, and the only action in this table that is
+   * `allow` for anonymous.
+   *
+   * The first is the whole argument in one line: there is no caller to authorise, so
+   * there is nothing to read and nothing to compare. The second is the failure mode
+   * this cell is shaped to avoid — had it been composed from any `Subject`-reading
+   * rule, EVERY ONE of these five would be a denial, because every subject a caller
+   * could supply would be the wrong one (a certificate belongs to the holder, not to
+   * whoever is asking) and an absent field denies.
+   */
+  ok('anonymous verifies a reference', ANON, 'certificate:verify'),
+  ok(
+    'anonymous verifies with a subject present and irrelevant',
+    ANON,
+    'certificate:verify',
+    CERTIFICATE_OF_S1_IN_A,
+  ),
+  ok('a student verifies a reference', STUDENT_IN, 'certificate:verify'),
+  ok('a teacher verifies a reference', TEACHER_A, 'certificate:verify'),
+  ok('an admin verifies a reference', ADMIN, 'certificate:verify'),
+];
+
+const QUALIFICATION_CELLS: readonly Cell[] = [
+  no('anonymous reads the catalogue', ANON, 'qualification:read', 'anonymous:deny'),
+  ok('student reads the catalogue', STUDENT_IN, 'qualification:read'),
+  ok('teacher reads the catalogue', TEACHER_A, 'qualification:read'),
+  ok('admin reads the catalogue', ADMIN, 'qualification:read'),
+  no('anonymous adds to the catalogue', ANON, 'qualification:create', 'anonymous:deny'),
+  no('student adds to the catalogue', STUDENT_IN, 'qualification:create', 'STUDENT:deny'),
+  no('teacher adds to the catalogue', TEACHER_A, 'qualification:create', 'TEACHER:deny'),
+  ok('admin adds to the catalogue', ADMIN, 'qualification:create'),
+];
+
 const RESOURCE_CELLS: readonly Cell[] = [
   ok('anonymous reads a public resource', ANON, 'resource:read', RESOURCE_A_PUBLIC),
   no(
@@ -1450,6 +1649,8 @@ const MATRIX: readonly Cell[] = [
   ...ATTENDANCE_CELLS,
   ...ASSIGNMENT_CELLS,
   ...SUBMISSION_CELLS,
+  ...CERTIFICATE_CELLS,
+  ...QUALIFICATION_CELLS,
   ...RESOURCE_CELLS,
   ...ANNOUNCEMENT_CELLS,
   ...COMMENT_CELLS,
@@ -1496,6 +1697,19 @@ const ANONYMOUS_ALLOWED: readonly Action[] = [
   'resource:read',
   // Registration cannot happen without it — see the rule's comment in policy.ts.
   'department:list',
+  /*
+   * Phase 3, and the only action on this list that reaches a HOLDER'S OWN record
+   * rather than a course, a post or a file.
+   *
+   * It is here because a certificate is worthless without it. The document exists so
+   * that a stranger can check it, and the stranger has no account; refusing them would
+   * leave every certificate in the system an ornament. What the allow does NOT do is
+   * hand out anything: `verifyResultSchema` carries a name, a qualification, a date
+   * and a boolean, and the row's id, the holder's email and the grounds of any
+   * revocation are all absent by construction. The reference behind the lookup is 128
+   * bits of CSPRNG output, so the space cannot be walked whatever this cell says.
+   */
+  'certificate:verify',
 ];
 
 const DESTRUCTIVE_ACTIONS: readonly Action[] = [
@@ -1510,6 +1724,11 @@ const DESTRUCTIVE_ACTIONS: readonly Action[] = [
   // running behind it — neither belongs on an account that resets on a schedule.
   'user:bulk-create',
   'user:delete',
+  // Phase 3. A certificate is designed to outlive every account involved in it, so
+  // manufacturing or withdrawing one from a shared account that resets on a schedule
+  // leaves a real qualification nobody can undo with the same credentials.
+  'certificate:issue',
+  'certificate:revoke',
 ];
 
 // ---------------------------------------------------------------------------
@@ -1537,6 +1756,8 @@ const groups: ReadonlyArray<readonly [string, readonly Cell[]]> = [
   ['attendance', ATTENDANCE_CELLS],
   ['assignment', ASSIGNMENT_CELLS],
   ['submission', SUBMISSION_CELLS],
+  ['certificate', CERTIFICATE_CELLS],
+  ['qualification', QUALIFICATION_CELLS],
   ['resource', RESOURCE_CELLS],
   ['announcement', ANNOUNCEMENT_CELLS],
   ['comment', COMMENT_CELLS],
@@ -1559,7 +1780,7 @@ for (const [groupName, cells] of groups) {
 }
 
 describe('anonymous surface', () => {
-  it('is exactly four actions, and no more', () => {
+  it('is exactly the five actions listed above, and no more', () => {
     const reachable = ACTIONS.filter((action) => can(null, action, PERMISSIVE_SUBJECT).allowed);
     expect([...reachable].sort()).toEqual([...ANONYMOUS_ALLOWED].sort());
   });

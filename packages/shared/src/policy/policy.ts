@@ -49,6 +49,14 @@ export type Action =
   // submission
   | 'submission:read'
   | 'submission:grade'
+  // certificate
+  | 'certificate:read'
+  | 'certificate:issue'
+  | 'certificate:revoke'
+  | 'certificate:verify'
+  // qualification catalogue
+  | 'qualification:read'
+  | 'qualification:create'
   // resource
   | 'resource:read'
   | 'resource:create'
@@ -386,6 +394,156 @@ export const POLICY: PolicyTable = definePolicy({
   },
 
   // -------------------------------------------------------------------------
+  // Certificate
+  //
+  // The last link in the chain the feature plan opened: a vocational school exists to
+  // issue a qualification, and until this phase the repository could seat a student,
+  // mark them present, collect their work and record them COMPLETED (0009) with nothing
+  // at the end of it. `Enrollment.completedAt` is a date; a certificate is the document
+  // somebody is given.
+  //
+  // Four actions, and they divide by WHO IS BEING ASKED ABOUT rather than by what is
+  // being done, which is why the two read/issue rules take a subject and the other two
+  // do not.
+  // -------------------------------------------------------------------------
+  'certificate:read': {
+    anonymous: deny,
+    /*
+     * Own certificates only, and the field is `studentId` — the same shape
+     * `submission:read` uses for the same reason (a student's whole access rests on
+     * that one join, and a loader that forgets it denies silently).
+     */
+    STUDENT: isEnrolledStudent,
+    /*
+     * `or(ownsCourse, isAuthor)`, which is `resource:read`'s teacher cell minus the
+     * public branch, and deliberately the same composition.
+     *
+     * `ownsCourse` is the teacher's answer for a certificate issued out of a seat on
+     * their course, and it is the same rule `enrollment:complete` already decided on
+     * — the authority to record a completion is the authority to issue the document
+     * that records it. `isAuthor` is the other half, and it is not decoration: the
+     * issuer of a certificate whose `enrollmentId` has been nulled (the intake was
+     * hard-deleted, which soft delete makes rare but not impossible) would otherwise
+     * lose sight of a document they personally signed.
+     *
+     * `isAuthor` reads `subject.authorId`, so the certificate's subject loader puts
+     * `issuedById` on that exact key. That is a documented mapping, not a rename: the
+     * loader says so in a comment, and a key that is NOT written there denies rather
+     * than opens (LESSONS-LEARNED #18).
+     */
+    TEACHER: or(ownsCourse, isAuthor),
+    ADMIN: allow,
+  },
+  'certificate:issue': {
+    anonymous: deny,
+    STUDENT: deny,
+    /*
+     * The subject is the ENROLMENT named in the body, and there is no row yet, so
+     * this is `ownsCourse` for the same reason `resource:create` and
+     * `assignment:create` are: it is what stops a teacher certifying a seat on a
+     * colleague's course by guessing an id.
+     *
+     * The service then refuses an enrolment that is not COMPLETED, and that is a data
+     * fact rather than a permission — which is why it is not a fifth action. A rule
+     * reading "is this enrolment in a state" is a transition check, and this
+     * repository states those in one place (`ALLOWED_TRANSITIONS`,
+     * enrollments.service.ts) rather than in a policy cell per verb.
+     */
+    TEACHER: ownsCourse,
+    ADMIN: allow,
+  },
+  'certificate:revoke': {
+    anonymous: deny,
+    STUDENT: deny,
+    /*
+     * Admin only, and the narrowest cell in this table.
+     *
+     * Every other verb here is `ownsCourse` for a teacher, on the reasoning
+     * `enrollment:complete` states verbatim: the authority to record a qualification is
+     * the authority to correct it. Revocation is different in kind, not in degree. It
+     * is a public act — `GET /certificates/verify/:reference` is unauthenticated and
+     * will say so to anybody holding the reference — it is not a correction the person
+     * affected can dispute from the page, and a qualification is the one record in this
+     * system whose consequences outlive the account that holds it. A teacher who
+     * regrets an issue is a teacher who asks an admin.
+     */
+    TEACHER: deny,
+    ADMIN: allow,
+  },
+  /*
+   * `GET /certificates/verify/:reference` — the ONE unauthenticated action this
+   * repository has added, and the only reason is the endpoint's contract.
+   *
+   * WHY IT HAS NO SUBJECT. Not because none was convenient to load — because there is
+   * no caller to authorise. A verify request arrives from an employer with a printout
+   * and no account, and the entire value of the route is that they do not need one. A
+   * subject here would be a fiction: the thing being read is somebody else's
+   * certificate, and the anonymous cell is reached precisely when the requester has no
+   * identity to compare against it.
+   *
+   * WHY `allow` AND NOT SOMETHING NARROWER. Because `allow` is the ONLY cell here that
+   * says what it means. Every rule that reads a `Subject` field must deny when the
+   * field is absent (LESSONS-LEARNED #15), so a hypothetical `certificate:verify`
+   * composed from `or(isSelf, isAuthor)` would refuse every single caller of the route
+   * — and fail in the direction of a broken feature rather than a closed door, which
+   * is the shape of mistake this repository has now paid for three times.
+   *
+   * WHAT THE ALLOW DOES NOT MEAN. It is not a hole in the private surface. The
+   * reference is 128 bits of CSPRNG output (see `referenceSchema` in
+   * schema/certificate.ts), so the search space cannot be enumerated whatever this
+   * cell says; the route answers 404 for an unknown reference and 200 for a known one,
+   * carries no rate-limit exemption the other routes do not have, and returns four
+   * fields of which none is the holder's id, email, address or the grounds of any
+   * revocation. The access is to a FACT ABOUT A CREDENTIAL, and the credential holder
+   * chose to be findable — which is the entire reason a certificate carries a
+   * reference at all.
+   *
+   * It is eligible for SUBJECT_INDEPENDENT_ACTIONS below, and that is not a formality:
+   * the matrix test recomputes that list from the rules themselves and fails if the
+   * two disagree.
+   */
+  'certificate:verify': {
+    anonymous: allow,
+    STUDENT: allow,
+    TEACHER: allow,
+    ADMIN: allow,
+  },
+
+  // -------------------------------------------------------------------------
+  // Qualification catalogue
+  //
+  // Two actions the feature plan's list does not name, added because without them the
+  // phase is inert. `Qualification` is a catalogue a school maintains: the six real
+  // standards in `seed.ts` have to arrive somehow, and a table that only migration
+  // 0013's own CREATE TABLE can write to is not a catalogue, it is a constant. Both
+  // cells are subject-free — there is no per-row question to ask of either.
+  // -------------------------------------------------------------------------
+  'qualification:read': {
+    /*
+     * Every signed-in role, and NOT anonymous.
+     *
+     * `department:list` is public because a registration form has to fill a select
+     * before a session can exist, and that argument does not transfer: an employer
+     * checking a certificate has the reference, not a catalogue to browse, and the
+     * one public route this phase adds already answers without one. Keeping the
+     * catalogue behind a session is what lets the anonymous surface stay the size
+     * `resource:download`'s comment claims it is.
+     */
+    anonymous: deny,
+    STUDENT: allow,
+    TEACHER: allow,
+    ADMIN: allow,
+  },
+  'qualification:create': {
+    // Provisioning reference data, so exactly the shape of `user:create`: decided by
+    // role alone, before any target exists to load a subject for.
+    anonymous: deny,
+    STUDENT: deny,
+    TEACHER: deny,
+    ADMIN: allow,
+  },
+
+  // -------------------------------------------------------------------------
   // Resource
   // -------------------------------------------------------------------------
   'resource:read': {
@@ -418,8 +576,15 @@ export const POLICY: PolicyTable = definePolicy({
     // Strictly narrower than `resource:read`: a logged-out visitor may SEE that a
     // public resource on a PUBLISHED course exists, but pulling the bytes out of the
     // private bucket requires a session. That is the anti-scraping line, and it keeps
-    // the anonymous surface to four actions — `course:read`, `resource:read`,
-    // `department:read` and `department:list`.
+    // the anonymous surface to four actions that involve an EXISTING domain row —
+    // `course:read`, `resource:read`, `department:read` and `department:list`.
+    //
+    // `certificate:verify` joined that surface in Phase 3 and is the fifth, which is
+    // why it is worth saying what makes it different: it answers a question ABOUT a
+    // credential by an opaque reference, and a certificate holder cannot decline to be
+    // found without also declining to be issued one. `resource:download` denies a
+    // stranger the bytes of a file whose author marked it public, which is a different
+    // promise.
     anonymous: deny,
     STUDENT: resourceVisibleToStudent,
     TEACHER: resourceVisibleToTeacher,
@@ -800,6 +965,21 @@ export const SUBJECT_INDEPENDENT_ACTIONS = [
   'department:create',
   'department:update',
   'department:delete',
+  /*
+   * Phase 3, and the only one of the six that is `allow` for ANONYMOUS.
+   *
+   * It belongs for the reason the whole list exists: every other action resolves, for
+   * at least one caller class, to a rule that reads a `Subject` field, so asking
+   * `can(actor, action)` with no subject for any of them is a guaranteed refusal
+   * dressed as a check. `certificate:verify` reads nothing at all — there is no
+   * caller to authorise and therefore nothing to read — so a nav entry or a
+   * "does this deployment have the feature" probe may ask it bare, and gets an honest
+   * answer instead of a silent `false`.
+   */
+  'certificate:verify',
+  'certificate:revoke',
+  'qualification:read',
+  'qualification:create',
   'upload:presign',
   'conversation:create',
   'conversation:join',

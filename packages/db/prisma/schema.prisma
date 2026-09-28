@@ -135,6 +135,15 @@ enum NotificationType {
   COMMENT_REPLIED
   COMMENT_POSTED
   ACCOUNT_SUSPENDED
+  /// Phase 3. Awarding the outcome the school exists to produce is the one event in
+  /// this chain a student has no other way of learning about: the PDF exists, the
+  /// Qualifications tab exists, and neither of them notifies anybody. The enum member
+  /// needed a migration nobody had asked for — this is that migration (0013).
+  CERTIFICATE_ISSUED
+  /// A SEPARATE member rather than a second row under the one above, because the
+  /// notifications page filters by type and a withdrawal filed as "issued" answers the
+  /// question "what has been awarded to me" with the opposite sentence.
+  CERTIFICATE_REVOKED
 }
 
 enum AuditAction {
@@ -218,6 +227,15 @@ model User {
   enrollmentsCompleted Enrollment[]           @relation("EnrollmentCompletedBy")
   attendanceMarked  AttendanceRecord[]        @relation("AttendanceMarkedBy")
   submissionsGraded Submission[]              @relation("SubmissionGradedBy")
+  /// Phase 3. Three directions, three named relations: a student HOLDS these, a
+  /// colleague ISSUED them, and a colleague REVOKED one. Named rather than merged
+  /// because `User` already carries a relation of each of those three shapes for
+  /// another entity (`Resource.authorId` and `Announcement.authorId` are both
+  /// `isAuthor`), and a merged pair would make every one of them ambiguous to Prisma
+  /// and unreadable to the next person.
+  qualificationsHeld    StudentQualification[] @relation("StudentQualificationStudent")
+  qualificationsIssued  StudentQualification[] @relation("StudentQualificationIssuedBy")
+  qualificationsRevoked StudentQualification[] @relation("StudentQualificationRevokedBy")
   resourcesAuthored Resource[]                @relation("ResourceAuthor")
   announcements     Announcement[]            @relation("AnnouncementAuthor")
   comments          Comment[]                 @relation("CommentAuthor")
@@ -512,6 +530,10 @@ model Enrollment {
 
   attendanceRecords AttendanceRecord[]
   submissions       Submission[]
+  /// Certificates conferred through this seat, and the reason a certificate can be
+  /// traced back to a register rather than floating free of one. `SetNull` from the
+  /// certificate's end — see `StudentQualification.enrollmentId`.
+  qualifications    StudentQualification[]
 
   /// One enrollment row per (student, OFFERING). A withdrawn student who re-applies
   /// to the same intake updates this row rather than creating a second one; applying
@@ -664,6 +686,137 @@ model Submission {
   @@index([deletedAt])
 }
 
+/// What the school AWARDS, as distinct from what a member of staff studied.
+///
+/// Migration 0013; that file's header is where the argument lives. The short version:
+/// `packages/db/prisma/seed.ts` has listed six real standards since before this schema
+/// existed, and the only column any of them ever reached was
+/// `TeacherProfile.qualification` — one free-text `String` on a STAFF profile, holding a
+/// teacher's own paper qualification. The school HOSTS standards it does not model.
+///
+/// Soft-deleted rather than removed, because a retired standard still stands on every
+/// certificate naming it. "We no longer offer Level 3" is a statement about the
+/// catalogue, and the people holding one are not part of it.
+model Qualification {
+  id String @id @default(cuid())
+
+  /// The standard's own identifier — "CSWIP 3.1", "C&G-L3-DIP". This is the half an
+  /// employer looks the certificate up BY, which is why it is unique and why it is a
+  /// separate column from `name`: "CSWIP 3.1" is a number to be verified and "Welding
+  /// Inspector" is a phrase to be read, and one column cannot be both.
+  code String @unique
+  name String
+  /// "Level 3", "Level 4", "Category I". A string rather than an integer, because the
+  /// schemes in the seed's own list are not one scale — NVQ counts to 8, City & Guilds
+  /// to 5, F-Gas counts to three categories — and a numeric level would be a lie about
+  /// four of the six.
+  level String
+  /// "City & Guilds", "Pearson", "BSI". The body that actually conferred it, which is
+  /// the second thing a fraudulent certificate is checked against.
+  awardingBody String
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  awards StudentQualification[]
+
+  @@index([deletedAt])
+}
+
+/// One qualification, held by one student, on one date, under one reference.
+///
+/// `reference` is the design. It is the only `@unique` non-key column in this table and
+/// its entire value is that there is exactly one of it: two rows answering to the same
+/// reference would leave `GET /certificates/verify/:reference` unable to say WHICH
+/// qualification it is verifying. It is 26 Crockford base32 characters over 16 CSPRNG
+/// bytes, minted server-side, with the entropy floor held by a CHECK in migration 0013
+/// — that route is unauthenticated, and its whole security argument is that the space
+/// cannot be searched.
+///
+/// There is deliberately NO `@@unique([studentId, qualificationId])`, which every other
+/// "this person and this thing" pair in this schema carries. A re-sit after a
+/// revocation is a real event and it must leave both rows standing: overwriting the
+/// first would make a revocation unrepresentable, and the public verify route would
+/// then have nothing honest to say. Same discipline as `Submission`'s attempt triple.
+model StudentQualification {
+  id String @id @default(cuid())
+
+  /// Cascade, while `qualificationId` below is Restrict — see migration 0013, which
+  /// argues the asymmetry. In short: Phase 6 made account deletion SOFT, so this row
+  /// survives a person leaving, and the cascade exists so the test fixture's
+  /// `user.deleteMany` unwinds rather than failing on a Restrict.
+  student   User   @relation("StudentQualificationStudent", fields: [studentId], references: [id], onDelete: Cascade)
+  studentId String
+
+  /// Restrict: a catalogue entry somebody holds may not be hard-deleted, or a real
+  /// qualification is orphaned. Soft delete is the only path application code takes.
+  qualification   Qualification @relation(fields: [qualificationId], references: [id], onDelete: Restrict)
+  qualificationId String
+
+  /// When it was conferred. NOT `Enrollment.completedAt`: a completion says the
+  /// course finished, and a certificate is issued on a registrar's own date, which may
+  /// be months later and is what the PDF and the verify route are dated with.
+  issuedAt DateTime @default(now())
+
+  /// Who signed it. `SetNull` for the reason `Enrollment.completedById` is: the record
+  /// of WHO awarded a qualification must outlive their account, and a teacher who
+  /// leaves does not take the certificates they signed with them.
+  issuedBy   User?   @relation("StudentQualificationIssuedBy", fields: [issuedById], references: [id], onDelete: SetNull)
+  issuedById String?
+
+  /// The seat this came from — the link that makes `seat -> … -> qualify` an audit
+  /// trail rather than a coincidence, and the only thing distinguishing a certificate
+  /// from the same student's second attempt at the same course. The issue route refuses
+  /// an enrolment that is not COMPLETED, so this row said COMPLETED when it was
+  /// written.
+  ///
+  /// `SetNull`, not Cascade: retiring an intake must not take a student's
+  /// qualification with it, which is the same reasoning that gives `completedAt` the
+  /// right to outlive the course that produced it.
+  enrollment   Enrollment? @relation(fields: [enrollmentId], references: [id], onDelete: SetNull)
+  enrollmentId String?
+
+  /// 26 Crockford base32 characters over 16 CSPRNG bytes. Crockford rather than hex
+  /// because a person types this off a printout: the alphabet omits I, L, O and U, so
+  /// "1IL0" cannot be mistyped into a valid-looking neighbour.
+  reference String @unique
+
+  /// The three revocation columns are written as one statement and are never
+  /// half-present. `revokedById` is `SetNull` like every other attribution here, so
+  /// they CAN drift: a hard-deleted revoker leaves `revokedAt` set with `revokedById`
+  /// null. That is why no CHECK constrains them together — the obvious one would fire
+  /// on exactly the account deletion it is meant to survive.
+  revokedAt     DateTime?
+  revokedBy     User?   @relation("StudentQualificationRevokedBy", fields: [revokedById], references: [id], onDelete: SetNull)
+  revokedById   String?
+  /// Required by the API whenever `revokedAt` is written, and deliberately NOT part of
+  /// the public verify response. A revocation is a public fact; its grounds are not.
+  revokedReason String?
+
+  /// The PDF. `@unique` so one upload backs exactly one certificate, and `Restrict`
+  /// rather than `SetNull` for the reason `Submission.uploadId` is: the bytes ARE the
+  /// claim, and clearing the pointer would degrade quietly to "a certificate with no
+  /// certificate" — a worse state than a refused DELETE.
+  artifactUpload   Upload? @relation("StudentQualificationArtifact", fields: [artifactUploadId], references: [id], onDelete: Restrict)
+  artifactUploadId String? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Serves the holder's own list, newest first, which is every read of a student's
+  /// record.
+  @@index([studentId, issuedAt])
+  @@index([qualificationId])
+  @@index([enrollmentId])
+  @@index([issuedById])
+  @@index([revokedById])
+  /// No query reads this today. A revocation is the one column here whose rows get
+  /// rarer over time, which is exactly the shape that makes "every certificate revoked
+  /// in a window" cheap to add later and expensive not to.
+  @@index([revokedAt])
+}
+
 // ---------------------------------------------------------------------------
 // Content
 // ---------------------------------------------------------------------------
@@ -704,6 +857,13 @@ model Upload {
   /// rather than a nullable one, because a submission without a file is not a
   /// submission — see `Submission.uploadId`'s own comment for the Restrict.
   submission     Submission?
+  /// The PDF of a certificate, generated server-side at issue time rather than
+  /// uploaded by a browser. Nullable and `@unique` on the other side, and `Restrict`
+  /// from the certificate's end: the same reasoning as `submission` above, arrived at
+  /// by the other road. The UNIQUE claim is the interesting one — it is what lets the
+  /// uploads module's `assertUploadClaimable` refuse a second claim, so a certificate
+  /// upload cannot be re-pointed at somebody else's row.
+  studentQualification StudentQualification? @relation("StudentQualificationArtifact")
 
   @@index([ownerId])
   @@index([status, createdAt])

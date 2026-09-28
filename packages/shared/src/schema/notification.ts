@@ -15,6 +15,13 @@ export const notificationTypeSchema = z.enum([
   'COMMENT_REPLIED',
   'COMMENT_POSTED',
   'ACCOUNT_SUSPENDED',
+  // Phase 3, and the member Phase 2 recorded as needing "a migration nobody asked
+  // for". Awarding a qualification is the one event in the chain a student cannot
+  // discover any other way: the PDF exists and the Qualifications tab exists, and
+  // neither of them interrupts anybody. The revocation is a second member rather than
+  // a second row under this one because the notifications page filters by type.
+  'CERTIFICATE_ISSUED',
+  'CERTIFICATE_REVOKED',
 ]);
 export type NotificationTypeValue = z.infer<typeof notificationTypeSchema>;
 

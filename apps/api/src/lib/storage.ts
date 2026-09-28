@@ -63,6 +63,16 @@ export const PURPOSE_FOLDER: Readonly<Record<UploadPurpose, string>> = Object.fr
   AVATAR: 'avatars',
   RESOURCE: 'resources',
   SYLLABUS: 'syllabi',
+  /*
+   * Phase 3. Added as one line outside that phase's file fence, because
+   * `PURPOSE_FOLDER` is typed `Record<UploadPurpose, string>` and the type grew in
+   * `@skillwright/shared` — leaving it out would be a compile error here, which is the
+   * structure doing exactly what it is for. `certificates/` rather than reusing
+   * `resources/`: the prefix is the only record of an upload's purpose, and a
+   * certificate filed among coursework could not be told apart from one by reading
+   * the bucket.
+   */
+  CERTIFICATE: 'certificates',
 });
 
 /**

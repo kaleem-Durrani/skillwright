@@ -30,6 +30,7 @@ import coursesRoutes from './modules/courses/courses.routes.js';
 import enrollmentsRoutes from './modules/enrollments/enrollments.routes.js';
 import attendanceRoutes from './modules/attendance/attendance.routes.js';
 import assignmentsRoutes from './modules/assignments/assignments.routes.js';
+import certificatesRoutes from './modules/certificates/certificates.routes.js';
 import resourcesRoutes from './modules/resources/resources.routes.js';
 import announcementsRoutes from './modules/announcements/announcements.routes.js';
 import commentsRoutes from './modules/comments/comments.routes.js';
@@ -127,6 +128,10 @@ export async function buildApp(): Promise<AppInstance> {
   // Same shape, same reason: tasks hang off an intake, hand-ins off a task and a
   // hand-in, so the module spells its full paths (assignments.routes.ts).
   await app.register(assignmentsRoutes, { prefix: API_PREFIX });
+  // Certificates, for the same reason and with one addition: the catalogue hangs off
+  // `/qualifications` and the verify route is the one URL a printed certificate's QR
+  // code carries, so the module spells all three of its surfaces itself.
+  await app.register(certificatesRoutes, { prefix: API_PREFIX });
   await app.register(resourcesRoutes, { prefix: `${API_PREFIX}/resources` });
   await app.register(announcementsRoutes, { prefix: `${API_PREFIX}/announcements` });
   await app.register(commentsRoutes, { prefix: `${API_PREFIX}/comments` });
