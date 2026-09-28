@@ -68,7 +68,14 @@ function run(cli: string, args: string[], env: NodeJS.ProcessEnv, input?: string
     env: { ...process.env, ...env },
     encoding: 'utf8',
     input,
-    stdio: input === undefined ? 'inherit' : ['pipe', 'inherit', 'inherit'],
+    // When a stdin payload is being sent, BOTH output streams are piped, never
+    // inherited — stdio is [stdin, stdout, stderr], so leaving the third slot on
+    // 'inherit' sends the diagnostic straight to the terminal and leaves
+    // `error.stderr` empty. The CREATE DATABASE step below depends on reading it.
+    // With the streams inherited, the catch block saw only "Command failed: node.exe …"
+    // and rejected a database that was already there. Prisma reports the condition
+    // as P1009, wrapping the server's 42P04, so the message is what has to be read.
+    stdio: input === undefined ? 'inherit' : ['pipe', 'pipe', 'pipe'],
   });
 }
 
@@ -76,7 +83,8 @@ process.stdout.write(`real-stack database: ${e2eName}\n`);
 
 try {
   // No IF NOT EXISTS for CREATE DATABASE in Postgres, so the second run is expected
-  // to fail with 42P04 and that failure is the success case.
+  // to fail — with Prisma's P1009 wrapping the server's 42P04 — and that failure is
+  // the success case. `run` captures stderr so the check below can see it.
   run(
     PRISMA_CLI,
     ['db', 'execute', '--url', maintenanceUrl, '--stdin'],
@@ -85,11 +93,17 @@ try {
   );
   process.stdout.write('  created\n');
 } catch (error) {
+  // BOTH streams. Prisma's CLI reports "Database … already exists" (P1009) on
+  // STDOUT, not stderr, and the "Command failed: …" line execFileSync puts on the
+  // message is the only thing stderr carries — so a check reading stderr alone sees
+  // a command line, never the reason, and cannot tell "already exists" from "the
+  // server is down". Those two need opposite responses.
+  const streams = error instanceof Error ? (error as { stdout?: string; stderr?: string }) : {};
   const text =
     error instanceof Error
-      ? `${error.message}${String((error as { stderr?: string }).stderr ?? '')}`
+      ? `${error.message}${String(streams.stdout ?? '')}${String(streams.stderr ?? '')}`
       : String(error);
-  if (/already exists|42P04/i.test(text)) {
+  if (/already exists|42P04|P1009/i.test(text)) {
     process.stdout.write('  already exists\n');
   } else {
     process.stderr.write('  could not create it. Is the stack up? `pnpm infra:up`\n\n');
